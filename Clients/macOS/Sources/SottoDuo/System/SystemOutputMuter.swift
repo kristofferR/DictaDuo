@@ -14,13 +14,19 @@ struct SystemOutputClient {
 @MainActor
 final class SystemOutputMuter {
     private let client: SystemOutputClient
+    private let retryDelays: [Duration]
     private var muted: [(AudioDeviceID, AudioObjectPropertyElement)] = []
+    private var retryTask: Task<Void, Never>?
 
-    init(client: SystemOutputClient = .live) {
+    init(client: SystemOutputClient = .live, retryDelays: [Duration] = [.milliseconds(250), .seconds(1), .seconds(3)]) {
         self.client = client
+        self.retryDelays = retryDelays
     }
 
     func mute() {
+        // A new take suspends pending retries so they cannot unmute it; its own
+        // restore retries them.
+        retryTask?.cancel(); retryTask = nil
         // Only elements this muter silenced are restored; anything the user had
         // already muted stays muted.
         for device in Set(client.defaultOutputDevices()).sorted() {
@@ -33,7 +39,22 @@ final class SystemOutputMuter {
 
     func restore() {
         // An unmute that fails (e.g. the output dropped mid-take) stays pending
-        // so the next restore retries it instead of leaving the Mac muted.
+        // and is retried a few times, then again on the next restore, instead
+        // of leaving the Mac muted.
+        retryTask?.cancel(); retryTask = nil
+        unmutePending()
+        guard !muted.isEmpty else { return }
+        retryTask = Task { [weak self, retryDelays] in
+            for delay in retryDelays {
+                do { try await Task.sleep(for: delay) } catch { return }
+                guard let self else { return }
+                unmutePending()
+                if muted.isEmpty { return }
+            }
+        }
+    }
+
+    private func unmutePending() {
         muted = muted.filter { device, element in !client.setMuted(device, element, false) }
     }
 }

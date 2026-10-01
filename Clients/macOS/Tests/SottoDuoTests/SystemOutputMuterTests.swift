@@ -118,6 +118,34 @@ final class SystemOutputMuterTests: XCTestCase {
         muter.restore()
         XCTAssertEqual(output.devices[7], [kAudioObjectPropertyElementMain: false])
     }
+
+    func testRejectedRestoreIsRetriedAfterCaptureEnds() async {
+        let output = FakeOutput(devices: [7: [kAudioObjectPropertyElementMain: false]], defaultDevice: 7)
+        let muter = SystemOutputMuter(client: output.client, retryDelays: [.milliseconds(10)])
+
+        muter.mute()
+        output.rejectsChanges = true
+        muter.restore()
+        output.rejectsChanges = false
+        try? await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(output.devices[7], [kAudioObjectPropertyElementMain: false])
+    }
+
+    func testNewTakeSuspendsPendingRestoreRetries() async {
+        let output = FakeOutput(devices: [7: [kAudioObjectPropertyElementMain: false]], defaultDevice: 7)
+        let muter = SystemOutputMuter(client: output.client, retryDelays: [.milliseconds(10)])
+
+        muter.mute()
+        output.rejectsChanges = true
+        muter.restore()
+        output.rejectsChanges = false
+        muter.mute()
+        try? await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(output.devices[7], [kAudioObjectPropertyElementMain: true])
+
+        muter.restore()
+        XCTAssertEqual(output.devices[7], [kAudioObjectPropertyElementMain: false])
+    }
 }
 
 /// In-memory HAL: each device maps its settable mute elements to their state.
