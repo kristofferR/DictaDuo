@@ -6,6 +6,7 @@ import { Controller, type Desktop } from "./controller.ts";
 import { command } from "./desktop.ts";
 import { ClientNotice } from "./errors.ts";
 import { createGUIHandler } from "./gui.ts";
+import { DoubleTap } from "./double-tap.ts";
 import type { Command } from "./ipc.ts";
 import type { ShortcutSettings } from "./shortcuts.ts";
 
@@ -16,6 +17,7 @@ export class ClientRuntime {
   private mutations = 0;
   private generation = 0;
   private shortcutQueue: Promise<unknown> = Promise.resolve();
+  private readonly doubleTap = new DoubleTap();
   shortcuts?: ShortcutSettings;
   constructor(
     readonly settings: ConnectionSettings,
@@ -123,6 +125,17 @@ export class ClientRuntime {
       this.current?.controller.stop();
       return {};
     }
+    // Plasma portal edges; the microphone test's Stop button sends an untagged stop.
+    if (
+      (action === "start" || action === "stop") &&
+      input.shortcut === true &&
+      this.doubleTapping
+    ) {
+      if (action === "start" && !(await this.desktop.unlocked()))
+        throw new ClientNotice("Unlock this computer first.");
+      this.edge(action);
+      return {};
+    }
     if (action !== "stop" && !(await this.desktop.unlocked()))
       throw new ClientNotice("Unlock this computer first.");
     if (this.changing) throw new ClientNotice("The connection is changing. Try again in a moment.");
@@ -174,6 +187,21 @@ export class ClientRuntime {
       if (mutating) this.mutations--;
     }
   }
+  private get doubleTapping() {
+    return this.settings.config?.activationMode === "doubleTap";
+  }
+  /** A shortcut press or release. In double-tap mode only a double tap toggles recording. */
+  private edge(edge: "start" | "stop") {
+    const controller = this.current?.controller;
+    if (!controller) return;
+    if (!this.doubleTapping) {
+      if (edge === "start") controller.start();
+      else controller.stop();
+      return;
+    }
+    if (edge === "start") this.doubleTap.press();
+    else if (this.doubleTap.release()) controller.toggle();
+  }
   async command(action: Command): Promise<string> {
     if (this.shortcuts?.check.consume(action))
       return "Shortcut detected. No recording or clipboard action was performed.";
@@ -196,10 +224,8 @@ export class ClientRuntime {
         case "button-status":
           return JSON.stringify({ ...buttons.state, enabled: buttons.enabled });
         case "start":
-          controller.start();
-          break;
         case "stop":
-          controller.stop();
+          this.edge(action);
           break;
         case "toggle":
           controller.toggle();

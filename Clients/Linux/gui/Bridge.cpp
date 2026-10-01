@@ -194,7 +194,8 @@ void Bridge::sendNextShortcutEdge() {
     return;
   m_shortcutEdgeInFlight = true;
   const QString action = m_shortcutEdges.dequeue();
-  sendRequest(action, {}, {}, [this] {
+  // Tagged so the client can tell shortcut edges from the microphone test's Stop.
+  sendRequest(action, {{"shortcut", true}}, {}, [this] {
     m_shortcutEdgeInFlight = false;
     QTimer::singleShot(0, this, [this] { sendNextShortcutEdge(); });
   });

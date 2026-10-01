@@ -195,6 +195,39 @@ test("runtime serializes a delayed press, key release, and GUI shutdown release 
   expect(actions).toEqual(["start", "stop", "stop"]);
 });
 
+test("double-tap mode toggles on a double tap from either shortcut source, never on the test's Stop", async () => {
+  const f = await fixture();
+  const settings = await ConnectionSettings.open("/sottoduo-destination", f.file);
+  const checked = await settings.test({
+    server: f.server,
+    name: "Desktop",
+    accessToken: "fixture-secret",
+  });
+  settings.commit(checked.ticket, checked.hostID);
+  const runtime = new ClientRuntime(settings, f.desktop);
+  cleanup.push(() => runtime.close());
+  runtime.start();
+  const actions: string[] = [];
+  const controller = runtime["current"]!.controller;
+  controller.start = () => (actions.push("start"), true);
+  controller.stop = () => void actions.push("stop");
+  controller.toggle = () => void actions.push("toggle");
+  await runtime.gui({ version: 1, action: "saveActivationMode", mode: "doubleTap" });
+  expect(parseConfig(await Bun.file(f.file).json()).activationMode).toBe("doubleTap");
+  // Hyprland binds, then Plasma portal edges.
+  for (const edge of ["start", "stop", "start", "stop"] as const) await runtime.command(edge);
+  for (const action of ["start", "stop", "start", "stop"])
+    await runtime.gui({ version: 1, action, shortcut: true });
+  expect(actions).toEqual(["toggle", "toggle"]);
+  // The microphone test's Stop button still stops.
+  await runtime.gui({ version: 1, action: "stop" });
+  expect(actions).toEqual(["toggle", "toggle", "stop"]);
+  await runtime.gui({ version: 1, action: "saveActivationMode", mode: "hold" });
+  await runtime.command("start");
+  await runtime.command("stop");
+  expect(actions.slice(3)).toEqual(["start", "stop"]);
+});
+
 test("failed authentication and edited or expired proposals preserve config; new origins require a new token", async () => {
   const f = await fixture();
   const settings = await ConnectionSettings.open("/sottoduo-destination", f.file);

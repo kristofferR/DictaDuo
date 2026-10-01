@@ -60,6 +60,7 @@ export function createGUIHandler(
         sources: config.sources,
         microphones: microphoneSnapshot(config.sources),
         buttonEnabled: config.buttonEnabled,
+        activationMode: config.activationMode,
         shortcut: shortcuts?.snapshot() ?? null,
         buttonSettingsSupported: buttons !== undefined,
         button: buttons?.state
@@ -116,6 +117,13 @@ export function createGUIHandler(
           throw new ClientNotice("This computer is not the selected destination.");
         await buttons.disarm();
         return {};
+      case "saveActivationMode":
+        if (request.mode !== "hold" && request.mode !== "doubleTap")
+          throw new ClientNotice("Choose hold or double tap.");
+        if (controller.busy)
+          throw new ClientNotice("Finish dictation before changing how it starts.");
+        saveConfig(parseConfig({ ...config, activationMode: request.mode }));
+        return { mode: request.mode };
       case "saveButton": {
         if (!buttons)
           throw new ClientNotice("Update the background client to change pairing-button settings.");

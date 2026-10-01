@@ -33,6 +33,7 @@
       ]
     },
     "buttonEnabled": true,
+    "activationMode": "hold",
     "button": {
       "available": true,
       "selectedHere": false
