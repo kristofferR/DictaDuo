@@ -131,6 +131,25 @@ final class SystemOutputMuterTests: XCTestCase {
         XCTAssertEqual(output.devices[7], [kAudioObjectPropertyElementMain: false])
     }
 
+    func testPendingRestoreCompletesRetries() async {
+        let output = FakeOutput(devices: [7: [kAudioObjectPropertyElementMain: false]], defaultDevice: 7)
+        let muter = SystemOutputMuter(client: output.client, retryDelays: [.milliseconds(10)])
+
+        muter.mute()
+        muter.restore()
+        XCTAssertNil(muter.pendingRestore)
+
+        muter.mute()
+        output.rejectsChanges = true
+        muter.restore()
+        output.rejectsChanges = false
+        let pending = muter.pendingRestore
+        XCTAssertNotNil(pending)
+        await pending?.value
+        XCTAssertEqual(output.devices[7], [kAudioObjectPropertyElementMain: false])
+        XCTAssertNil(muter.pendingRestore)
+    }
+
     func testNewTakeSuspendsPendingRestoreRetries() async {
         let output = FakeOutput(devices: [7: [kAudioObjectPropertyElementMain: false]], defaultDevice: 7)
         let muter = SystemOutputMuter(client: output.client, retryDelays: [.milliseconds(10)])

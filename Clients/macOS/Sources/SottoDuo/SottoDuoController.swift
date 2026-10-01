@@ -795,6 +795,8 @@ final class SottoDuoController: ObservableObject {
         if activity == .success { activity = .idle }
     }
 
+    var pendingOutputRestore: Task<Void, Never>? { outputMuter.pendingRestore }
+
     func shutdown() {
         guard !isShuttingDown else { return }
         isShuttingDown = true

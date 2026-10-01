@@ -23,6 +23,10 @@ final class SystemOutputMuter {
         self.retryDelays = retryDelays
     }
 
+    /// Bounded retries still owed after a failed restore; quitting awaits them so
+    /// a transient HAL failure cannot leave the Mac muted.
+    var pendingRestore: Task<Void, Never>? { muted.isEmpty ? nil : retryTask }
+
     func mute() {
         // A new take suspends pending retries so they cannot unmute it; its own
         // restore retries them.
