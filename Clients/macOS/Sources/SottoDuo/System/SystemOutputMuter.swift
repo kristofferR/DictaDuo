@@ -3,7 +3,7 @@ import Foundation
 
 /// Small injection boundary so mute/restore tests never touch the Mac's output.
 struct SystemOutputClient {
-    let defaultOutputDevice: () -> AudioDeviceID?
+    let defaultOutputDevices: () -> [AudioDeviceID]
     /// Elements whose mute can be set: the main element, or each channel when a
     /// device only exposes per-channel mute.
     let muteElements: (AudioDeviceID) -> [AudioObjectPropertyElement]
@@ -21,12 +21,13 @@ final class SystemOutputMuter {
     }
 
     func mute() {
-        guard let device = client.defaultOutputDevice() else { return }
         // Only elements this muter silenced are restored; anything the user had
         // already muted stays muted.
-        for element in client.muteElements(device)
-        where client.isMuted(device, element) == false && client.setMuted(device, element, true) {
-            muted.append((device, element))
+        for device in Set(client.defaultOutputDevices()).sorted() {
+            for element in client.muteElements(device)
+            where client.isMuted(device, element) == false && client.setMuted(device, element, true) {
+                muted.append((device, element))
+            }
         }
     }
 
@@ -39,16 +40,21 @@ final class SystemOutputMuter {
 
 extension SystemOutputClient {
     static var live: Self {
-        Self(defaultOutputDevice: SystemOutputHardware.defaultOutputID, muteElements: SystemOutputHardware.muteElements,
+        Self(defaultOutputDevices: SystemOutputHardware.defaultOutputIDs, muteElements: SystemOutputHardware.muteElements,
              isMuted: SystemOutputHardware.isMuted, setMuted: SystemOutputHardware.setMuted)
     }
 }
 
 /// Uses the same mute control as the menu bar and keyboard, on the default
-/// output device. Volume levels are never changed.
+/// media and sound-effects output devices. Volume levels are never changed.
 enum SystemOutputHardware {
-    static func defaultOutputID() -> AudioDeviceID? {
-        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+    static func defaultOutputIDs() -> [AudioDeviceID] {
+        [kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyDefaultSystemOutputDevice]
+            .compactMap { defaultOutputID(selector: $0) }
+    }
+
+    private static func defaultOutputID(selector: AudioObjectPropertySelector) -> AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(mSelector: selector,
                                                  mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var id = AudioDeviceID(kAudioObjectUnknown)
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)

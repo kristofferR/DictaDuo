@@ -261,13 +261,15 @@ final class SottoDuoController: ObservableObject {
     }
 
     private func applyConfiguration(_ settings: SottoDuoConfiguration) {
-        guard !isBusy, !isShuttingDown else { return }
+        guard !isShuttingDown else { return }
         applyingConfiguration = true
+        defer { applyingConfiguration = false }
+        // This preference only affects the next take, so accept edits while busy.
+        if muteOutputWhileRecording != settings.muteOutputWhileRecording { muteOutputWhileRecording = settings.muteOutputWhileRecording }
+        guard !isBusy else { return }
         if let key = HoldKey(rawValue: settings.holdKey), shortcut != key { shortcut = key }
         if launchAtLogin != settings.launchAtLogin { launchAtLogin = settings.launchAtLogin }
         if djiMicButtonEnabled != settings.djiMicButtonEnabled { djiMicButtonEnabled = settings.djiMicButtonEnabled }
-        if muteOutputWhileRecording != settings.muteOutputWhileRecording { muteOutputWhileRecording = settings.muteOutputWhileRecording }
-        applyingConfiguration = false
     }
 
     private func client() throws -> ServerClient {
@@ -1054,7 +1056,7 @@ final class SottoDuoController: ObservableObject {
     private func finishDictation(atLimit: Bool = false) {
         guard isCapturing else { return }
         recorder.stopAcceptingAudio()
-        outputMuter.restore()
+        if remoteCapture == nil { outputMuter.restore() }
         guard activity == .recording else { cancelDictation(); return }
         let releasedAt = ProcessInfo.processInfo.systemUptime
         destinationTask?.finish()
@@ -1104,7 +1106,11 @@ final class SottoDuoController: ObservableObject {
                 guard sessionID == current, !Task.isCancelled else { return }
                 var result: GenerationRecord
                 if let capture {
-                    result = try await capture.stop(continuationID: continuationID)
+                    result = try await capture.stop(continuationID: continuationID) { [weak self] in
+                        guard let self, sessionID == current else { return }
+                        outputMuter.restore()
+                    }
+                    guard sessionID == current, !Task.isCancelled else { return }
                     serverSealed = true
                 } else {
                     guard var finish else { throw ServerClientError.invalidResponse }

@@ -4,6 +4,32 @@ import XCTest
 
 @MainActor
 final class SystemOutputMuterTests: XCTestCase {
+    func testMutesSeparateSoundEffectsOutputAndRestoresOriginalDevices() {
+        let output = FakeOutput(devices: [7: [kAudioObjectPropertyElementMain: false],
+                                          9: [1: true, 2: false]], defaultDevice: 7, systemDevice: 9)
+        let muter = SystemOutputMuter(client: output.client)
+
+        muter.mute()
+        XCTAssertEqual(output.devices[7], [kAudioObjectPropertyElementMain: true])
+        XCTAssertEqual(output.devices[9], [1: true, 2: true])
+
+        output.defaultDevice = nil
+        output.systemDevice = nil
+        muter.restore()
+        XCTAssertEqual(output.devices[7], [kAudioObjectPropertyElementMain: false])
+        XCTAssertEqual(output.devices[9], [1: true, 2: false])
+    }
+
+    func testSharedMediaAndSoundEffectsOutputIsChangedOnce() {
+        let output = FakeOutput(devices: [7: [kAudioObjectPropertyElementMain: false]], defaultDevice: 7, systemDevice: 7)
+        let muter = SystemOutputMuter(client: output.client)
+
+        muter.mute()
+        muter.restore()
+        XCTAssertEqual(output.setCalls, 2)
+        XCTAssertEqual(output.devices[7], [kAudioObjectPropertyElementMain: false])
+    }
+
     func testMutesOutputWhileRecordingAndRestoresIt() {
         let output = FakeOutput(devices: [7: [kAudioObjectPropertyElementMain: false]], defaultDevice: 7)
         let muter = SystemOutputMuter(client: output.client)
@@ -99,17 +125,19 @@ final class SystemOutputMuterTests: XCTestCase {
 private final class FakeOutput {
     var devices: [AudioDeviceID: [AudioObjectPropertyElement: Bool]]
     var defaultDevice: AudioDeviceID?
+    var systemDevice: AudioDeviceID?
     var rejectsChanges = false
     private(set) var setCalls = 0
 
-    init(devices: [AudioDeviceID: [AudioObjectPropertyElement: Bool]], defaultDevice: AudioDeviceID?) {
+    init(devices: [AudioDeviceID: [AudioObjectPropertyElement: Bool]], defaultDevice: AudioDeviceID?, systemDevice: AudioDeviceID? = nil) {
         self.devices = devices
         self.defaultDevice = defaultDevice
+        self.systemDevice = systemDevice
     }
 
     var client: SystemOutputClient {
         SystemOutputClient(
-            defaultOutputDevice: { [unowned self] in defaultDevice },
+            defaultOutputDevices: { [unowned self] in [defaultDevice, systemDevice].compactMap { $0 } },
             muteElements: { [unowned self] device in devices[device].map { $0.keys.sorted() } ?? [] },
             isMuted: { [unowned self] device, element in devices[device]?[element] },
             setMuted: { [unowned self] device, element, muted in
