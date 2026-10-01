@@ -56,7 +56,9 @@ private struct DevicePreferencesForm: View {
                     }
                     .frame(width: 125)
                 } label: {
-                    Text(controller.isCheckingShortcut ? "Hold the key for a second" : "Shortcut check")
+                    Text(controller.isCheckingShortcut
+                         ? (controller.activationMode == .doubleTapToggle ? "Double tap the key" : "Hold the key for a second")
+                         : "Shortcut check")
                 }
                 if let note = controller.shortcut.note { Text(note).font(.caption).foregroundStyle(SottoDuoPalette.muted) }
                 DisclosureGroup("Shortcut diagnostics", isExpanded: $showingDiagnostics) {
