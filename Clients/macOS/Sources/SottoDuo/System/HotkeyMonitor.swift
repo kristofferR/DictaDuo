@@ -137,8 +137,10 @@ struct HotkeyMonitorEnvironment {
             flags: { CGEventSource.flagsState(.hidSystemState) },
             now: { ProcessInfo.processInfo.systemUptime },
             createTap: { monitor in
-                let mask = [CGEventType.flagsChanged, .keyDown, .keyUp, .leftMouseDown, .rightMouseDown]
-                    .reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
+                let mask = [
+                    CGEventType.flagsChanged, .keyDown, .keyUp,
+                    .leftMouseDown, .rightMouseDown, .otherMouseDown,
+                ].reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
                 guard let tap = CGEvent.tapCreate(
                     tap: .cgSessionEventTap, place: .headInsertEventTap, options: .listenOnly,
                     eventsOfInterest: mask, callback: sottoduoHotkeyCallback,
@@ -359,7 +361,7 @@ final class HotkeyMonitor {
             }
         case .keyUp:
             if key == .fn, code == key.keyCode { release() }
-        case .leftMouseDown, .rightMouseDown:
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
             // In particular, Option+letter shortcuts during the debounce window
             // remain ordinary shortcuts, not surprise microphone activations.
             interruptPress()

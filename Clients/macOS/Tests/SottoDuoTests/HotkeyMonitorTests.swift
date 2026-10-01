@@ -1019,7 +1019,7 @@ final class HotkeyMonitorTests: XCTestCase {
         try fixture.tap()
         XCTAssertEqual(fixture.presses, 0, "A chord between taps must not leave the first tap pending")
 
-        for interruption in [CGEventType.keyDown, .leftMouseDown] {
+        for interruption in [CGEventType.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown] {
             fixture.time += 1
             try fixture.tap()
             fixture.time += 0.1
