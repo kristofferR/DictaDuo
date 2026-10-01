@@ -18,6 +18,8 @@ export class ClientRuntime {
   private generation = 0;
   private shortcutQueue: Promise<unknown> = Promise.resolve();
   private readonly doubleTap = new DoubleTap();
+  /** The take a pending tap was made during, so a pair cannot span one ending. */
+  private tapTake?: number;
   shortcuts?: ShortcutSettings;
   constructor(
     readonly settings: ConnectionSettings,
@@ -199,6 +201,9 @@ export class ClientRuntime {
       else controller.stop();
       return;
     }
+    const take = controller.busy ? controller.activity.startedAt : undefined;
+    if (take !== this.tapTake) this.doubleTap.reset();
+    this.tapTake = take;
     if (edge === "start") this.doubleTap.press();
     else if (this.doubleTap.release()) controller.toggle();
   }

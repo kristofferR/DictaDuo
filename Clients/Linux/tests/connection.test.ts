@@ -219,6 +219,16 @@ test("double-tap mode toggles on a double tap from either shortcut source, never
   for (const action of ["start", "stop", "start", "stop"])
     await runtime.gui({ version: 1, action, shortcut: true });
   expect(actions).toEqual(["toggle", "toggle"]);
+  // A tap during a take does not pair with one after it ends.
+  let busy = true;
+  Object.defineProperty(controller, "busy", { get: () => busy });
+  controller.activity = { phase: "processing", startedAt: 1 };
+  await runtime.command("start");
+  await runtime.command("stop");
+  busy = false;
+  await runtime.command("start");
+  await runtime.command("stop");
+  expect(actions).toEqual(["toggle", "toggle"]);
   // The microphone test's Stop button still stops.
   await runtime.gui({ version: 1, action: "stop" });
   expect(actions).toEqual(["toggle", "toggle", "stop"]);
