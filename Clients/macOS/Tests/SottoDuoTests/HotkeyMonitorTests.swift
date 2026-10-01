@@ -1028,6 +1028,16 @@ final class HotkeyMonitorTests: XCTestCase {
             try fixture.tap()
             XCTAssertEqual(fixture.presses, 0, "Input between releases must not leave the first tap pending")
         }
+
+        fixture.time += 1
+        try fixture.tap()
+        fixture.time += 0.1
+        fixture.flags = .maskAlphaShift
+        try fixture.send(.flagsChanged, code: 57)
+        fixture.flags = []
+        fixture.time += 0.1
+        try fixture.tap()
+        XCTAssertEqual(fixture.presses, 0, "Caps Lock between taps must not leave the first tap pending")
     }
 
     @MainActor

@@ -342,7 +342,9 @@ final class HotkeyMonitor {
                 } else {
                     release()
                 }
-            } else if key.hasOtherModifiers(in: event.flags) {
+            } else if code == 57 || key.hasOtherModifiers(in: event.flags) {
+                // Caps Lock (57) is input, but its persistent alpha-shift flag
+                // is not a held chord, so its own edge is the interruption.
                 interruptPress()
             }
         case .keyDown:

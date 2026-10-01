@@ -1140,6 +1140,9 @@ final class SottoDuoController: ObservableObject {
                 do { try await connection.delivery(id, receipt: receipt) }
                 catch { continuationAnchors.removeAll { $0.generationID == id } }
                 guard sessionID == current, !Task.isCancelled else { return }
+                // A tap made while the take was finishing must not pair with
+                // one made after it, matching the cancel and failure paths.
+                hotkey.clearLatchedTake()
                 capture?.cancelMonitoring(); remoteCapture = nil
                 activeGenerationID = nil; activeClient = nil; self.uploadTask = nil; self.uploadPipe = nil
                 destinationTask = nil; insertionDestination = nil; recordingListHint = nil; recordingInputName = nil
