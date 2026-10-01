@@ -717,6 +717,25 @@ final class HotkeyMonitorTests: XCTestCase {
     }
 
     @MainActor
+    func testLongHoldDoesNotPairWithANextTap() async throws {
+        let fixture = HotkeyFixture()
+        fixture.monitor.mode = .doubleTapToggle
+        XCTAssertTrue(fixture.monitor.start())
+        defer { fixture.monitor.stop() }
+
+        try fixture.press()
+        fixture.time += 3
+        try fixture.release()
+        fixture.time += 0.2
+        try fixture.tap()
+        XCTAssertEqual(fixture.presses, 0, "A long hold followed by one tap is not a double tap")
+
+        fixture.time += 0.2
+        try fixture.tap()
+        XCTAssertEqual(fixture.presses, 1, "The following short tap still pairs")
+    }
+
+    @MainActor
     func testEscapeCancelsALatchedDoubleTapRecording() async throws {
         let fixture = HotkeyFixture()
         fixture.monitor.mode = .doubleTapToggle

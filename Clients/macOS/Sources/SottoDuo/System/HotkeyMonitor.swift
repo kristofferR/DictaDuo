@@ -226,6 +226,7 @@ final class HotkeyMonitor {
     }
 
     /// Two taps inside this window toggle recording; a lone tap does nothing.
+    /// A press held longer than this is a hold, not a tap.
     static let doubleTapWindow: TimeInterval = 0.45
 
     var mode: HotkeyActivationMode = .hold {
@@ -250,6 +251,7 @@ final class HotkeyMonitor {
     private var blockedUntilRelease = false
     private var awaitingObservedRelease = false
     private var lastTapAt: TimeInterval?
+    private var pressedAt: TimeInterval?
 
     init(environment: HotkeyMonitorEnvironment = .live) {
         self.environment = environment
@@ -375,6 +377,7 @@ final class HotkeyMonitor {
     private func beginHold(flags: CGEventFlags) {
         guard !physicalDown else { return }
         physicalDown = true
+        pressedAt = environment.now()
         armWatchdog()
         guard !blockedUntilRelease, !key.hasOtherModifiers(in: flags) else {
             blockCurrentHold()
@@ -492,6 +495,13 @@ final class HotkeyMonitor {
 
     private func registerToggleTap() {
         let now = environment.now()
+        // A long hold is not a tap and breaks any pending pair, so holding the
+        // key and then tapping once cannot toggle recording.
+        guard let pressedAt, now - pressedAt <= Self.doubleTapWindow else {
+            lastTapAt = nil
+            onDiagnostic?("Hold ignored: only short taps toggle recording.")
+            return
+        }
         guard let previousTap = lastTapAt, now - previousTap <= Self.doubleTapWindow else {
             lastTapAt = now
             onDiagnostic?("Tap ignored: double tap to toggle recording.")
