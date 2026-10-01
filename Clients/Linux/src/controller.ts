@@ -32,6 +32,7 @@ type Take = {
   atLimit: boolean;
   /** Fixed at start, so a settings change mid-take still restores the output. */
   output?: Output;
+  muting?: Promise<void>;
 };
 type Output = Pick<OutputMuter, "mute" | "restore">;
 export interface Result {
@@ -112,7 +113,7 @@ export class Controller {
     this.onStart?.(button?.ticket);
     this.lastTick = Date.now();
     this.setState("preparing", "preparing");
-    void take.output?.mute();
+    take.muting = take.output?.mute().catch(() => {});
     this.watchdog = setInterval(() => {
       void this.watch(take);
     }, 1000);
@@ -231,9 +232,11 @@ export class Controller {
     if (!this.live(take)) return;
     if (!(await this.desktop.unlocked(take.startedAt)))
       throw new Error("Desktop is locked or unavailable.");
+    // The microphone opens only once playback is silenced.
     const [sources, defaultID] = await Promise.all([
       this.api.sources(),
       this.desktop.defaultInput(this.preferences.hostID),
+      take.muting,
     ]);
     const options = take.button
       ? sources.filter((source) => sourceKey(source.identity) === sourceKey(take.button!.source))

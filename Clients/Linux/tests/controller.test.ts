@@ -237,14 +237,24 @@ test("output stays muted from activation until the microphone is sealed, only wh
   const f = await fixture();
   const events: string[] = [];
   f.controller.output = {
-    mute: async () => void events.push(`mute:${f.controller.activity.phase}`),
+    mute: async () => {
+      events.push(`mute:${f.controller.activity.phase}`);
+      await Bun.sleep(50);
+      events.push("muted");
+    },
     restore: async () => void events.push(`restore:${f.controller.activity.phase}`),
+  };
+  const start = f.api.start.bind(f.api);
+  f.api.start = async (...args) => {
+    events.push("start");
+    return start(...args);
   };
   f.controller.start();
   await until(() => f.controller.state.startsWith("recording"));
   f.controller.stop();
   await f.controller.settled();
-  expect(events).toEqual([]);
+  expect(events).toEqual(["start"]);
+  events.length = 0;
 
   f.controller.muteOutput = true;
   f.controller.start();
@@ -253,7 +263,7 @@ test("output stays muted from activation until the microphone is sealed, only wh
   f.controller.muteOutput = false;
   f.controller.stop();
   await f.controller.settled();
-  expect(events.slice(0, 2)).toEqual(["mute:preparing", "restore:processing"]);
+  expect(events.slice(0, 4)).toEqual(["mute:preparing", "muted", "start", "restore:processing"]);
   expect(events.every((event) => event !== "mute:processing")).toBe(true);
 });
 
