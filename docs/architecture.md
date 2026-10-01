@@ -52,7 +52,7 @@ The Mac rechecks destination, selection, protected fields, modifiers, and clipbo
 
 Microphone capture uses input-only Core Audio without changing system routing or playback volume. Route changes apply to the next take. Release, cancellation, sleep/lock, or device loss ends capture.
 
-With **Mute system audio while recording** enabled under **This Mac**, the default output device is muted when a take starts and restored when capture ends. Only mute controls SottoDuo changed are restored, so output that was already muted stays muted. A client crash during a take can leave output muted.
+With **Mute system audio while recording** enabled under **This Mac** (or **This computer** on Linux, through PipeWire's `wpctl`), the default output device is muted when a take starts and restored when capture ends. Only mute controls SottoDuo changed are restored, so output that was already muted stays muted. A client crash during a take can leave output muted.
 
 ## Settings
 

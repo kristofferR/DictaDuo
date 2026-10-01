@@ -233,6 +233,30 @@ test("owned HTTP capture reuses history and delivers once, including duplicate r
   expect(record.capture?.source.id).toBe("dji");
   expect(record.delivery?.status).toBe("inserted");
 });
+test("output stays muted from activation until the microphone is sealed, only when enabled", async () => {
+  const f = await fixture();
+  const events: string[] = [];
+  f.controller.output = {
+    mute: async () => void events.push(`mute:${f.controller.activity.phase}`),
+    restore: async () => void events.push(`restore:${f.controller.activity.phase}`),
+  };
+  f.controller.start();
+  await until(() => f.controller.state.startsWith("recording"));
+  f.controller.stop();
+  await f.controller.settled();
+  expect(events).toEqual([]);
+
+  f.controller.muteOutput = true;
+  f.controller.start();
+  await until(() => f.controller.state.startsWith("recording"));
+  // Turning the setting off mid-take still restores this take's output.
+  f.controller.muteOutput = false;
+  f.controller.stop();
+  await f.controller.settled();
+  expect(events.slice(0, 2)).toEqual(["mute:preparing", "restore:processing"]);
+  expect(events.every((event) => event !== "mute:processing")).toBe(true);
+});
+
 test("definitive startup rejection permits one fallback with fresh owner and request ID", async () => {
   const f = await fixture();
   const start = f.api.start.bind(f.api);

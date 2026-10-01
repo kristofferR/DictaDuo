@@ -6,6 +6,7 @@ import { Controller, type Desktop } from "./controller.ts";
 import { command } from "./desktop.ts";
 import { ClientNotice } from "./errors.ts";
 import { createGUIHandler } from "./gui.ts";
+import { OutputMuter } from "./output.ts";
 import type { Command } from "./ipc.ts";
 import type { ShortcutSettings } from "./shortcuts.ts";
 
@@ -16,6 +17,7 @@ export class ClientRuntime {
   private mutations = 0;
   private generation = 0;
   private shortcutQueue: Promise<unknown> = Promise.resolve();
+  private readonly output = new OutputMuter();
   shortcuts?: ShortcutSettings;
   constructor(
     readonly settings: ConnectionSettings,
@@ -34,6 +36,8 @@ export class ClientRuntime {
     controller = new Controller(api, this.desktop, config.device, config.sources),
   ) {
     controller.captureAllowed = () => !this.changing && !this.shortcuts?.blocked;
+    controller.output = this.output;
+    controller.muteOutput = config.muteOutputWhileRecording;
     const buttons = new ButtonDestinationClient(
       api,
       this.desktop,
@@ -58,6 +62,7 @@ export class ClientRuntime {
     this.changing = true;
     const current = this.current;
     await Promise.allSettled([current?.buttons.close(), current?.controller.cancel()]);
+    await this.output.finish();
   }
   unsafe() {
     this.shortcuts?.check.end();

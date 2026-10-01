@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { APIError, type API, type Device, type Generation } from "./api.ts";
 import { candidates, sourceKey, type SourceID, type SourcePreferences } from "./sources.ts";
 import { RecordingFeedback } from "./feedback.ts";
+import type { OutputMuter } from "./output.ts";
 const recordingLimitMS = 174000;
 export interface Destination {
   deliver(text: string): Promise<"inserted" | "preview" | "uncertain">;
@@ -29,7 +30,10 @@ type Take = {
   preview: boolean;
   feedbackAbort: AbortController;
   atLimit: boolean;
+  /** Fixed at start, so a settings change mid-take still restores the output. */
+  output?: Output;
 };
+type Output = Pick<OutputMuter, "mute" | "restore">;
 export interface Result {
   id: string;
   text: string;
@@ -44,6 +48,8 @@ export class Controller {
   private lastTick = Date.now();
   feedback = new RecordingFeedback();
   captureAllowed: () => boolean = () => true;
+  output?: Output;
+  muteOutput = false;
   onStart?: (ticket?: string) => void;
   onComplete?: (id: string | undefined, ticket: string | undefined, succeeded: boolean) => void;
   activity: {
@@ -95,6 +101,7 @@ export class Controller {
       preview,
       feedbackAbort: new AbortController(),
       atLimit: false,
+      output: this.muteOutput ? this.output : undefined,
     };
     this.take = take;
     this.activity = {
@@ -105,6 +112,7 @@ export class Controller {
     this.onStart?.(button?.ticket);
     this.lastTick = Date.now();
     this.setState("preparing", "preparing");
+    void take.output?.mute();
     this.watchdog = setInterval(() => {
       void this.watch(take);
     }, 1000);
@@ -115,6 +123,7 @@ export class Controller {
         await this.cancelTake(take);
       })
       .finally(() => {
+        void take.output?.restore();
         take.feedbackAbort.abort();
         this.feedback.finish(take.atLimit);
         take.destination?.close();
@@ -305,6 +314,8 @@ export class Controller {
     this.verify(record, take);
     if (record.capture?.state !== "sealed") throw new Error("Capture was not sealed.");
     take.sealed = true;
+    // The microphone has stopped; processing runs with the output restored.
+    void take.output?.restore();
     // Include cold model loading plus the server's speech and proofreading limits.
     const deadline = Date.now() + 360_000;
     while (this.live(take) && !["completed", "failed", "cancelled"].includes(record.status)) {

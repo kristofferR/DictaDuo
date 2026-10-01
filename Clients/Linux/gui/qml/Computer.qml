@@ -68,6 +68,30 @@ ScrollView {
             }
             Setting {
                 ui: root.ui
+                title: "Mute system audio while recording"
+                detail: "Silences this computer's speakers during a take, then restores them."
+                Switch {
+                    objectName: "muteOutputSwitch"
+                    Accessible.name: "Mute system audio while recording"
+                    checked: !!root.ui.snapshot.muteOutputWhileRecording
+                    enabled: bridge.connected && root.ui.snapshot.muteOutputWhileRecording !== undefined && !bridge.preview
+                    onClicked: {
+                        bridge.request("saveMuteOutput", {
+                            enabled: checked
+                        });
+                        checked = Qt.binding(() => !!root.ui.snapshot.muteOutputWhileRecording);
+                    }
+                }
+                Connections {
+                    target: bridge
+                    function onReply(action, data) {
+                        if (action === "saveMuteOutput")
+                            bridge.request("snapshot");
+                    }
+                }
+            }
+            Setting {
+                ui: root.ui
                 title: "Launch at login"
                 detail: "Keep dictation feedback ready without opening this window. Your background dictation service must already be set up."
                 Switch {
