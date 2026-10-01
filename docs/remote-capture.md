@@ -24,7 +24,7 @@ All routes retain server bearer authentication and Host/Origin policy. The initi
 
 Owner hashes are stored privately beside generation metadata, outside the artifact allowlist. Secrets and hashes are absent from API records, history and downloadable metadata. Restart retains ownership checks but never resumes capture. Ownership applies to remote generations only; old local-upload clients keep their existing authorization semantics.
 
-Remote generations reject HTTP PCM uploads, the upload WebSocket and the old client-supplied finish route, even with an owner secret. Only the trusted local provider supplies their audio and final counts. Same-device/request-ID retries share the admitted generation and pending startup, but require the same secret, source and mode. A different active request is busy; stale secrets cannot control a newer generation. Repeating stop uses the original result; changing its continuation ID is a conflict. Cancel never restarts a take.
+Remote generations reject HTTP PCM uploads, the upload WebSocket and the old client-supplied finish route, even with an owner secret. Only the trusted local provider supplies their audio and final counts. Same-device/request-ID retries share the admitted generation and pending startup, but require the same secret, source and mode. A different request while the provider is recording is busy (`capture_busy`); sealed takes queue for processing like local uploads; stale secrets cannot control a newer generation. Repeating stop uses the original result; changing its continuation ID is a conflict. Cancel never restarts a take.
 
 ## Lifecycle and bounds
 
