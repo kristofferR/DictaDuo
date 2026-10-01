@@ -340,8 +340,8 @@ final class HotkeyMonitor {
                 } else {
                     release()
                 }
-            } else if physicalDown, key.hasOtherModifiers(in: event.flags) {
-                blockCurrentHold()
+            } else if key.hasOtherModifiers(in: event.flags) {
+                interruptPress()
             }
         case .keyDown:
             // Some HID keyboards send a companion keyDown for the modifier
@@ -354,15 +354,15 @@ final class HotkeyMonitor {
                    event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
                     beginHold(flags: event.flags)
                 }
-            } else if physicalDown {
-                blockCurrentHold()
+            } else {
+                interruptPress()
             }
         case .keyUp:
             if key == .fn, code == key.keyCode { release() }
         case .leftMouseDown, .rightMouseDown:
             // In particular, Option+letter shortcuts during the debounce window
             // remain ordinary shortcuts, not surprise microphone activations.
-            if physicalDown { blockCurrentHold() }
+            interruptPress()
         default:
             break
         }
@@ -439,6 +439,12 @@ final class HotkeyMonitor {
         return true
     }
 
+    /// Unrelated input interrupts a held key, or breaks a tap pair between
+    /// releases so a tap, another key, and a tap is not a double tap.
+    private func interruptPress() {
+        if physicalDown { blockCurrentHold() } else { lastTapAt = nil }
+    }
+
     private func blockCurrentHold() {
         onDiagnostic?("Hold interrupted; release the key before trying again.")
         blockedUntilRelease = true
@@ -505,9 +511,12 @@ final class HotkeyMonitor {
 
     /// A take that failed or was cancelled after starting must not leave a
     /// double-tap latch behind; the next double tap should start a new take.
+    /// A pending first tap is dropped too, so a lone tap after the take ended
+    /// cannot complete a pair begun during it.
     func clearLatchedTake() {
-        guard mode == .doubleTapToggle, active else { return }
+        guard mode == .doubleTapToggle else { return }
         active = false
+        lastTapAt = nil
     }
 
     private func checkPhysicalRelease() {

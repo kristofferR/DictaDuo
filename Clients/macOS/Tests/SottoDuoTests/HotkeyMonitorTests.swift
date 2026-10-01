@@ -1018,6 +1018,37 @@ final class HotkeyMonitorTests: XCTestCase {
         fixture.time += 0.1
         try fixture.tap()
         XCTAssertEqual(fixture.presses, 0, "A chord between taps must not leave the first tap pending")
+
+        for interruption in [CGEventType.keyDown, .leftMouseDown] {
+            fixture.time += 1
+            try fixture.tap()
+            fixture.time += 0.1
+            try fixture.send(interruption, code: 0)
+            fixture.time += 0.1
+            try fixture.tap()
+            XCTAssertEqual(fixture.presses, 0, "Input between releases must not leave the first tap pending")
+        }
+    }
+
+    @MainActor
+    func testClearLatchedTakeDropsAPendingTap() async throws {
+        let fixture = HotkeyFixture()
+        fixture.monitor.mode = .doubleTapToggle
+        XCTAssertTrue(fixture.monitor.start())
+        defer { fixture.monitor.stop() }
+        try fixture.tap()
+        fixture.time += 0.2
+        try fixture.tap()
+        XCTAssertEqual(fixture.presses, 1)
+
+        // One stop tap, then the take is cancelled before the window expires.
+        fixture.time += 2
+        try fixture.tap()
+        fixture.monitor.clearLatchedTake()
+        fixture.time += 0.2
+        try fixture.tap()
+        XCTAssertEqual(fixture.presses, 1, "A lone tap after the take ended must not start another")
+        XCTAssertEqual(fixture.releases, 0)
     }
 }
 
