@@ -6,8 +6,9 @@ import XCTest
 @MainActor
 final class RemoteButtonTests: XCTestCase {
     func testRegistrationDoesNotSelectAndDuplicateCommandsAreAcknowledgedOnce() async throws {
+        // Closing the client sends a detached lease DELETE that can outlive the test,
+        // so the session stays valid instead of being invalidated on exit.
         let fixture = HTTPFixture()
-        defer { fixture.session.invalidateAndCancel() }
         let ticket = UUID()
         let command = ButtonCommand(id: UUID(), takeID: ticket, action: .start,
             source: .init(hostID: "desktop", id: "dji"), expiresAt: Date().addingTimeInterval(5))
@@ -33,7 +34,6 @@ final class RemoteButtonTests: XCTestCase {
 
     func testUnavailableClientDropsLeaseAndRejectsExpiredStart() async throws {
         let fixture = HTTPFixture()
-        defer { fixture.session.invalidateAndCancel() }
         fixture.respond = { _ in
             (200, try ServerClient.encode(ButtonDestinationState(destinations: [], available: true,
                 command: .init(id: UUID(), takeID: UUID(), action: .start,
