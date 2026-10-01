@@ -159,7 +159,8 @@ final class SottoDuoAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         // must never depend on the new image's intrinsic width.
         statusItem = NSStatusBar.system.statusItem(withLength: SottoDuoBuild.current.isDevelopment ? 62 : 30)
         if let button = statusItem.button {
-            SottoDuoBrand.updateStatusButton(button, activity: controller.activity, shortcut: controller.shortcut)
+            SottoDuoBrand.updateStatusButton(button, activity: controller.activity, shortcut: controller.shortcut,
+                                              activationMode: controller.activationMode)
         }
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePopover)
@@ -173,11 +174,11 @@ final class SottoDuoAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         // stable while open, and remeasure current content on the next opening.
         menuContent.sizingOptions = []
         popover.contentViewController = menuContent
-        activitySubscription = controller.$activity.combineLatest(controller.$shortcut)
-            .removeDuplicates { $0.0 == $1.0 && $0.1 == $1.1 }
-            .sink { [weak self] activity, shortcut in
+        activitySubscription = controller.$activity.combineLatest(controller.$shortcut, controller.$activationMode)
+            .removeDuplicates { $0.0 == $1.0 && $0.1 == $1.1 && $0.2 == $1.2 }
+            .sink { [weak self] activity, shortcut, activationMode in
             guard let button = self?.statusItem.button else { return }
-            SottoDuoBrand.updateStatusButton(button, activity: activity, shortcut: shortcut)
+            SottoDuoBrand.updateStatusButton(button, activity: activity, shortcut: shortcut, activationMode: activationMode)
         }
     }
 
