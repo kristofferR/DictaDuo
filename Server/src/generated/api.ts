@@ -1099,7 +1099,7 @@ export interface components {
   parameters: {
     /** @description Opt in to remote capture source/state fields; omit for the legacy generation shape. */
     CaptureView: "capture-v1";
-    /** @description Required for remote-generation cancellation and delivery; omitted by legacy local-upload clients. */
+    /** @description Required for remote-capture cancellation and delivery; omitted by local-upload clients. */
     CaptureMutationOwner: string;
     /** @description Client-generated 256-bit lowercase hexadecimal secret, unique per capture request. Required in addition to server authorization for remote recording control and delivery. Never put it in URLs or history. */
     CaptureOwner: string;
@@ -1664,7 +1664,7 @@ export interface operations {
       header?: {
         /** @description Opt in to remote capture source/state fields; omit for the legacy generation shape. */
         "X-SottoDuo-Capture"?: components["parameters"]["CaptureView"];
-        /** @description Required for remote-generation cancellation and delivery; omitted by legacy local-upload clients. */
+        /** @description Required for remote-capture cancellation and delivery; omitted by local-upload clients. */
         "X-SottoDuo-Capture-Owner"?: components["parameters"]["CaptureMutationOwner"];
       };
       path: {
@@ -1718,7 +1718,7 @@ export interface operations {
       header?: {
         /** @description Opt in to remote capture source/state fields; omit for the legacy generation shape. */
         "X-SottoDuo-Capture"?: components["parameters"]["CaptureView"];
-        /** @description Required for remote-generation cancellation and delivery; omitted by legacy local-upload clients. */
+        /** @description Required for remote-capture cancellation and delivery; omitted by local-upload clients. */
         "X-SottoDuo-Capture-Owner"?: components["parameters"]["CaptureMutationOwner"];
       };
       path: {
@@ -2101,7 +2101,10 @@ export interface operations {
   discardRecording: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description Required for remote-capture cancellation and delivery; omitted by local-upload clients. */
+        "X-SottoDuo-Capture-Owner"?: components["parameters"]["CaptureMutationOwner"];
+      };
       path: {
         id: components["schemas"]["UUID"];
       };
@@ -2147,7 +2150,10 @@ export interface operations {
   recordRecordingDelivery: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description Required for remote-capture cancellation and delivery; omitted by local-upload clients. */
+        "X-SottoDuo-Capture-Owner"?: components["parameters"]["CaptureMutationOwner"];
+      };
       path: {
         id: components["schemas"]["UUID"];
       };

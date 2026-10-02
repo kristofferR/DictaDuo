@@ -176,6 +176,8 @@ export function createGUIHandler(
       }
       case "history":
         return history.list(request.before, request.source, request.queryID);
+      case "historyEntry":
+        return history.entry(request);
       case "historyAudio":
       case "historyArtifact":
       case "deleteHistory":

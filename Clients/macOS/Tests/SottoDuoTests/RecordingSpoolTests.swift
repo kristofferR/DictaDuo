@@ -212,18 +212,20 @@ final class RecordingSpoolTests: XCTestCase {
         let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16_000))
         buffer.frameLength = buffer.frameCapacity
         try XCTUnwrap(buffer.floatChannelData)[0].initialize(repeating: 0.125, count: Int(buffer.frameLength))
-        for second in 1...7_200 {
+        // Past the former 180 s limit by default; the full two hours writes about 1 GB.
+        let seconds = ProcessInfo.processInfo.environment["SOTTODUO_SPOOL_LONG_TEST"] == "1" ? 7_200 : 240
+        for second in 1...seconds {
             writer.append(buffer)
             await writer.checkpoint()
-            if [1_800, 3_600, 7_200].contains(second) {
+            if [181, seconds / 2, seconds].contains(second) {
                 XCTAssertEqual(spool.finalManifest.first?.inferenceFrames, Int64(second) * 16_000)
                 XCTAssertEqual(spool.finalManifest.first?.originalFrames, Int64(second) * 16_000)
             }
         }
         let audio = try await writer.finish()
-        XCTAssertEqual(audio.duration, 7_200, accuracy: 0.001)
-        XCTAssertEqual(spool.finalManifest.first?.inferenceFrames, 7_200 * 16_000)
-        XCTAssertEqual(spool.finalManifest.first?.originalFrames, 7_200 * 16_000)
+        XCTAssertEqual(audio.duration, TimeInterval(seconds), accuracy: 0.001)
+        XCTAssertEqual(spool.finalManifest.first?.inferenceFrames, Int64(seconds) * 16_000)
+        XCTAssertEqual(spool.finalManifest.first?.originalFrames, Int64(seconds) * 16_000)
         XCTAssertLessThanOrEqual(writer.peakQueuedPCMBytes, RecordingWriter.maximumQueuedPCMBytes)
         XCTAssertTrue(spool.isSealed)
         audio.cleanup()

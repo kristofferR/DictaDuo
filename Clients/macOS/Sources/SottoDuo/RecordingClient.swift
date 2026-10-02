@@ -122,6 +122,9 @@ actor RecordingClient {
                 if case RecordingTransferError.server(let failure) = error, !failure.retryable { throw error }
                 if case ServerClientError.rejected(let status, _) = error,
                    (300..<500).contains(status), status != 408, status != 429 { throw error }
+                // A protocol violation or endpoint mismatch recurs on every reconnect.
+                if case ServerClientError.invalidResponse = error { throw error }
+                if case ServerClientError.invalidEndpoint = error { throw error }
                 failures = min(failures + 1, 6)
                 // Bound retries without bounding the duration of offline capture.
                 // A changed Preferences endpoint never redirects this uploader.

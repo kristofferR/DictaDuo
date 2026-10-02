@@ -178,6 +178,7 @@ export class ClientRuntime {
       "connection",
       "sources",
       "history",
+      "historyEntry",
       "preferences",
       "receiver",
       "shortcuts",

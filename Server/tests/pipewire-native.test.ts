@@ -246,5 +246,12 @@ nativeTest("target removal cancels an active take without substituting audio", a
   )!;
   await command("pw-cli", ["destroy", String(source.id)]);
   await noCapture();
-  expect((await services.recordings.get(record.id)).capture?.state).toBe("stopped");
+  // Loss ends the take asynchronously: audio already written is sealed as
+  // stopped, and a take that lost its source before any audio is discarded.
+  await until(async () => {
+    const snapshot = await services.recordings.get(record.id);
+    return snapshot.captureState === "discarded" || snapshot.capture?.state === "stopped"
+      ? true
+      : undefined;
+  });
 });

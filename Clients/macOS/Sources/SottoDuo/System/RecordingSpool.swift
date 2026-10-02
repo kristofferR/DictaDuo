@@ -469,8 +469,9 @@ final class RecordingSpool: @unchecked Sendable {
     func markDeliveryAttempted() throws {
         try lock.withLock {
             guard !discarded else { throw SpoolError.invalid("This recording was discarded.") }
+            let previous = manifest
             manifest.deliveryAttempted = true
-            try saveManifest()
+            do { try saveManifest() } catch { manifest = previous; throw error }
         }
     }
 

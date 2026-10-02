@@ -3183,7 +3183,7 @@ public enum Operations {
                 ///
                 /// - Remark: Generated from `#/paths/v1/generations/{id}/cancel/POST/header/X-SottoDuo-Capture`.
                 public var xSottoDuoCapture: Components.Parameters.CaptureView?
-                /// Required for remote-generation cancellation and delivery; omitted by legacy local-upload clients.
+                /// Required for remote-capture cancellation and delivery; omitted by local-upload clients.
                 ///
                 /// - Remark: Generated from `#/paths/v1/generations/{id}/cancel/POST/header/X-SottoDuo-Capture-Owner`.
                 public var xSottoDuoCaptureOwner: Components.Parameters.CaptureMutationOwner?
@@ -3192,7 +3192,7 @@ public enum Operations {
                 ///
                 /// - Parameters:
                 ///   - xSottoDuoCapture: Opt in to remote capture source/state fields; omit for the legacy generation shape.
-                ///   - xSottoDuoCaptureOwner: Required for remote-generation cancellation and delivery; omitted by legacy local-upload clients.
+                ///   - xSottoDuoCaptureOwner: Required for remote-capture cancellation and delivery; omitted by local-upload clients.
                 ///   - accept:
                 public init(
                     xSottoDuoCapture: Components.Parameters.CaptureView? = nil,
@@ -3506,7 +3506,7 @@ public enum Operations {
                 ///
                 /// - Remark: Generated from `#/paths/v1/generations/{id}/delivery/POST/header/X-SottoDuo-Capture`.
                 public var xSottoDuoCapture: Components.Parameters.CaptureView?
-                /// Required for remote-generation cancellation and delivery; omitted by legacy local-upload clients.
+                /// Required for remote-capture cancellation and delivery; omitted by local-upload clients.
                 ///
                 /// - Remark: Generated from `#/paths/v1/generations/{id}/delivery/POST/header/X-SottoDuo-Capture-Owner`.
                 public var xSottoDuoCaptureOwner: Components.Parameters.CaptureMutationOwner?
@@ -3515,7 +3515,7 @@ public enum Operations {
                 ///
                 /// - Parameters:
                 ///   - xSottoDuoCapture: Opt in to remote capture source/state fields; omit for the legacy generation shape.
-                ///   - xSottoDuoCaptureOwner: Required for remote-generation cancellation and delivery; omitted by legacy local-upload clients.
+                ///   - xSottoDuoCaptureOwner: Required for remote-capture cancellation and delivery; omitted by local-upload clients.
                 ///   - accept:
                 public init(
                     xSottoDuoCapture: Components.Parameters.CaptureView? = nil,
@@ -5833,12 +5833,21 @@ public enum Operations {
             public var path: Operations.DiscardRecording.Input.Path
             /// - Remark: Generated from `#/paths/v2/recordings/{id}/discard/POST/header`.
             public struct Headers: Sendable, Hashable {
+                /// Required for remote-capture cancellation and delivery; omitted by local-upload clients.
+                ///
+                /// - Remark: Generated from `#/paths/v2/recordings/{id}/discard/POST/header/X-SottoDuo-Capture-Owner`.
+                public var xSottoDuoCaptureOwner: Components.Parameters.CaptureMutationOwner?
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.DiscardRecording.AcceptableContentType>]
                 /// Creates a new `Headers`.
                 ///
                 /// - Parameters:
+                ///   - xSottoDuoCaptureOwner: Required for remote-capture cancellation and delivery; omitted by local-upload clients.
                 ///   - accept:
-                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.DiscardRecording.AcceptableContentType>] = .defaultValues()) {
+                public init(
+                    xSottoDuoCaptureOwner: Components.Parameters.CaptureMutationOwner? = nil,
+                    accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.DiscardRecording.AcceptableContentType>] = .defaultValues()
+                ) {
+                    self.xSottoDuoCaptureOwner = xSottoDuoCaptureOwner
                     self.accept = accept
                 }
             }
@@ -6125,12 +6134,21 @@ public enum Operations {
             public var path: Operations.RecordRecordingDelivery.Input.Path
             /// - Remark: Generated from `#/paths/v2/recordings/{id}/delivery/POST/header`.
             public struct Headers: Sendable, Hashable {
+                /// Required for remote-capture cancellation and delivery; omitted by local-upload clients.
+                ///
+                /// - Remark: Generated from `#/paths/v2/recordings/{id}/delivery/POST/header/X-SottoDuo-Capture-Owner`.
+                public var xSottoDuoCaptureOwner: Components.Parameters.CaptureMutationOwner?
                 public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.RecordRecordingDelivery.AcceptableContentType>]
                 /// Creates a new `Headers`.
                 ///
                 /// - Parameters:
+                ///   - xSottoDuoCaptureOwner: Required for remote-capture cancellation and delivery; omitted by local-upload clients.
                 ///   - accept:
-                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.RecordRecordingDelivery.AcceptableContentType>] = .defaultValues()) {
+                public init(
+                    xSottoDuoCaptureOwner: Components.Parameters.CaptureMutationOwner? = nil,
+                    accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.RecordRecordingDelivery.AcceptableContentType>] = .defaultValues()
+                ) {
+                    self.xSottoDuoCaptureOwner = xSottoDuoCaptureOwner
                     self.accept = accept
                 }
             }

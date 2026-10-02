@@ -943,7 +943,10 @@ final class SottoDuoController: ObservableObject {
             finishDictation(cancelled: true)
             return
         }
-        if isCapturing {
+        if isCapturing, resumingRecordingID != nil {
+            // The spool holds the session's earlier runs; never discard them here.
+            pauseResumedRecording("Resume cancelled. The saved recording is unchanged.")
+        } else if isCapturing {
             let generation = activeGenerationID
             let connection = activeClient
             let shouldCancel = remoteCapture?.shouldCancelServer ?? true
@@ -1079,10 +1082,10 @@ final class SottoDuoController: ObservableObject {
         let shown = !isCapturing && pending.session == sessionID
         pendingDictations.removeAll { $0 === pending }
         pending.cancel()
-        pending.stopped?.cancel()
+        let stopped = pending.stopped
+        stopped?.cancel()
         if let spool = pending.spool {
-            // Explicit discard: wait for the released writer, then remove both copies.
-            let stopped = recorderStopTask
+            // Explicit discard: wait for this take's released writer, then remove both copies.
             Task {
                 _ = try? await stopped?.value
                 try? spool.discard()
@@ -1575,8 +1578,23 @@ final class SottoDuoController: ObservableObject {
                   capability.maximumPCMBytes == RecordingWire.maximumPCMBytes else {
                 throw ServerClientError.rejected(409, "This server does not support compatible long recordings. Update the server, then try again.")
             }
-            let created = try await connection.createRecording(.init(requestID: requestID, device: device,
-                                                                      mode: isTest ? .test : .dictation))
+            let admission = CreateGenerationRequest(requestID: requestID, device: device, mode: isTest ? .test : .dictation)
+            let created: RecordingSnapshot
+            do { created = try await connection.createRecording(admission) }
+            catch {
+                // A lost response may hide an admitted session that nothing would
+                // settle. Admission is idempotent per request, so replay it to discard.
+                if case ServerClientError.rejected(let status, _) = error, (400..<500).contains(status) { throw error }
+                Task {
+                    for delay in [1, 5, 30] {
+                        try? await Task.sleep(for: .seconds(delay))
+                        guard let orphan = try? await connection.createRecording(admission) else { continue }
+                        try? await connection.discardRecording(orphan.id)
+                        return
+                    }
+                }
+                throw error
+            }
             guard sessionID == current, activity == .starting, !Task.isCancelled else {
                 Task { try? await connection.discardRecording(created.id) }; return
             }
@@ -1635,15 +1653,8 @@ final class SottoDuoController: ObservableObject {
         recorder.stopAcceptingAudio()
         if remoteCapture == nil { outputMuter.restore() }
         guard activity == .recording else {
-            if resumingRecordingID != nil {
-                if activeSpool != nil { preserveInterruptedRecording("Recording paused before the microphone became ready.") }
-                else {
-                    resetSession()
-                    activity = .idle
-                    statusMessage = "Recording remains paused"
-                    recoverPendingRecordings()
-                }
-            } else { cancelDictation() }
+            if resumingRecordingID != nil { pauseResumedRecording("Recording paused before the microphone became ready.") }
+            else { cancelDictation() }
             return
         }
         let releasedAt = ProcessInfo.processInfo.systemUptime
@@ -1908,6 +1919,17 @@ final class SottoDuoController: ObservableObject {
             case .completed: statusMessage = "Preparing result…"
             case .failed: statusMessage = snapshot.error ?? "Processing stopped · Audio saved"
             }
+        }
+    }
+
+    /// Ending a resumed take early pauses its session again with the earlier runs intact.
+    private func pauseResumedRecording(_ message: String) {
+        if activeSpool != nil { preserveInterruptedRecording(message) }
+        else {
+            resetSession()
+            activity = .idle
+            statusMessage = "Recording remains paused"
+            recoverPendingRecordings()
         }
     }
 

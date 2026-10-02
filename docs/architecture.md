@@ -34,7 +34,7 @@ The TypeScript server also supports [Soniox streaming with automatic Whisper fal
 
 ## A recording
 
-An additive [remote capture coordinator](remote-capture.md) separates server-hosted audio from the destination client. It reuses generation admission and processing through a trusted local capture-provider interface. No hardware provider is configured by default; the following local-upload flow continues unchanged.
+An additive [remote capture coordinator](remote-capture.md) separates server-hosted audio from the destination client. Its takes are durable recording sessions whose audio a trusted local capture provider writes into one capture run. No hardware provider is configured by default; the following local-upload flow continues unchanged.
 
 Local Mac takes use durable recording sessions:
 
@@ -45,7 +45,7 @@ Local Mac takes use durable recording sessions:
 5. Stop drains capture and persists exact per-run endpoints. The server waits for contiguous durable audio, finishes pending speech/text tails, and assembles one result. There is no whole-session model request or mandatory WAV copy.
 6. Compact WebSocket snapshots carry transfer/processing progress. The client fetches the final transcript, verifies focus/caret safety, persists one delivery attempt, and reports its outcome separately from inference completion.
 
-Remote-microphone and Linux takes still use the generation flow (create, sequenced upload or provider capture, finish, NDJSON events) until they move to recording sessions.
+Remote-microphone takes, including those started from Linux, are recording sessions recorded by the server's capture provider; see [remote capture](remote-capture.md).
 
 Admitted audio survives network outages, app interruptions, and server restarts. Stopped sessions recover transfer and processing automatically; recovery and history never paste an old result. Explicit discard removes audio, unlike interruption. New capture still requires online admission. Legacy v1 generations retain their original lifecycle and limits; the reference Swift server does not advertise v2 recording support.
 

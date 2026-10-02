@@ -252,8 +252,16 @@ test("recording sessions join legacy history and are opened and deleted on their
   const tools = new HistoryTools(new API(address, "history-fixture-token"));
   const page = await tools.list(undefined, undefined, "q");
   expect(page.items.map((item) => item.id)).toEqual([session.id, legacy.id]);
-  expect(page.items[0]).toMatchObject({ status: "completed", finalText: "Hello world." });
+  expect(page.items[0]).toMatchObject({
+    status: "completed",
+    finalText: "",
+    previewText: "Hello world.",
+    summaryOnly: true,
+  });
   expect(page.nextCursor).toBeUndefined();
+  const entry = await tools.entry({ id: session.id, server: address });
+  expect(entry.record).toMatchObject({ status: "completed", finalText: "Hello world." });
+  expect(entry.record).not.toHaveProperty("summaryOnly");
   expect((await tools.list(undefined, "wispr-flow", "q")).items).toEqual([]);
   const audio = await tools.action("historyAudio", {
     id: session.id,

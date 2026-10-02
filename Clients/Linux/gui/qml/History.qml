@@ -18,6 +18,7 @@ ColumnLayout {
     property bool append: false
     property bool deleting: false
     property string audioID: ""
+    property string entryID: ""
     property string audioKind: ""
     property string message: ""
     property string queryID: ""
@@ -60,6 +61,17 @@ ColumnLayout {
         }))
             selectedID = filtered.length ? filtered[0].id : "";
 
+    }
+
+    // A completed session is listed as a summary; load its full record when selected.
+    function loadEntry() {
+        if (!selected || !selected.summaryOnly || entryID === selected.id || !available || bridge.preview)
+            return;
+        entryID = selected.id;
+        bridge.request("historyEntry", {
+            "id": entryID,
+            "server": server
+        });
     }
 
     function load(older, retry) {
@@ -142,6 +154,7 @@ ColumnLayout {
     objectName: "historyPage"
     spacing: 14
     onFilteredChanged: reconcile()
+    onSelectedChanged: loadEntry()
     onVisibleChanged: if (visible) Qt.callLater(maybeLoadOlder)
     Component.onCompleted: {
         server = bridge.snapshot.server || "";
@@ -176,6 +189,16 @@ ColumnLayout {
                 root.reconcile();
                 Qt.callLater(root.maybeLoadOlder);
             }
+            if (action === "historyEntry") {
+                if (data.record.id === root.entryID)
+                    root.entryID = "";
+                if (data.server !== root.server)
+                    return ;
+
+                root.records = root.records.map((r) => {
+                    return r.id === data.record.id ? data.record : r;
+                });
+            }
             if (action === "deleteHistory") {
                 root.deleting = false;
                 if (data.server !== root.server)
@@ -200,8 +223,11 @@ ColumnLayout {
         }
 
         function onFailed(action, message) {
-            if (!["history", "historyAudio", "historyArtifact", "deleteHistory"].includes(action))
+            if (!["history", "historyEntry", "historyAudio", "historyArtifact", "deleteHistory"].includes(action))
                 return ;
+
+            if (action === "historyEntry")
+                root.entryID = "";
 
             if (action === "history")
                 root.loading = false;
@@ -223,6 +249,7 @@ ColumnLayout {
                 root.cursor = "";
                 root.deviceID = "";
                 root.audioID = "";
+                root.entryID = "";
                 root.loading = false;
                 root.deleting = false;
                 root.server = server;

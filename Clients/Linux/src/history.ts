@@ -170,14 +170,12 @@ export class HistoryTools {
             throw error;
           }),
     ]);
+    // A completed session's result can be large; `entry` loads it once selected.
     const sessions: Page = {
-      items: await Promise.all(
-        recordings.items.map(async (snapshot) =>
-          snapshot.processingState === "completed"
-            ? ((await this.api.recording(snapshot.id, 60_000)).result ?? summary(snapshot))
-            : summary(snapshot),
-        ),
-      ),
+      items: recordings.items.map((snapshot) => ({
+        ...summary(snapshot),
+        ...(snapshot.processingState === "completed" ? { summaryOnly: true } : {}),
+      })),
       nextCursor: recordings.nextCursor,
     };
     for (const session of sessions.items) this.recordings.add(session.id);
@@ -203,6 +201,19 @@ export class HistoryTools {
         ? { nextCursor: JSON.stringify(position) }
         : {}),
     };
+  }
+  /** The full record of a listed recording session, whose list item is only a summary. */
+  async entry(request: Record<string, unknown>) {
+    if (request.server !== this.api.endpoint)
+      throw new ClientNotice("The connected server changed. Refresh history before continuing.");
+    const id = identifier(request.id);
+    if (!this.recordings.has(id))
+      throw new ClientNotice("Refresh history before opening this entry.");
+    try {
+      return { record: await this.session(id), server: this.api.endpoint };
+    } catch (error) {
+      return notice(error, "Loading the entry");
+    }
   }
   async action(
     action: "deleteHistory" | "historyAudio" | "historyArtifact",

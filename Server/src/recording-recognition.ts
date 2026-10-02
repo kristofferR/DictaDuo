@@ -97,8 +97,7 @@ export class LiveRecognition {
   sync(id: string, state: LiveRunState): LiveSegment | undefined {
     let live = this.streams.get(id);
     if (live && (live.state.runID !== state.runID || live.commitFrame < state.cursorFrame)) {
-      live.stream.close();
-      this.streams.delete(id);
+      this.close(id);
       live = undefined;
     }
     if (!live) {
@@ -137,6 +136,12 @@ export class LiveRecognition {
 
   shutdown() {
     for (const id of [...this.streams.keys()]) this.close(id);
+  }
+
+  /** Ends a failed stream; the worker falls back or retries from its cursor. */
+  private fail(id: string, reason: string) {
+    this.close(id);
+    this.callbacks.failed(id, reason);
   }
 
   private finished(live: LiveStream) {
@@ -182,9 +187,7 @@ export class LiveRecognition {
         this.callbacks.segment(id);
       },
       failed: (reason) => {
-        if (this.streams.get(id) !== live) return;
-        this.streams.delete(id);
-        this.callbacks.failed(id, reason);
+        if (this.streams.get(id) === live) this.fail(id, reason);
       },
     });
     this.streams.set(id, live);
@@ -202,9 +205,7 @@ export class LiveRecognition {
         !state.cloudOnly &&
         Math.min(target, state.availableFrames) - live.fedFrame > BACKLOG_FRAMES
       ) {
-        live.stream.close();
-        this.streams.delete(id);
-        this.callbacks.failed(id, "Live recognition fell behind; using server recognition.");
+        this.fail(id, "Live recognition fell behind; using server recognition.");
         continue;
       }
       // Pace against recent sending, so a long upload gap never becomes a burst.
@@ -230,9 +231,7 @@ export class LiveRecognition {
       }
       if (live.finalizing) {
         if (now - live.finalizing.sentAt > FINALIZE_TIMEOUT_MS) {
-          live.stream.close();
-          this.streams.delete(id);
-          this.callbacks.failed(id, "Live recognition did not finalize in time.");
+          this.fail(id, "Live recognition did not finalize in time.");
         }
         continue;
       }
@@ -272,10 +271,8 @@ export class LiveRecognition {
       live.fedFrame = until;
       live.lastSentAt = Date.now();
     } catch {
-      if (this.streams.get(id) !== live) return;
-      live.stream.close();
-      this.streams.delete(id);
-      this.callbacks.failed(id, "Saved audio could not be read for live recognition.");
+      if (this.streams.get(id) === live)
+        this.fail(id, "Saved audio could not be read for live recognition.");
     } finally {
       live.feeding = false;
     }

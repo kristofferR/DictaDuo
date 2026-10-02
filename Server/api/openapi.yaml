@@ -884,6 +884,7 @@ paths:
         default:
           $ref: "#/components/responses/APIError"
       parameters:
+        - "$ref": "#/components/parameters/CaptureMutationOwner"
         - name: id
           in: path
           required: true
@@ -921,6 +922,7 @@ paths:
         default:
           $ref: "#/components/responses/APIError"
       parameters:
+        - "$ref": "#/components/parameters/CaptureMutationOwner"
         - name: id
           in: path
           required: true
@@ -2306,7 +2308,7 @@ components:
       name: "X-SottoDuo-Capture-Owner"
       in: "header"
       required: false
-      description: "Required for remote-generation cancellation and delivery; omitted by legacy local-upload clients."
+      description: "Required for remote-capture cancellation and delivery; omitted by local-upload clients."
       schema:
         type: "string"
         pattern: "^[0-9a-f]{64}$"
