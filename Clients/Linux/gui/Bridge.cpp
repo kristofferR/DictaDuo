@@ -185,7 +185,9 @@ void Bridge::request(const QString &action, const QVariantMap &arguments,
               [this, pendingKey] { m_pending.remove(pendingKey); });
 }
 void Bridge::requestShortcutEdge(const QString &action) {
-  if (action != "start" && action != "stop")
+  // One-shot shortcuts share the queue so a cancel cannot overtake a pending start.
+  if (action != "start" && action != "stop" && action != "cancel" && action != "undo" &&
+      action != "copyLast")
     return;
   // CLOCK_MONOTONIC milliseconds, the same clock as the client's process.hrtime.
   const double at = std::chrono::duration<double, std::milli>(

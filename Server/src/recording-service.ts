@@ -1091,6 +1091,9 @@ export class RecordingService {
         throw failure("server_unavailable", readiness.message, 503);
       }
       if (manifest.snapshot.processingState === "completed") {
+        // Finished audio is not indexed in memory; verify it before touching the result.
+        for (const stream of manifest.snapshot.streams)
+          await this.indexStream(manifest.snapshot.id, manifest, stream);
         // Start over, but keep the finished result until the new one replaces it.
         const directory = this.directory(manifest.snapshot.id);
         await atomicPrivateWrite(join(directory, PREVIOUS_MANIFEST), JSON.stringify(manifest));
@@ -1103,16 +1106,23 @@ export class RecordingService {
         manifest.textState = createLongRecordingTextState(manifest.previous?.list);
         manifest.snapshot.transcribedFrames = manifest.snapshot.proofreadFrames = 0;
         manifest.snapshot.previewText = "";
-        // Finished audio is not indexed in memory; processing needs it again.
-        for (const stream of manifest.snapshot.streams)
-          await this.indexStream(manifest.snapshot.id, manifest, stream);
       }
       manifest.snapshot.processingState = "queued";
       delete manifest.snapshot.error;
       manifest.snapshot.recognition = { provider: "whisper" };
       this.liveFailures.delete(manifest.snapshot.id);
       this.live?.close(manifest.snapshot.id);
-      await this.commit(manifest);
+      try {
+        await this.commit(manifest);
+      } catch (error) {
+        // The session is still completed on disk; put its result back.
+        const directory = this.directory(manifest.snapshot.id);
+        await rename(join(directory, PREVIOUS_RESULT), join(directory, "result.json")).catch(
+          () => {},
+        );
+        await rm(join(directory, PREVIOUS_MANIFEST), { force: true });
+        throw error;
+      }
       this.schedule();
       return copy(manifest.snapshot);
     });
@@ -1625,13 +1635,14 @@ export class RecordingService {
           };
           await atomicPrivateWrite(join(this.directory(id), "transcript.txt"), result.finalText);
           await atomicPrivateWrite(join(this.directory(id), "result.json"), JSON.stringify(result));
-          for (const name of [PREVIOUS_RESULT, PREVIOUS_MANIFEST])
-            await rm(join(this.directory(id), name), { force: true });
           manifest.snapshot.processingState = "completed";
           manifest.snapshot.proofreadFrames = manifest.snapshot.transcribedFrames;
           manifest.snapshot.previewText = result.finalText.slice(-4096);
           delete manifest.snapshot.error;
           await this.commit(manifest);
+          // A retry's backups go only once the new result is committed.
+          for (const name of [PREVIOUS_RESULT, PREVIOUS_MANIFEST])
+            await rm(join(this.directory(id), name), { force: true });
           for (const stream of manifest.snapshot.streams)
             this.chunks.delete(this.streamKey(id, stream.runID, stream.kind));
         });

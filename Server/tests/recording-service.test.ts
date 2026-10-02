@@ -534,6 +534,11 @@ test("a finished take can be transcribed again, and a failed retry keeps the old
     "previous transcript is kept",
   );
   expect((await service.detail(snapshot.id)).result?.finalText).toContain("second pass");
+  // A retry whose saved audio is damaged fails without hiding the current result.
+  await rm(join(context.path, "sessions", snapshot.id, runID.toUpperCase(), "inference", "0.pcm"));
+  inference.fail = false;
+  await expect(service.retry(snapshot.id)).rejects.toThrow();
+  expect((await service.detail(snapshot.id)).result?.finalText).toContain("second pass");
   // Nothing is left over to restore again after a restart.
   const restarted = await restart(context);
   expect((await restarted.detail(snapshot.id)).result?.finalText).toContain("second pass");
