@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { GenerationService } from "../src/generation-service.ts";
 import type { InferenceBackend } from "../src/inference/native-inference.ts";
+import { InferenceError } from "../src/inference/inference-error.ts";
 
 class FakeInference implements InferenceBackend {
   failProof = false;
@@ -459,7 +460,7 @@ class QueuedInference extends FakeInference {
   signals: (AbortSignal | undefined)[] = [];
   starts = Array.from({ length: 4 }, deferred);
   releases = Array.from({ length: 4 }, deferred);
-  failFirst = false;
+  failures = 0;
   proofStarted = deferred();
   proofRelease?: ReturnType<typeof deferred>;
   override async transcribe(
@@ -476,7 +477,7 @@ class QueuedInference extends FakeInference {
     // Deliberately hold cleanup after abort to detect overlapping replacement work.
     await this.releases[index]!.promise;
     signal?.throwIfAborted();
-    if (this.failFirst && index === 0) throw new Error("Speech helper failed.");
+    if (index < this.failures) throw new Error("Speech helper failed.");
     return {
       text: `Recording ${index + 1}.`,
       language: "en",
@@ -561,7 +562,8 @@ test("cancelling receiving and queued recordings leaves active inference alone; 
 
 test("a failed speech job does not strand the next queued recording", async () => {
   const inference = new QueuedInference();
-  inference.failFirst = true;
+  // Both attempts of the first recording fail.
+  inference.failures = 2;
   const { service } = await setup(inference);
   const first = await upload(service);
   await service.finish(first.id, { inferenceFrames: 4000 });
@@ -569,9 +571,11 @@ test("a failed speech job does not strand the next queued recording", async () =
   const next = await upload(service);
   await service.finish(next.id, { inferenceFrames: 4000 });
   inference.releases[0]!.release();
-  expect((await completed(service, first.id)).status).toBe("failed");
   await inference.starts[1]!.promise;
   inference.releases[1]!.release();
+  expect((await completed(service, first.id)).status).toBe("failed");
+  await inference.starts[2]!.promise;
+  inference.releases[2]!.release();
   expect((await completed(service, next.id)).status).toBe("completed");
 });
 
@@ -612,4 +616,130 @@ test("the next recording waits until proofreading and result publication finish"
   expect((await service.get(first.id)).status).toBe("completed");
   inference.releases[1]!.release();
   expect((await completed(service, second.id)).status).toBe("completed");
+});
+
+test("a cancelled sealed recording can be transcribed again without overwriting the retry", async () => {
+  const inference = new QueuedInference();
+  const { service } = await setup(inference);
+  const record = await upload(service);
+  await service.finish(record.id, { inferenceFrames: 4000 });
+  await inference.starts[0]!.promise;
+  expect((await service.cancel(record.id)).status).toBe("cancelled");
+  const retried = await service.retry(record.id);
+  expect(retried.status).toBe("queued");
+  expect(retried.error).toBeUndefined();
+  expect(retried.recognition?.provider).toBe("whisper");
+  // The aborted first run unwinds only after the retry was queued behind it.
+  inference.releases[0]!.release();
+  await inference.starts[1]!.promise;
+  inference.releases[1]!.release();
+  const final = await completed(service, record.id);
+  expect(final.status).toBe("completed");
+  expect(final.finalText).toBe("Recording 2.");
+});
+
+test("a retry that fails before new speech keeps the transcript it replaced", async () => {
+  const inference = new QueuedInference();
+  inference.proofRelease = deferred();
+  const { service, path } = await setup(inference);
+  const record = await upload(service);
+  await service.finish(record.id, { inferenceFrames: 4000 });
+  inference.releases[0]!.release();
+  await inference.proofStarted.promise;
+  // Shutdown during proofreading cancels the take after its transcript was saved.
+  await service.shutdown();
+  const failing = new FakeInference();
+  failing.transcribe = async () => {
+    throw new Error("Helper exited.");
+  };
+  const restarted = await GenerationService.open(
+    { dataDirectory: path, development: true },
+    failing,
+  );
+  resources.push({ service: restarted, path });
+  const interrupted = await restarted.get(record.id);
+  expect(interrupted.status).toBe("cancelled");
+  expect(interrupted.rawText).toBe("Recording 1.");
+  expect((await restarted.retry(record.id)).rawText).toBe("");
+  const final = await completed(restarted, record.id);
+  expect(final.status).toBe("failed");
+  expect(final.error).toBe("Helper exited.");
+  expect(final.rawText).toBe("Recording 1.");
+  // Cancelling a retry, as shutdown does, gives the transcript back too.
+  failing.transcribe = (_path, _language, _terms, _progress, signal) =>
+    new Promise((_, reject) => signal?.addEventListener("abort", () => reject(signal.reason)));
+  await restarted.retry(record.id);
+  const cancelled = await restarted.cancel(record.id);
+  expect(cancelled.status).toBe("cancelled");
+  expect(cancelled.rawText).toBe("Recording 1.");
+});
+
+test("only failed or cancelled recordings with sealed audio can be retried", async () => {
+  const { service } = await setup();
+  const receiving = await upload(service);
+  await expect(service.retry(receiving.id)).rejects.toMatchObject({ code: "not_retryable" });
+  await service.cancel(receiving.id);
+  await expect(service.retry(receiving.id)).rejects.toMatchObject({ code: "not_retryable" });
+  const done = await upload(service);
+  await service.finish(done.id, { inferenceFrames: 4000 });
+  expect((await completed(service, done.id)).status).toBe("completed");
+  await expect(service.retry(done.id)).rejects.toMatchObject({ code: "not_retryable" });
+});
+
+test("a transient speech failure is retried once before the recording fails", async () => {
+  const inference = new FakeInference();
+  let failures = 1,
+    calls = 0;
+  const transcribe = inference.transcribe.bind(inference);
+  inference.transcribe = async (...args) => {
+    calls++;
+    if (failures-- > 0) throw new Error("Helper exited.");
+    return transcribe(...args);
+  };
+  const { service } = await setup(inference);
+  const recovered = await upload(service);
+  await service.finish(recovered.id, { inferenceFrames: 4000 });
+  expect((await completed(service, recovered.id)).status).toBe("completed");
+  expect(calls).toBe(2);
+  failures = 2;
+  const failed = await upload(service);
+  await service.finish(failed.id, { inferenceFrames: 4000 });
+  const final = await completed(service, failed.id);
+  expect(final.status).toBe("failed");
+  expect(final.error).toBe("Helper exited.");
+  expect((await service.retry(failed.id)).status).toBe("queued");
+  expect((await completed(service, failed.id)).status).toBe("completed");
+});
+
+test("a timed-out speech run is not retried", async () => {
+  const inference = new FakeInference();
+  let calls = 0;
+  inference.transcribe = async () => {
+    calls++;
+    throw new InferenceError("timeout", "Whisper inference timed out.");
+  };
+  const { service } = await setup(inference);
+  const record = await upload(service);
+  await service.finish(record.id, { inferenceFrames: 4000 });
+  expect((await completed(service, record.id)).status).toBe("failed");
+  expect(calls).toBe(1);
+});
+
+test("a late speech failure is not retried", async () => {
+  const inference = new FakeInference();
+  let calls = 0;
+  inference.transcribe = async () => {
+    calls++;
+    setSystemTime(Date.now() + 60_000);
+    throw new InferenceError("unavailable", "Helper exited.");
+  };
+  const { service } = await setup(inference);
+  try {
+    const record = await upload(service);
+    await service.finish(record.id, { inferenceFrames: 4000 });
+    expect((await completed(service, record.id)).status).toBe("failed");
+    expect(calls).toBe(1);
+  } finally {
+    setSystemTime();
+  }
 });

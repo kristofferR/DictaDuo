@@ -130,13 +130,16 @@ public struct ServerHealth: Codable, Equatable, Sendable {
     public var serverVersion: String
     public var isDev: Bool
     public var ready: Bool
+    public var generationRetry: Bool?
     public var speech: ModelRuntimeInfo
     public var proofreading: ModelRuntimeInfo
     public var message: String?
     public init(apiVersion: Int = SottoDuoAPI.version, serverVersion: String = "0.1.0", isDev: Bool = true,
-                ready: Bool, speech: ModelRuntimeInfo, proofreading: ModelRuntimeInfo, message: String? = nil) {
+                ready: Bool, speech: ModelRuntimeInfo, proofreading: ModelRuntimeInfo, message: String? = nil,
+                generationRetry: Bool? = nil) {
         self.apiVersion = apiVersion; self.serverVersion = serverVersion; self.isDev = isDev
         self.ready = ready; self.speech = speech; self.proofreading = proofreading; self.message = message
+        self.generationRetry = generationRetry
     }
 }
 

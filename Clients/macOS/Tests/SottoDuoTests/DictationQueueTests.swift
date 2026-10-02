@@ -112,7 +112,8 @@ final class DictationQueueTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(275))
         let first = try XCTUnwrap(fixture.server.created.first)
         fixture.controller.toggleTestRecording()
-        fixture.controller.cancelDictation()
+        // An undoable cancel would keep the released take; discarding must reach its teardown.
+        fixture.controller.cancelDictation(undoable: false)
         try await waitUntil {
             fixture.server.cancelled.contains(first) && !fixture.controller.isBusy && fixture.hardware.stoppedRequest != nil
         }
@@ -209,13 +210,18 @@ final class DictationQueueTests: XCTestCase {
         try await waitUntil { fixture.server.finishing.count == 2 }
         let second = try XCTUnwrap(fixture.server.created.last)
 
+        // Cancelling a queued take keeps it in history instead of discarding it.
         fixture.controller.cancelDictation()
-        try await waitUntil { fixture.server.cancelled.contains(second) }
-        XCTAssertFalse(fixture.server.cancelled.contains(first))
+        XCTAssertTrue(fixture.controller.isUndoPending)
+        fixture.controller.keepCancelledTake()
         fixture.server.complete(first, text: "Earlier take survives")
-        try await waitUntil { fixture.server.deliveries == [first] && !fixture.controller.isBusy }
+        fixture.server.complete(second, text: "Kept only")
+        try await waitUntil { fixture.server.deliveries.count == 2 && !fixture.controller.isBusy }
+        XCTAssertTrue(fixture.server.cancelled.isEmpty)
+        XCTAssertEqual(fixture.server.deliveries, [first, second])
+        XCTAssertEqual(fixture.server.receipt(first), "tested")
+        XCTAssertEqual(fixture.server.receipt(second), "cancelled")
         XCTAssertEqual(fixture.controller.lastTranscript, "Earlier take survives")
-        XCTAssertEqual(fixture.controller.activity, .success)
         XCTAssertNil(fixture.controller.errorMessage)
     }
 
@@ -229,20 +235,22 @@ final class DictationQueueTests: XCTestCase {
         let first = try XCTUnwrap(fixture.server.created.first)
         try await fixture.recordAndRelease()
         try await waitUntil { fixture.server.finishing.count == 2 }
-        let cancelled = try XCTUnwrap(fixture.server.created.last)
+        let kept = try XCTUnwrap(fixture.server.created.last)
         fixture.controller.cancelDictation()
-        try await waitUntil { fixture.server.cancelled.contains(cancelled) }
+        fixture.controller.keepCancelledTake()
 
         try await fixture.recordAndRelease()
         try await waitUntil { fixture.server.finishing.count == 3 }
         let third = try XCTUnwrap(fixture.server.created.last)
         fixture.server.complete(third, text: "Third take")
+        fixture.server.complete(kept, text: "Kept only")
         try await Task.sleep(for: .milliseconds(50))
-        XCTAssertTrue(fixture.server.deliveries.isEmpty, "Cancelling a middle take must retain its preceding delivery dependency")
+        XCTAssertTrue(fixture.server.deliveries.isEmpty, "A kept middle take must retain its preceding delivery dependency")
         fixture.server.complete(first, text: "First take")
-        try await waitUntil { fixture.server.deliveries.count == 2 && !fixture.controller.isBusy }
-        XCTAssertEqual(Set(fixture.server.deliveries), Set([first, third]))
+        try await waitUntil { fixture.server.deliveries.count == 3 && !fixture.controller.isBusy }
+        XCTAssertEqual(Set(fixture.server.deliveries), Set([first, kept, third]))
         XCTAssertEqual(fixture.deliveredTranscripts, ["First take", "Third take"])
+        XCTAssertEqual(fixture.server.receipt(kept), "cancelled")
         XCTAssertEqual(fixture.controller.lastTranscript, "Third take")
     }
 
@@ -354,7 +362,7 @@ final class DictationQueueTests: XCTestCase {
     }
 
     @MainActor
-    func testRepeatedCancellationDrainsPendingTakesAndAllowsAnotherHold() async throws {
+    func testRepeatedCancellationKeepsTheTakeAndAllowsAnotherHold() async throws {
         let fixture = try QueueControllerFixture()
         defer { fixture.close() }
         try await fixture.ready()
@@ -366,15 +374,65 @@ final class DictationQueueTests: XCTestCase {
         let second = try XCTUnwrap(fixture.server.created.last)
 
         fixture.controller.cancelDictation()
-        XCTAssertTrue(fixture.controller.isBusy)
+        XCTAssertTrue(fixture.controller.isUndoPending)
+        try await Task.sleep(for: .milliseconds(350))
+        // A separate, later cancel closes the window and keeps the take.
         fixture.controller.cancelDictation()
-        try await waitUntil { fixture.server.cancelled.count == 2 && !fixture.controller.isBusy }
-        XCTAssertEqual(Set(fixture.server.cancelled), Set([first, second]))
-        XCTAssertTrue(fixture.server.deliveries.isEmpty)
-        XCTAssertEqual(fixture.controller.activity, .idle)
+        XCTAssertFalse(fixture.controller.isUndoPending)
+        fixture.server.complete(first, text: "First take")
+        fixture.server.complete(second, text: "Kept only")
+        try await waitUntil { fixture.server.deliveries.count == 2 && !fixture.controller.isBusy }
+        XCTAssertTrue(fixture.server.cancelled.isEmpty)
+        XCTAssertEqual(fixture.server.receipt(second), "cancelled")
+        XCTAssertEqual(fixture.controller.lastTranscript, "First take")
         fixture.controller.toggleTestRecording()
         try await waitUntil { fixture.controller.isRecording }
+        fixture.controller.cancelDictation(undoable: false)
+    }
+}
+
+extension DictationQueueTests {
+    @MainActor
+    func testCancelledTakeIsKeptInHistoryWithoutDelivering() async throws {
+        let fixture = try QueueControllerFixture()
+        defer { fixture.close() }
+        try await fixture.ready()
+        fixture.controller.toggleTestRecording()
+        try await waitUntil { fixture.controller.isRecording }
+        try await Task.sleep(for: .milliseconds(275))
         fixture.controller.cancelDictation()
+        XCTAssertTrue(fixture.controller.isUndoPending)
+        let id = try XCTUnwrap(fixture.server.created.first)
+        try await waitUntil { fixture.server.finishing.contains(id) }
+        XCTAssertFalse(fixture.server.cancelled.contains(id), "A cancelled take is still sealed and transcribed")
+        fixture.controller.keepCancelledTake()
+        XCTAssertFalse(fixture.controller.isUndoPending)
+        fixture.server.complete(id, text: "Kept words")
+        try await waitUntil { fixture.server.receipt(id) != nil && !fixture.controller.isBusy }
+        XCTAssertEqual(fixture.server.receipt(id), "cancelled")
+        XCTAssertEqual(fixture.controller.lastDeliveryStatus, .kept)
+        XCTAssertNotEqual(fixture.controller.lastTranscript, "Kept words")
+    }
+
+    @MainActor
+    func testUndoDeliversACancelledTakeAsUsual() async throws {
+        let fixture = try QueueControllerFixture()
+        defer { fixture.close() }
+        try await fixture.ready()
+        fixture.controller.toggleTestRecording()
+        try await waitUntil { fixture.controller.isRecording }
+        try await Task.sleep(for: .milliseconds(275))
+        fixture.controller.cancelDictation()
+        // The same Escape reaching a second handler must not close the window.
+        fixture.controller.cancelDictation()
+        XCTAssertTrue(fixture.controller.isUndoPending)
+        let id = try XCTUnwrap(fixture.server.created.first)
+        try await waitUntil { fixture.server.finishing.contains(id) }
+        fixture.controller.undoCancellation()
+        fixture.server.complete(id, text: "Undone words")
+        try await waitUntil { fixture.server.receipt(id) != nil && !fixture.controller.isBusy }
+        XCTAssertEqual(fixture.server.receipt(id), "tested")
+        XCTAssertEqual(fixture.controller.lastTranscript, "Undone words")
     }
 }
 
@@ -481,6 +539,7 @@ private final class QueueHTTPFixture: @unchecked Sendable {
     private var finishRequests: [UUID: QueueURLProtocol] = [:]
     private var finishValues: [UUID: FinishGenerationRequest] = [:]
     private var delivered: [UUID] = []
+    private var receiptStatuses: [UUID: String] = [:]
     private var cancellations: [UUID] = []
     private var uploadedFrames: [String: Int64] = [:]
     private var heldDeliveries: [UUID: QueueURLProtocol] = [:]
@@ -499,6 +558,7 @@ private final class QueueHTTPFixture: @unchecked Sendable {
     var created: [UUID] { lock.withLock { records.map(\.id) } }
     var finishing: Set<UUID> { lock.withLock { Set(finishRequests.keys) } }
     var deliveries: [UUID] { lock.withLock { delivered } }
+    func receipt(_ id: UUID) -> String? { lock.withLock { receiptStatuses[id] } }
     var cancelled: [UUID] { lock.withLock { cancellations } }
 
     init() {
@@ -571,8 +631,9 @@ private final class QueueHTTPFixture: @unchecked Sendable {
                 lock.withLock { cancellations.append(id) }
                 transport.respondEmpty()
             case "delivery":
+                let receipt = try SottoDuoAPI.decodeWire(DeliveryReceipt.self, from: body(request))
                 let held = lock.withLock {
-                    delivered.append(id)
+                    delivered.append(id); receiptStatuses[id] = receipt.status
                     if holdingDeliveries { heldDeliveries[id] = transport }
                     return holdingDeliveries
                 }

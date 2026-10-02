@@ -44,7 +44,9 @@ An additive [remote capture coordinator](remote-capture.md) separates server-hos
 
 On the Mac, a released take keeps its own connection, destination, and delivery receipt, so a new hold can start while earlier takes upload and process. Deliveries run in recording order and wait while a hold is in progress. Escape cancels the take the HUD shows until its text is inserted; earlier takes keep running.
 
-Interrupted partial uploads expire; a complete upload can finish after the client disconnects. A pending take recovers a briefly interrupted result stream from the saved generation and still delivers once; remote-capture takes do not reconnect. Opening history never pastes an old result. Restarting the server marks unfinished generations failed and retains completed history. There is no offline queue or retry UI; only a sealed take's finish acknowledgement and result stream are retried automatically.
+Cancelling a take with at least 0.25 seconds of audio does not discard it. The server still transcribes it, and for 4 seconds Undo or the dictation key inserts it as usual (`sottoduo undo` on Linux). Otherwise it is saved to history as **Not pasted** with a `cancelled` delivery receipt. Device-initiated cancels, lock, and shutdown still discard. The TypeScript server's `POST /v1/generations/{id}/retry` re-transcribes a failed or cancelled recording's sealed audio with local Whisper. Mac history offers it as **Transcribe again** when server health advertises `generationRetry: true`; the Swift reference server and Linux history do not offer transcription retry.
+
+Interrupted partial uploads expire; a complete upload can finish after the client disconnects. A pending take recovers a briefly interrupted result stream from the saved generation and still delivers once; remote-capture takes do not reconnect. Opening history never pastes an old result. Restarting the server marks unfinished generations failed and retains completed history. There is no offline queue, and uploads and deliveries are never retried automatically; only a transient local Whisper failure gets one automatic second attempt on the sealed audio.
 
 ## Text delivery
 

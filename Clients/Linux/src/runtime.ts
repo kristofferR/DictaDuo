@@ -241,6 +241,9 @@ export class ClientRuntime {
         case "cancel":
           await controller.cancel();
           break;
+        case "undo":
+          controller.undo();
+          break;
         case "status":
           return controller.state;
         case "result":

@@ -30,6 +30,23 @@ Window {
         id: linger
         interval: 4500
     }
+    // Whole seconds left to undo a cancel; steps once per second, no continuous repaint.
+    property int undoSeconds: 0
+    readonly property string undoKey: portalShortcuts.plasma ? portalShortcuts.trigger : (ui.shortcut && ui.shortcut.key) || ""
+    function updateUndo() {
+        undoSeconds = ui.activity.undoUntil ? Math.max(0, Math.ceil((ui.activity.undoUntil - Date.now()) / 1000)) : 0;
+    }
+    Connections {
+        target: hud.ui
+        function onActivityChanged() { hud.updateUndo(); }
+    }
+    Timer {
+        interval: 1000
+        repeat: true
+        running: hud.ui.activity.undoUntil !== undefined && hud.ui.activity.undoUntil > 0
+        triggeredOnStart: true
+        onTriggered: hud.updateUndo()
+    }
     Rectangle {
         anchors.fill: parent
         anchors.margins: 3
@@ -64,7 +81,7 @@ Window {
                 }
                 SLabel {
                     ui: hud.ui
-                    text: (hud.ui.feedback.elapsedSeconds !== undefined ? hud.ui.duration(hud.ui.feedback.elapsedSeconds) + " · " : "") + (hud.ui.activity.source || "SottoDuo")
+                    text: hud.undoSeconds > 0 ? "Press " + (hud.undoKey || "the dictation key") + " again to paste · " + hud.undoSeconds + "s" : (hud.ui.feedback.elapsedSeconds !== undefined ? hud.ui.duration(hud.ui.feedback.elapsedSeconds) + " · " : "") + (hud.ui.activity.source || "SottoDuo")
                     color: hud.ui.c.muted
                     font.pixelSize: 11
                     Layout.fillWidth: true

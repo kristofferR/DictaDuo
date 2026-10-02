@@ -254,6 +254,7 @@ final class ServerClientTests: XCTestCase {
             XCTAssertEqual(request.url?.scheme, "wss")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer private-token")
             XCTAssertEqual(request.value(forHTTPHeaderField: "X-SottoDuo-Recognition"), "streaming-v1")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-SottoDuo-Generation-Retry"), "retry-v1")
         }
         let local = try ServerClient(endpoint: "HTTP://127.0.0.1:8391", token: "").streamingRequest(to: UUID())
         XCTAssertEqual(local.url?.scheme, "ws")

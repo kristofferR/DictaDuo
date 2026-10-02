@@ -456,6 +456,26 @@ paths:
           required: true
           schema:
             "$ref": "#/components/schemas/UUID"
+  "/v1/generations/{id}/retry":
+    post:
+      operationId: "retryGeneration"
+      responses:
+        "202":
+          description: "Accepted"
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/GenerationRecord"
+        default:
+          "$ref": "#/components/responses/APIError"
+      parameters:
+        - "$ref": "#/components/parameters/CaptureView"
+        -
+          name: "id"
+          in: "path"
+          required: true
+          schema:
+            "$ref": "#/components/schemas/UUID"
   "/v1/generations/{id}/delivery":
     post:
       operationId: "recordDelivery"
@@ -928,6 +948,9 @@ components:
           type: "boolean"
         ready:
           type: "boolean"
+        generationRetry:
+          type: "boolean"
+          description: "Whether failed or cancelled generations with sealed audio can be retried. Request this field with X-SottoDuo-Generation-Retry: retry-v1. An omitted value means unsupported."
         speech:
           "$ref": "#/components/schemas/ModelRuntimeInfo"
         proofreading:

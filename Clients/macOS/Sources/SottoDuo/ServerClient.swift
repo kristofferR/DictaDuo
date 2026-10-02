@@ -88,6 +88,7 @@ struct ServerClient: Sendable {
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("streaming-v1", forHTTPHeaderField: "X-SottoDuo-Recognition")
+        request.setValue("retry-v1", forHTTPHeaderField: "X-SottoDuo-Generation-Retry")
         request.setValue("capture-v1", forHTTPHeaderField: "X-SottoDuo-Capture")
         if let destinationOwner { request.setValue(destinationOwner, forHTTPHeaderField: "X-SottoDuo-Destination-Owner") }
         if let captureOwner { request.setValue(captureOwner, forHTTPHeaderField: "X-SottoDuo-Capture-Owner") }
@@ -320,6 +321,9 @@ extension ServerClient {
     }
     func cancel(_ id: UUID) async throws {
         try await send(path: "v1/generations/\(id)/cancel", method: "POST")
+    }
+    func retry(_ id: UUID) async throws -> GenerationRecord {
+        try await json(path: "v1/generations/\(id)/retry", method: "POST")
     }
     func delete(_ id: UUID) async throws {
         try await send(path: "v1/generations/\(id)", method: "DELETE")

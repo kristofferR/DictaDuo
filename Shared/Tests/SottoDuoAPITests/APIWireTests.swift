@@ -4,6 +4,24 @@ import SottoDuoAPIWire
 import XCTest
 
 final class APIWireTests: XCTestCase {
+    func testGenerationRetryRequiresAnExplicitServerCapability() throws {
+        let json = Data("""
+            {"apiVersion":2,"serverVersion":"0.1.0","isDev":true,"ready":true,
+             "speech":{"modelID":"whisper","backend":"local","ready":true},
+             "proofreading":{"modelID":"qwen","backend":"local","ready":false}}
+            """.utf8)
+        XCTAssertNil(try SottoDuoAPI.decodeWire(ServerHealth.self, from: json).generationRetry)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: json) as? [String: Any])
+        for supported in [true, false] {
+            object["generationRetry"] = supported
+            let health = try SottoDuoAPI.decodeWire(ServerHealth.self,
+                from: JSONSerialization.data(withJSONObject: object))
+            XCTAssertEqual(health.generationRetry, supported)
+            XCTAssertEqual(try SottoDuoAPI.decodeWire(ServerHealth.self,
+                from: SottoDuoAPI.encodeWire(health)).generationRetry, supported)
+        }
+    }
+
     func testRemoteSourceStatusDecodesWithTheExistingDateStrategy() throws {
         let data = Data("""
             {"sources":[{"identity":{"hostID":"host-stable","id":"usb-dji"},"name":"DJI",\

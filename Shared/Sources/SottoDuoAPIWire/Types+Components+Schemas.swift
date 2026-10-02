@@ -529,6 +529,10 @@ extension Components {
             public var isDev: Swift.Bool
             /// - Remark: Generated from `#/components/schemas/ServerHealth/ready`.
             public var ready: Swift.Bool
+            /// Whether failed or cancelled generations with sealed audio can be retried. Request this field with X-SottoDuo-Generation-Retry: retry-v1. An omitted value means unsupported.
+            ///
+            /// - Remark: Generated from `#/components/schemas/ServerHealth/generationRetry`.
+            public var generationRetry: Swift.Bool?
             /// - Remark: Generated from `#/components/schemas/ServerHealth/speech`.
             public var speech: Components.Schemas.ModelRuntimeInfo
             /// - Remark: Generated from `#/components/schemas/ServerHealth/proofreading`.
@@ -542,6 +546,7 @@ extension Components {
             ///   - serverVersion:
             ///   - isDev:
             ///   - ready:
+            ///   - generationRetry: Whether failed or cancelled generations with sealed audio can be retried. Request this field with X-SottoDuo-Generation-Retry: retry-v1. An omitted value means unsupported.
             ///   - speech:
             ///   - proofreading:
             ///   - message:
@@ -550,6 +555,7 @@ extension Components {
                 serverVersion: Swift.String,
                 isDev: Swift.Bool,
                 ready: Swift.Bool,
+                generationRetry: Swift.Bool? = nil,
                 speech: Components.Schemas.ModelRuntimeInfo,
                 proofreading: Components.Schemas.ModelRuntimeInfo,
                 message: Swift.String? = nil
@@ -558,6 +564,7 @@ extension Components {
                 self.serverVersion = serverVersion
                 self.isDev = isDev
                 self.ready = ready
+                self.generationRetry = generationRetry
                 self.speech = speech
                 self.proofreading = proofreading
                 self.message = message
@@ -567,6 +574,7 @@ extension Components {
                 case serverVersion
                 case isDev
                 case ready
+                case generationRetry
                 case speech
                 case proofreading
                 case message
@@ -589,6 +597,10 @@ extension Components {
                     Swift.Bool.self,
                     forKey: .ready
                 )
+                self.generationRetry = try container.decodeIfPresent(
+                    Swift.Bool.self,
+                    forKey: .generationRetry
+                )
                 self.speech = try container.decode(
                     Components.Schemas.ModelRuntimeInfo.self,
                     forKey: .speech
@@ -606,6 +618,7 @@ extension Components {
                     "serverVersion",
                     "isDev",
                     "ready",
+                    "generationRetry",
                     "speech",
                     "proofreading",
                     "message"

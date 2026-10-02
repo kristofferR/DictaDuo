@@ -14,6 +14,7 @@ const help = `SottoDuo for Linux
   sottoduo daemon           Run the desktop client in the graphical session
   sottoduo start|stop        Hold-to-talk press/release commands
   sottoduo toggle|cancel    Toggle recording or cancel this desktop's take
+  sottoduo undo             Insert a just-cancelled take after all (4 seconds)
   sottoduo status|result    Show state or the current process's last result
   sottoduo arm|disarm       Select or clear this computer for the DJI pairing button
   sottoduo button-status    Show button destination and receiver availability

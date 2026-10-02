@@ -142,6 +142,8 @@ final class SottoDuoController: ObservableObject {
     @Published private(set) var hasMoreHistory = false
     @Published private(set) var historySourceFilter = "all"
     @Published private(set) var wisprFlowImportState: WisprFlowImportState = .idle
+    /// Set while a cancelled take can still be pasted; the HUD counts down to it.
+    @Published private(set) var undoDeadline: Date?
     private var historyCursor: String?
     private var wisprFlowReader: WisprFlowSourceReader?
     private var wisprFlowPrepareTask: Task<Void, Never>?
@@ -160,6 +162,9 @@ final class SottoDuoController: ObservableObject {
     var isCapturing: Bool { activity.isCapturing }
     var recordingUsesClipboard: Bool { isCapturing && insertionDestination == .clipboard }
     var isBusy: Bool { activity.isBusy || !pendingDictations.isEmpty }
+    var isUndoPending: Bool { undoDeadline != nil }
+    var hudExpanded: Bool { isCapturing || isUndoPending }
+    static let undoWindow: TimeInterval = 4
     var canCancelWithEscape: Bool { !hotkey.isHoldingFn }
     var isServerReady: Bool { serverHealth?.ready == true && serverHealth?.apiVersion == SottoDuoAPI.version }
     var canTest: Bool { isServerReady && microphones.resolution.device != nil && !isCapturing }
@@ -196,6 +201,9 @@ final class SottoDuoController: ObservableObject {
     private var insertionRebases = ConfirmedInsertionRebases<InsertionTarget>()
     /// Released takes in recording order. The newest may own the HUD via sessionID.
     @Published private var pendingDictations: [PendingDictation] = []
+    private var undoTake: PendingDictation?
+    private var undoTask: Task<Void, Never>?
+    private var undoOpenedAt: TimeInterval = 0
     private var uploadTask: Task<FinishGenerationRequest, Error>?
     private var uploadPipe: AudioChunkPipe?
     private var remoteCapture: RemoteCaptureSession?
@@ -229,6 +237,8 @@ final class SottoDuoController: ObservableObject {
         let buttonSelection: UUID?
         var task: Task<Void, Never>?
         var sealed = false
+        /// A cancelled take waits here to learn whether it is pasted or only kept.
+        let gate: TakeDeliveryGate
         /// The text transaction finished; only the delivery receipt remains, which Escape must not cancel.
         var inserted = false
         /// Nil until the destination resolves; list continuation keys off its anchor.
@@ -238,12 +248,14 @@ final class SottoDuoController: ObservableObject {
 
         init(session: UUID, id: UUID, client: ServerClient, upload: Task<FinishGenerationRequest, Error>?,
              pipe: AudioChunkPipe?, capture: RemoteCaptureSession?, destination: InsertionDestinationCapture?,
-             trigger: DictationTrigger?, buttonSelection: UUID?) {
+             trigger: DictationTrigger?, buttonSelection: UUID?, cancelled: Bool) {
+            gate = TakeDeliveryGate(pending: cancelled)
             self.session = session; self.id = id; self.client = client; self.upload = upload; self.pipe = pipe
             self.capture = capture; self.destination = destination; self.trigger = trigger; self.buttonSelection = buttonSelection
         }
 
         func cancel() {
+            gate.decide(false)
             task?.cancel(); stopped?.cancel(); upload?.cancel(); pipe?.cancel(); destination?.cancel(); capture?.cancelMonitoring()
         }
     }
@@ -780,8 +792,22 @@ final class SottoDuoController: ObservableObject {
         else { beginDictation(trigger: .test) }
     }
 
-    func cancelDictation() {
+    /// A user cancel never throws away a take with usable audio: the server still
+    /// transcribes it into history, and the HUD offers a short window to paste it
+    /// after all. A second cancel closes that window early. Device-initiated
+    /// cancels (`undoable: false`) discard the take as before.
+    func cancelDictation(undoable: Bool = true) {
         guard isBusy else { return }
+        if undoable, isUndoPending {
+            // One Escape can reach both the key listener and a focused view;
+            // only a later, separate cancel closes the window it just opened.
+            if ProcessInfo.processInfo.systemUptime - undoOpenedAt > 0.3 { closeUndoWindow() }
+            return
+        }
+        if undoable, activity == .recording, ProcessInfo.processInfo.systemUptime - recordingStart >= Self.minimumTake {
+            finishDictation(cancelled: true)
+            return
+        }
         if isCapturing {
             let generation = activeGenerationID
             let connection = activeClient
@@ -792,6 +818,9 @@ final class SottoDuoController: ObservableObject {
         } else if activity.isBusy, let pending = pendingDictations.last(where: { $0.session == sessionID }) {
             // The text is already in the field; the take settles once its receipt returns.
             guard !pending.inserted else { return }
+            // Already headed to history only; cancelling the server run would lose it.
+            if undoable, pending.gate.state == .discard { return }
+            if undoable, pending.gate.hold() { openUndoWindow(for: pending); return }
             cancelPending(pending)
         } else if let earlier = pendingDictations.last {
             // The HUD shows a settled result or error. Dismissing it must not
@@ -800,6 +829,82 @@ final class SottoDuoController: ObservableObject {
             return
         } else { showCancelled() }
         refreshServer()
+    }
+
+    /// Paste a cancelled take after all, as though it had ended normally.
+    func undoCancellation() {
+        guard let take = undoTake else { return }
+        undoTask?.cancel(); undoTask = nil
+        undoTake = nil
+        undoDeadline = nil
+        if take.session == sessionID { statusMessage = "Transcribing…" }
+        take.gate.decide(true)
+    }
+
+    /// Close the undo window now, keeping the cancelled take in history only.
+    func keepCancelledTake() {
+        closeUndoWindow()
+    }
+
+    private func openUndoWindow(for take: PendingDictation) {
+        hudTask?.cancel()
+        undoTask?.cancel()
+        undoTake = take
+        undoOpenedAt = ProcessInfo.processInfo.systemUptime
+        undoDeadline = Date().addingTimeInterval(Self.undoWindow)
+        statusMessage = "Cancelled. Saving to history."
+        onHUDVisibility?(true)
+        undoTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(Self.undoWindow)) } catch { return }
+            self?.closeUndoWindow()
+        }
+    }
+
+    /// Drops the undo window when its take ends without reaching the gate.
+    private func clearUndo(for take: PendingDictation?) {
+        guard undoTake != nil, take == nil || undoTake === take else { return }
+        undoTask?.cancel(); undoTask = nil
+        undoTake = nil
+        undoDeadline = nil
+    }
+
+    private func closeUndoWindow() {
+        undoTask?.cancel(); undoTask = nil
+        let take = undoTake
+        undoTake = nil
+        undoDeadline = nil
+        guard let take else { return }
+        if take.session == sessionID { statusMessage = "Saving to history…" }
+        take.gate.decide(false)
+    }
+
+    /// Re-runs transcription on a failed or cancelled recording's saved audio.
+    /// The result lands in history only; nothing is pasted.
+    func retryGeneration(_ id: UUID) {
+        // One retry per recording at a time; a second would be rejected and
+        // leave an error over the first one's result.
+        guard serverHealth?.generationRetry == true, retryingGenerationIDs.insert(id).inserted else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            defer { retryingGenerationIDs.remove(id) }
+            do {
+                let connection = try client()
+                replaceGeneration(try await connection.retry(id))
+                let final = try await connection.events(id) { [weak self] record in
+                    await self?.replaceGeneration(record)
+                }
+                replaceGeneration(final)
+                if final.status != .completed { errorMessage = final.error ?? "Transcription failed again." }
+            } catch { errorMessage = error.localizedDescription }
+            refreshServer()
+        }
+    }
+
+    @Published private(set) var retryingGenerationIDs = Set<UUID>()
+
+    private func replaceGeneration(_ record: GenerationRecord) {
+        guard let index = generations.firstIndex(where: { $0.id == record.id }) else { return }
+        generations[index] = record
     }
 
     /// Cancelling the take the HUD shows hands the HUD to earlier work, if any.
@@ -950,7 +1055,7 @@ final class SottoDuoController: ObservableObject {
         djiMicButton.onPress = { [weak self] in self?.receiveDJIMicButton($0) }
         djiMicButton.onDisconnect = { [weak self] id in
             guard let self, isCapturing, recordingTrigger == .dji(id) else { return }
-            cancelDictation()
+            cancelDictation(undoable: false)
         }
         hotkey.onPress = { [weak self] in
             guard let self else { return false }
@@ -959,6 +1064,8 @@ final class SottoDuoController: ObservableObject {
                 // No take started, so a double-tap monitor must not latch.
                 return false
             }
+            // The dictation key doubles as the undo shortcut; no new take, so no latch.
+            if isUndoPending { undoCancellation(); return false }
             return beginDictation(trigger: .keyboard)
         }
         hotkey.onRelease = { [weak self] in
@@ -997,6 +1104,8 @@ final class SottoDuoController: ObservableObject {
         let buttonSource = trigger.buttonTicket == nil ? nil : remoteButtonSource
         stopShortcutCheck()
         guard isServerReady else { showError(serverStatusMessage); refreshServer(); onShowWindow?(); return false }
+        // Starting a new take settles an open undo window: the cancelled take is kept.
+        closeUndoWindow()
         hudTask?.cancel(); errorMessage = nil
         // Confirmed cursor moves matter only to takes that overlap them.
         if pendingDictations.isEmpty { insertionRebases.removeAll() }
@@ -1184,7 +1293,12 @@ final class SottoDuoController: ObservableObject {
         startRecordingTimer()
     }
 
-    private func finishDictation(atLimit: Bool = false) {
+    /// The server rejects shorter recordings, so they are discarded outright.
+    private static let minimumTake: TimeInterval = 0.25
+
+    /// A cancelled take is processed exactly like a finished one, but only
+    /// pasted if the user undoes the cancellation before its window closes.
+    private func finishDictation(atLimit: Bool = false, cancelled: Bool = false) {
         guard isCapturing else { return }
         // A take ended by the duration limit must not leave a double-tap
         // latch behind, matching the failure and cancel paths.
@@ -1194,7 +1308,7 @@ final class SottoDuoController: ObservableObject {
         guard activity == .recording else { cancelDictation(); return }
         let releasedAt = ProcessInfo.processInfo.systemUptime
         destinationTask?.finish()
-        guard releasedAt - recordingStart >= 0.25 else { cancelDictation(); return }
+        guard releasedAt - recordingStart >= Self.minimumTake else { cancelDictation(); return }
         guard let id = activeGenerationID, let connection = activeClient,
               remoteCapture != nil || (uploadTask != nil && uploadPipe != nil) else {
             failSession("This recording has no server session.", cancelServer: true); return
@@ -1208,11 +1322,12 @@ final class SottoDuoController: ObservableObject {
         let clipboardCount = recordingClipboardChangeCount
         let pending = PendingDictation(session: current, id: id, client: connection, upload: uploadTask, pipe: uploadPipe,
                                        capture: remoteCapture, destination: destinationTask, trigger: recordingTrigger,
-                                       buttonSelection: buttonSelectionAtStart)
+                                       buttonSelection: buttonSelectionAtStart, cancelled: cancelled)
         // Usually known at release, so a later take can continue a list in another field.
         let knownDestination: InsertionDestination? = test ? .clipboard : insertionDestination
         pending.target = knownDestination.map { Self.resolve($0, isTest: test, releasedAt: releasedAt) }
         pendingDictations.append(pending)
+        if cancelled { openUndoWindow(for: pending) }
         // Hand this take to the pending entry so a new hold can start immediately.
         activeGenerationID = nil; activeClient = nil; uploadTask = nil; uploadPipe = nil; remoteCapture = nil
         destinationTask = nil; insertionDestination = nil; recordingListHint = nil; recordingInputName = nil
@@ -1229,6 +1344,7 @@ final class SottoDuoController: ObservableObject {
             var capturedAudio: CapturedAudio?
             defer {
                 capturedAudio?.cleanup()
+                clearUndo(for: pending)
                 pending.capture?.cancelMonitoring()
                 if let ticket = pending.trigger?.buttonTicket { remoteButtons?.complete(ticket) }
                 pendingDictations.removeAll { $0 === pending }
@@ -1300,6 +1416,24 @@ final class SottoDuoController: ObservableObject {
                 // Processing and uploads overlap. Clipboard/paste transactions
                 // remain ordered and each keeps its original destination.
                 await precedingDelivery?.value
+                try Task.checkCancellation()
+                // Decide only now, so a take still queued behind another can be cancelled with Undo.
+                guard await pending.gate.consume() else {
+                    // Cancelled and not undone: the transcript stays in history only.
+                    // Nothing is inserted, so later takes need not wait for the receipt.
+                    insertionFinished.continuation.finish()
+                    try? await connection.delivery(id, receipt: DeliveryReceipt(status: "cancelled",
+                        message: "Cancelled before pasting. Kept in history."))
+                    try Task.checkCancellation()
+                    if sessionID == current {
+                        lastDeliveryStatus = .kept
+                        activity = .success
+                        statusMessage = "Saved to history"
+                        dismissHUDAfter(seconds: 1.2)
+                    }
+                    refreshServer()
+                    return
+                }
                 await waitForCaptureRelease()
                 try Task.checkCancellation()
                 let destination = rebasedDestination(resolved)
@@ -1479,6 +1613,7 @@ final class SottoDuoController: ObservableObject {
     }
 
     private func stopPendingDictations() {
+        clearUndo(for: nil)
         for pending in pendingDictations {
             pending.cancel()
             if pending.shouldCancelServer { Task { try? await pending.client.cancel(pending.id) } }
@@ -1597,7 +1732,7 @@ final class SottoDuoController: ObservableObject {
                 case .stop:
                     if recordingTrigger == .remoteButton(ticket) { finishDictation() }
                 case .cancel:
-                    if recordingTrigger == .remoteButton(ticket) { cancelDictation() }
+                    if recordingTrigger == .remoteButton(ticket) { cancelDictation(undoable: false) }
                     else if let pending = pendingDictations.first(where: { $0.trigger == .remoteButton(ticket) }),
                             pending.shouldCancelServer { cancelPending(pending) }
                 }
@@ -1607,7 +1742,7 @@ final class SottoDuoController: ObservableObject {
                 for pending in pendingDictations where pending.trigger?.buttonTicket != nil && pending.shouldCancelServer {
                     cancelPending(pending)
                 }
-                if recordingTrigger?.buttonTicket != nil { cancelDictation() }
+                if recordingTrigger?.buttonTicket != nil { cancelDictation(undoable: false) }
             }, changed: { [weak self] in self?.remoteButtonState = $0 })
         remoteButtons?.start()
     }

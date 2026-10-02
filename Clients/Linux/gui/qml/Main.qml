@@ -126,6 +126,9 @@ ApplicationWindow {
         }
     }
     function messageFor(phase) {
+        // A cancelled take keeps its recording or processing phase while it can be undone.
+        if (activity.undoUntil)
+            return "Not pasted";
         if (phase === "preparing")
             return "Starting microphone…";
         if (phase === "recording")
@@ -137,7 +140,7 @@ ApplicationWindow {
         if (phase === "failed")
             return "Dictation interrupted";
         if (phase === "cancelled")
-            return "Dictation cancelled";
+            return activity.kept ? "Saved to history" : "Dictation cancelled";
         if (phase === "completed")
             return result && result.delivery === "inserted" ? "Inserted at your cursor" : result && result.delivery === "uncertain" ? "Check your text field" : "Text ready to copy";
         return triggerVerb + " to dictate.";
