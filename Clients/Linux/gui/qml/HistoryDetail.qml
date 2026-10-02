@@ -18,6 +18,45 @@ ColumnLayout {
     property string copiedID: ""
     onRecordChanged: copiedID = ""
 
+    // One label table for statuses both clients write; Mac uses the same words.
+    function statusLabel(status) {
+        return ({
+            receiving: "Recording",
+            queued: "Waiting to transcribe",
+            transcribing: "Transcribing",
+            proofreading: "Cleaning up text",
+            completed: "Done",
+            failed: "Transcription failed",
+            cancelled: "Cancelled"
+        })[status] || status;
+    }
+    function deliveryLabel(delivery) {
+        if (!delivery)
+            return "";
+        return ({
+            inserted: "Pasted",
+            listUpdated: "Pasted",
+            copied: "Copied",
+            unconfirmed: "Check the field",
+            failed: "Couldn't paste",
+            tested: "Microphone test",
+            cancelled: "Not pasted",
+            none: "Not pasted"
+        })[delivery.status] || "";
+    }
+    function cleanupLabel(processing) {
+        const status = processing.status || (processing.enabled ? "applied" : "disabled");
+        return ({
+            disabled: "Text cleanup off",
+            unavailable: "Text cleanup unavailable",
+            applied: "Text cleaned up",
+            unchanged: "Text cleanup made no changes",
+            rejected: "Text cleanup skipped",
+            failed: "Text cleanup failed",
+            skipped: "Text cleanup skipped"
+        })[status] || "Text cleanup";
+    }
+
     // A zero budget means the engine has no vocabulary prompting at all.
     function hintText(title, hints) {
         if (!hints || !hints.omittedTerms.length)
@@ -93,7 +132,7 @@ ColumnLayout {
         visible: !!root.record
         color: root.ui.c.muted
         font.pixelSize: 12
-        text: root.record ? root.record.device.name + " · " + (root.record.importedSource ? "Wispr Flow · " : "SottoDuo · ") + root.record.status + (root.duration() ? " · " + root.duration() : "") + " · Delivery: " + (root.record.delivery ? root.record.delivery.status : "not reported") : ""
+        text: root.record ? [root.record.device.name, root.record.importedSource ? "Wispr Flow" : "SottoDuo", root.statusLabel(root.record.status), root.duration(), root.deliveryLabel(root.record.delivery)].filter(part => !!part).join(" · ") : ""
     }
 
     ScrollView {
@@ -167,14 +206,14 @@ ColumnLayout {
                 ui: root.ui
                 Layout.fillWidth: true
                 visible: !!text
-                text: root.record ? root.record.formattingRejectionReason || "" : ""
+                text: root.record && root.record.formattingRejectionReason ? "List formatting skipped: " + root.record.formattingRejectionReason : ""
             }
 
             SLabel {
                 ui: root.ui
                 Layout.fillWidth: true
                 visible: !!text
-                text: root.processing ? "Text cleanup: " + (root.processing.status || (root.processing.enabled ? "enabled" : "disabled")) + (root.processing.reason ? "\n" + root.processing.reason : "") : ""
+                text: root.processing ? root.cleanupLabel(root.processing) + (root.processing.reason ? ": " + root.processing.reason : "") : ""
             }
 
             CheckBox {

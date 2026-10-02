@@ -213,7 +213,7 @@ struct HistoryPage: View {
                     Label(sourceLabel(selected),
                           systemImage: selected.importedSource == nil ? "laptopcomputer" : "square.and.arrow.down")
                     if selected.importedSource == nil { Text(statusLabel(selected.status)) }
-                    if selected.delivery?.status == "cancelled" { Text("Not pasted") }
+                    if let delivery = deliveryLabel(selected.delivery?.status) { Text(delivery) }
                     if let sourceStatus = selected.importedSource?.sourceStatus, !sourceStatus.isEmpty {
                         Text("Flow status: \(sourceStatus)")
                     }
@@ -255,11 +255,11 @@ struct HistoryPage: View {
                                 .foregroundStyle(SottoDuoPalette.muted)
                         }
                         if let reason = selected.formattingRejectionReason {
-                            Text(reason).font(.caption).foregroundStyle(SottoDuoPalette.warning)
+                            Text("List formatting skipped: \(reason)").font(.caption).foregroundStyle(SottoDuoPalette.warning)
                         }
                         if let processing = selected.textProcessing {
                             if let reason = processing.reason {
-                                Text(reason).font(.caption).foregroundStyle(SottoDuoPalette.warning)
+                                Text("\(cleanupLabel(processing.status)): \(reason)").font(.caption).foregroundStyle(SottoDuoPalette.warning)
                             }
                             if processing.status == .rejected, let proposed = processing.proposedText {
                                 DisclosureGroup("Rejected cleanup") {
@@ -350,12 +350,36 @@ struct HistoryPage: View {
     private func statusLabel(_ status: GenerationStatus) -> String {
         switch status {
         case .receiving: "Recording"
-        case .queued: "Queued"
+        case .queued: "Waiting to transcribe"
         case .transcribing: "Transcribing"
-        case .proofreading: "Proofreading"
-        case .completed: "Completed"
-        case .failed: "Failed"
+        case .proofreading: "Cleaning up text"
+        case .completed: "Done"
+        case .failed: "Transcription failed"
         case .cancelled: "Cancelled"
+        }
+    }
+
+    /// One label table for the delivery statuses both clients write.
+    private func deliveryLabel(_ status: String?) -> String? {
+        switch status {
+        case "inserted", "listUpdated": "Pasted"
+        case "copied": "Copied"
+        case "unconfirmed": "Check the field"
+        case "failed": "Couldn't paste"
+        case "tested": "Microphone test"
+        case "cancelled", "none": "Not pasted"
+        default: nil
+        }
+    }
+
+    private func cleanupLabel(_ status: TextProcessingRecord.Status?) -> String {
+        switch status {
+        case .disabled: "Text cleanup off"
+        case .unavailable: "Text cleanup unavailable"
+        case .applied: "Text cleaned up"
+        case .unchanged: "Text cleanup made no changes"
+        case .failed: "Text cleanup failed"
+        case .rejected, .skipped, nil: "Text cleanup skipped"
         }
     }
 
