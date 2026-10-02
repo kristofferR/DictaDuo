@@ -860,10 +860,8 @@ export class GenerationService {
    * Soniox stream cannot be replayed.
    */
   async retry(id: string) {
-    const state = await this.inference.readiness(
-      false,
-      recognitionEngine(this.getInternal(id).settings.preferences, this.engines),
-    );
+    const engine = recognitionEngine(this.getInternal(id).settings.preferences, this.engines);
+    const state = await this.inference.readiness(false, engine);
     return this.mutate(async () => {
       if (this.stopping)
         throw new ServiceError(503, "server_stopping", "The server is shutting down.");
@@ -881,7 +879,8 @@ export class GenerationService {
           "Only failed or cancelled recordings can be transcribed again.",
         );
       if (!state.available) {
-        this.beginWarmup();
+        // The take's frozen engine may differ from the shared preference.
+        this.beginWarmup(engine);
         throw new ServiceError(503, "server_unavailable", state.message);
       }
       // Keep the saved audio and metadata, but drop the previous run's output.
@@ -1568,17 +1567,13 @@ export class GenerationService {
     ])
       await rm(join(this.directory(id), name), { force: true }).catch(() => {});
   }
-  private beginWarmup() {
+  private beginWarmup(engine = recognitionEngine(this.preferences.preferences, this.engines)) {
     if (this.stopping || this.warming || this.processingControllers.size) return;
     this.warming = true;
     const controller = new AbortController();
     this.warmController = controller;
     this.warmTask = this.inference
-      .warmUp(
-        this.preferences.preferences.textCorrectionEnabled,
-        controller.signal,
-        recognitionEngine(this.preferences.preferences, this.engines),
-      )
+      .warmUp(this.preferences.preferences.textCorrectionEnabled, controller.signal, engine)
       .catch(() => {})
       .finally(() => {
         this.warming = false;

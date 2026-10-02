@@ -1096,10 +1096,11 @@ export class RecordingService {
    * real time. The result lands in history; nothing is delivered.
    */
   async retry(id: string) {
-    const readiness = await this.inference.readiness(
-      false,
-      recognitionEngine(this.lookup(id).snapshot.settings.preferences, this.inference.engines),
+    const engine = recognitionEngine(
+      this.lookup(id).snapshot.settings.preferences,
+      this.inference.engines,
     );
+    const readiness = await this.inference.readiness(false, engine);
     return this.mutate(async () => {
       this.assertRunning();
       const manifest = copy(this.lookup(id));
@@ -1112,7 +1113,11 @@ export class RecordingService {
           "not_retryable",
           "Only failed recordings with saved audio can be transcribed again.",
         );
-      if (!readiness.available) throw failure("server_unavailable", readiness.message, 503);
+      if (!readiness.available) {
+        // Verify and load the take's engine so a later retry can run.
+        void this.inference.warmUp(false, undefined, engine).catch(() => {});
+        throw failure("server_unavailable", readiness.message, 503);
+      }
       manifest.snapshot.processingState = "queued";
       delete manifest.snapshot.error;
       manifest.snapshot.recognition = { provider: "whisper" };

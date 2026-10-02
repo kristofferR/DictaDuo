@@ -20,8 +20,23 @@ afterEach(async () => {
 class Engines extends FakeInference {
   calls: { engine: RecognitionEngine; terms: string[] }[] = [];
   proofLanguages: string[] = [];
+  /** Engines whose model is unverified, as after a restart, until warmed. */
+  cold = new Set<RecognitionEngine>();
+  warmed: RecognitionEngine[] = [];
+  failures = 0;
   constructor(readonly engines: readonly RecognitionEngine[] = ["whisper", "parakeet"]) {
     super();
+  }
+  override async readiness(_proofreading?: boolean, engine: RecognitionEngine = "whisper") {
+    return { ...(await super.readiness()), available: !this.cold.has(engine) };
+  }
+  override async warmUp(
+    _proofreading?: boolean,
+    _signal?: AbortSignal,
+    engine?: RecognitionEngine,
+  ) {
+    this.warmed.push(engine ?? "whisper");
+    this.cold.delete(engine ?? "whisper");
   }
   override async transcribe(
     path: string,
@@ -31,6 +46,7 @@ class Engines extends FakeInference {
     _signal?: AbortSignal,
     engine: RecognitionEngine = "whisper",
   ) {
+    if (this.failures-- > 0) throw new Error("Helper exited.");
     this.calls.push({ engine, terms });
     const speech = await super.transcribe(path, language, terms, progress);
     return { ...speech, language: engine === "parakeet" ? "auto" : "en" };
@@ -201,11 +217,101 @@ test("a selection whose engine was uninstalled runs on Whisper and says so", asy
   expect(inference.calls.map((call) => call.engine)).toEqual(["whisper"]);
 });
 
-test("v1 responses include engine fields only for clients that request them", async () => {
-  const { service } = await open();
+async function until(condition: () => boolean | Promise<boolean>) {
+  for (let count = 0; !(await condition()); count++) {
+    if (count > 400) throw new Error("Condition was not met.");
+    await Bun.sleep(5);
+  }
+}
+
+test("retrying a take after a restart warms the take's engine, not the preference", async () => {
+  const { service, inference } = await open();
   await select(service, "parakeet");
-  const app = createHTTPServer(service);
-  cleanups.push(() => app.close());
+  const record = await service.create({
+    requestID: randomUUID(),
+    device: { id: "fixture", name: "Test Mac" },
+    mode: "test",
+  });
+  await service.appendAudio(
+    record.id,
+    "inference",
+    0,
+    { sampleRate: 16000, channels: 1 },
+    Buffer.alloc(16_000),
+  );
+  inference.failures = 2;
+  await service.finish(record.id, { inferenceFrames: 4000 });
+  await until(async () => (await service.get(record.id)).status === "failed");
+  await select(service, "whisper");
+  inference.cold.add("parakeet");
+  await expect(service.retry(record.id)).rejects.toMatchObject({ code: "server_unavailable" });
+  await until(() => inference.warmed.includes("parakeet"));
+  expect((await service.retry(record.id)).status).toBe("queued");
+  await until(async () => (await service.get(record.id)).status === "completed");
+  expect(inference.calls.map((call) => call.engine)).toEqual(["parakeet"]);
+});
+
+test("retrying a recording session warms the session's engine", async () => {
+  const inference = new Engines();
+  const { service, path } = await open(inference);
+  await select(service, "parakeet");
+  const recordings = await RecordingService.open(
+    { dataDirectory: path, development: true },
+    inference,
+    { getPreferences: () => service.getPreferences() },
+  );
+  cleanups.push(() => recordings.shutdown());
+  const created = await recordings.create({
+    requestID: randomUUID(),
+    device: { id: "fixture", name: "Test Mac" },
+    mode: "test",
+  });
+  const session = await recordings.resume(created.id);
+  const runID = randomUUID().toUpperCase();
+  const pcm = Buffer.alloc(64_000);
+  await recordings.appendAudio(
+    session.id,
+    {
+      type: "audio",
+      epoch: session.epoch,
+      runID,
+      kind: "inference",
+      sequence: 0,
+      firstFrame: 0,
+      frameCount: 16_000,
+      format: { sampleRate: 16000, channels: 1 },
+      sha256: sha256(pcm),
+    },
+    pcm,
+  );
+  inference.failures = Number.MAX_SAFE_INTEGER;
+  await recordings.stop(session.id, session.epoch, [{ runID, inferenceFrames: 16_000 }]);
+  await until(async () => (await recordings.get(session.id)).processingState === "failed");
+  inference.failures = 0;
+  await select(service, "whisper");
+  inference.cold.add("parakeet");
+  await expect(recordings.retry(session.id)).rejects.toMatchObject({
+    code: "server_unavailable",
+  });
+  await until(() => inference.warmed.includes("parakeet"));
+  expect((await recordings.retry(session.id)).processingState).toBe("queued");
+  await until(async () => (await recordings.get(session.id)).processingState === "completed");
+  expect(inference.calls.every((call) => call.engine === "parakeet")).toBe(true);
+});
+
+test("responses include engine fields only for clients that request them", async () => {
+  const { service, inference, path } = await open();
+  await select(service, "parakeet");
+  const recordings = await RecordingService.open(
+    { dataDirectory: path, development: true },
+    inference,
+    { getPreferences: () => service.getPreferences() },
+  );
+  const app = createHTTPServer(service, undefined, undefined, recordings);
+  cleanups.push(async () => {
+    await app.close();
+    await recordings.shutdown();
+  });
   const headers = { "x-sottoduo-recognition-engine": "engine-v1" };
   const legacy = await app.inject({ url: "/v1/preferences" });
   expect(legacy.body).not.toContain("recognitionEngine");
@@ -219,4 +325,31 @@ test("v1 responses include engine fields only for clients that request them", as
     (await app.inject({ url: "/v1/health", headers })).json(),
   );
   expect(health.recognitionEngines).toEqual(["whisper", "parakeet"]);
+  // v2 recording snapshots carry frozen preferences, negotiated the same way.
+  const create = (extra = {}) =>
+    app.inject({
+      method: "POST",
+      url: "/v2/recordings",
+      headers: extra,
+      payload: {
+        requestID: randomUUID(),
+        device: { id: "fixture", name: "Test Mac" },
+        mode: "test",
+      },
+    });
+  const strict = await create();
+  expect(strict.statusCode).toBe(201);
+  expect(strict.body).not.toContain("recognitionEngine");
+  // A settled session's event stream ends after its snapshot.
+  const id = strict.json().id;
+  expect(
+    (await app.inject({ method: "POST", url: `/v2/recordings/${id}/discard` })).body,
+  ).not.toContain("recognitionEngine");
+  const events = await app.inject({ url: `/v2/recordings/${id}/events` });
+  expect(events.body).toContain(id);
+  expect(events.body).not.toContain("recognitionEngine");
+  const aware = await create(headers);
+  expect(
+    validateBody("RecordingSnapshot", aware.json()).settings.preferences.recognitionEngine,
+  ).toBe("parakeet");
 });

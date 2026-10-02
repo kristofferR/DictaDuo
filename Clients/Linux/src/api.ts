@@ -44,7 +44,7 @@ export class API {
         Authorization: `Bearer ${this.token}`,
         ...(destinationOwner ? { "X-SottoDuo-Destination-Owner": destinationOwner } : {}),
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-        // Legacy routes negotiate these fields; recording routes ignore the headers.
+        // Legacy routes negotiate these fields; recording routes negotiate only the engine.
         "X-SottoDuo-Capture": "capture-v1",
         "X-SottoDuo-Recognition": "streaming-v1",
         "X-SottoDuo-Recognition-Engine": "engine-v1",

@@ -52,7 +52,7 @@ Server-attached microphones record durable recording sessions through the [remot
 
 ## Shared preferences
 
-Send `X-SottoDuo-Recognition: streaming-v1` to receive the optional recognition fields in JSON and NDJSON. Without this header, responses retain the legacy v1 shape for strict older clients. Likewise, send `X-SottoDuo-Recognition-Engine: engine-v1` to receive `recognitionEngine` in preferences and `recognitionEngines` in health.
+Send `X-SottoDuo-Recognition: streaming-v1` to receive the optional recognition fields in JSON and NDJSON. Without this header, responses retain the legacy v1 shape for strict older clients. Likewise, send `X-SottoDuo-Recognition-Engine: engine-v1` to receive `recognitionEngine` in preferences and `recognitionEngines` in health. Recording session responses, events and WebSocket snapshots negotiate this header too.
 
 GET/PUT use `{ "revision": N, "preferences": { ... } }`. A save must include the current revision; successful validation returns the incremented snapshot. Active generations keep their admission-time snapshot.
 
