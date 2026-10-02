@@ -65,18 +65,14 @@ export class ClientRuntime {
   async close() {
     this.changing = true;
     const current = this.current;
-    await Promise.allSettled([current?.buttons.close(), current?.controller.cancel()]);
+    await Promise.allSettled([current?.buttons.close(), current?.controller.cancelAll()]);
     await this.output.finish();
   }
   unsafe() {
     this.shortcuts?.check.end();
     void this.current?.buttons.disarm().catch(() => {});
-    const controller = this.current?.controller;
-    if (
-      controller?.busy &&
-      ["preparing", "recording", "processing"].includes(controller.activity.phase)
-    )
-      void controller.cancel().catch(() => {});
+    // A take already delivering keeps its single insertion attempt.
+    void this.current?.controller.cancelAll(false).catch(() => {});
   }
   gui(request: unknown): Promise<unknown> {
     if (

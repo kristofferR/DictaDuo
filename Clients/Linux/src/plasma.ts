@@ -2,6 +2,7 @@ import { pipeWireInputs } from "../../../Server/src/capture/pipewire-discovery.t
 import type { Desktop, Destination } from "./controller.ts";
 import { command } from "./desktop.ts";
 import type { SourceID } from "./sources.ts";
+import { NativeDestinations } from "./native-destination.ts";
 
 const preview = (): Destination => ({ deliver: async () => "preview", close() {} });
 export function isPlasmaDesktop(names: (string | undefined)[]) {
@@ -43,6 +44,7 @@ export class PlasmaDesktop implements Desktop {
   private session?: ReturnType<typeof Bun.spawn>;
   private connected = false;
   private lockedSince = 0;
+  private destinations = new NativeDestinations();
   constructor(private helper: string) {}
 
   async monitorSession(unsafe: () => void): Promise<void> {
@@ -204,88 +206,21 @@ export class PlasmaDesktop implements Desktop {
   async capture(): Promise<Destination> {
     const startedAt = Date.now();
     if (!(await this.unlocked(startedAt))) return preview();
-    let child: ReturnType<typeof Bun.spawn>;
-    try {
-      child = Bun.spawn([this.helper, "focused"], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "ignore",
-      });
-    } catch {
-      return preview();
-    }
-    if (
-      typeof child.stdin === "number" ||
-      !child.stdin ||
-      !(child.stdout instanceof ReadableStream)
-    ) {
-      child.kill();
-      return preview();
-    }
-    const input = child.stdin;
-    const reader = child.stdout.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let closed = false;
-    const close = () => {
-      closed = true;
-      child.kill("SIGKILL");
-    };
-    const line = async (timeout: number) => {
-      const timer = setTimeout(close, timeout);
-      try {
-        while (!buffer.includes("\n")) {
-          const next = await reader.read();
-          if (next.done) throw new Error("Destination helper stopped.");
-          buffer += decoder.decode(next.value, { stream: true });
-          if (buffer.length > 100) throw new Error("Invalid destination helper response.");
-        }
-        const at = buffer.indexOf("\n");
-        const value = buffer.slice(0, at);
-        buffer = buffer.slice(at + 1);
-        return value;
-      } finally {
-        clearTimeout(timer);
-      }
-    };
-    try {
-      if ((await line(1400)) !== "ready") {
-        close();
-        return preview();
-      }
-    } catch {
-      close();
-      return preview();
-    }
-    let attempted = false;
+    const destination = await this.destinations.capture(this.helper, "focused");
     return {
-      close,
-      deliver: async (text) => {
-        if (
-          /[\u0000-\u0008\u000b-\u001f\u007f]/.test(text) ||
-          attempted ||
-          closed ||
-          !(await this.unlocked(startedAt))
-        ) {
-          close();
+      close: () => destination.close(),
+      deliver: async (text, held) => {
+        if (!(await this.unlocked(startedAt))) {
+          destination.close();
           return "preview";
         }
-        attempted = true;
-        try {
-          input.write(JSON.stringify(text) + "\n");
-          await input.flush();
-          const result = await line(1500);
-          return result === "inserted" || result === "preview" ? result : "uncertain";
-        } catch {
-          return "uncertain";
-        } finally {
-          close();
-        }
+        return destination.deliver(text, held);
       },
     };
   }
 
   close(): void {
+    this.destinations.invalidate();
     this.connected = false;
     this.screen?.kill();
     this.session?.kill();

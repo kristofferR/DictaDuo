@@ -9,7 +9,6 @@ type Registration = { id: string; owner: string; acknowledgement?: string };
 export class ButtonDestinationClient {
   private registration?: Registration;
   private epoch = 0;
-  private keyboardRegistration?: Registration;
   private closed = false;
   private pending?: Promise<void>;
   private lastTick = Date.now();
@@ -39,16 +38,17 @@ export class ButtonDestinationClient {
   }
   start() {
     this.controller.onStart = (ticket) => {
-      this.keyboardRegistration = ticket ? undefined : this.registration;
+      // Each keyboard take remembers the registration it began under.
+      return ticket ? undefined : this.registration;
     };
-    this.controller.onComplete = (id, ticket, succeeded) => {
+    this.controller.onComplete = (id, ticket, succeeded, keyboardRegistration) => {
       const registration = this.registration;
       if (!registration) return;
       if (ticket)
         void this.request(registration, "/complete", { takeID: ticket }).catch(() => {
           if (this.registration === registration) return this.disarm();
         });
-      else if (succeeded && id && this.keyboardRegistration === registration)
+      else if (succeeded && id && keyboardRegistration === registration)
         void this.select(id).catch(() => {});
     };
     this.pending ??= this.loop();
@@ -71,7 +71,8 @@ export class ButtonDestinationClient {
       this.registration !== registration
     )
       throw new ClientNotice("The button destination is not connected and unlocked.");
-    if (this.controller.busy)
+    // A completed keyboard take may reselect while a newer take is still queued.
+    if (!generationID && this.controller.busy)
       throw new ClientNotice("Finish dictation before changing its destination.");
     if (!this.state?.available)
       throw new ClientNotice(
@@ -83,7 +84,6 @@ export class ButtonDestinationClient {
     ++this.epoch;
     const registration = this.registration;
     this.registration = undefined;
-    this.keyboardRegistration = undefined;
     this.state = undefined;
     await this.controller.cancelButton();
     if (registration)

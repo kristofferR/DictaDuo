@@ -21,7 +21,7 @@ async function until(predicate: () => boolean | Promise<boolean>) {
     await Bun.sleep(5);
   }
 }
-async function fixture() {
+async function fixture(inference = new FakeInference()) {
   const sources = (): Source[] =>
     ["dji", "built-in"].map((id) => ({
       identity: { hostID: "desktop", id },
@@ -61,7 +61,7 @@ async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), "sottoduo-linux-test-"));
   const service = await GenerationService.open(
     { dataDirectory: directory, development: true, captureProvider: provider },
-    new FakeInference(),
+    inference,
   );
   let recognitionHeader: string | undefined;
   let feedbackHeader: string | undefined;
@@ -109,7 +109,7 @@ async function fixture() {
     { hostID: "desktop", mode: "automatic", priority: [{ hostID: "desktop", id: "dji" }] },
   );
   cleanup.push(async () => {
-    await controller.cancel();
+    await controller.cancelAll();
     await controller.settled();
   });
   return {
@@ -610,4 +610,364 @@ test("GUI microphone tests retain a preview without attempting desktop insertion
   expect((await f.api.get(f.controller.result!.id)).mode).toBe("test");
   expect(f.deliveries()).toBe(0);
   expect(selected).toBe(false);
+});
+
+function heldInference() {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let calls = 0;
+  class HeldInference extends FakeInference {
+    override async transcribe(...args: Parameters<FakeInference["transcribe"]>) {
+      if (calls++ === 0) await held;
+      return super.transcribe(...args);
+    }
+  }
+  return { inference: new HeldInference(), release: () => release() };
+}
+function track(f: Awaited<ReturnType<typeof fixture>>) {
+  const started: string[] = [],
+    delivered: string[] = [];
+  const start = f.api.start.bind(f.api),
+    delivery = f.api.delivery.bind(f.api);
+  f.api.start = async (...args) => {
+    const record = await start(...args);
+    started.push(record.id);
+    return record;
+  };
+  f.api.delivery = async (...args) => {
+    delivered.push(args[0]);
+    return delivery(...args);
+  };
+  return { started, delivered };
+}
+async function record(f: Awaited<ReturnType<typeof fixture>>) {
+  await until(() => f.controller.start());
+  await until(() => f.controller.state.startsWith("recording"));
+}
+
+test("a sealed take processes while the next take records, and deliveries keep recording order", async () => {
+  const held = heldInference();
+  const f = await fixture(held.inference);
+  const ids = track(f);
+  await record(f);
+  f.controller.stop();
+  await record(f);
+  expect(f.controller.busy).toBe(true);
+  f.controller.stop();
+  await until(() => ids.started.length === 2);
+  await Bun.sleep(400);
+  expect(f.deliveries()).toBe(0);
+  held.release();
+  await f.controller.settled();
+  expect(ids.delivered).toEqual(ids.started);
+  expect(f.controller.result?.id).toBe(ids.started[1]);
+  expect(f.controller.busy).toBe(false);
+});
+
+test("a completed take waits for a newer held take before delivering", async () => {
+  const f = await fixture();
+  const ids = track(f);
+  await record(f);
+  f.controller.stop();
+  await record(f);
+  await until(async () => (await f.api.get(ids.started[0]!)).status === "completed");
+  await Bun.sleep(400);
+  expect(f.deliveries()).toBe(0);
+  expect(f.controller.state.startsWith("recording")).toBe(true);
+  f.controller.stop();
+  await f.controller.settled();
+  expect(ids.delivered).toEqual(ids.started);
+});
+
+test("an insertion deferred for a newer held take is retried after its release", async () => {
+  const f = await fixture();
+  const ids = track(f);
+  const statuses: string[] = [];
+  const delivery = f.api.delivery.bind(f.api);
+  f.api.delivery = async (...args) => {
+    statuses.push(args[2]);
+    return delivery(...args);
+  };
+  let raced = false;
+  // The next take starts while the destination's own delivery checks are pending.
+  f.desktop.capture = async () => ({
+    close() {},
+    deliver: async (_text, held = () => false) => {
+      if (!raced) {
+        raced = true;
+        await record(f);
+      }
+      return held() ? "held" : "inserted";
+    },
+  });
+  await record(f);
+  f.controller.stop();
+  await until(() => raced && f.controller.state.startsWith("recording"));
+  await Bun.sleep(200);
+  expect(ids.delivered).toEqual([]);
+  f.controller.stop();
+  await f.controller.settled();
+  expect(ids.delivered).toEqual(ids.started);
+  expect(statuses).toEqual(["inserted", "inserted"]);
+});
+
+test("later insertions do not wait for an earlier delivery receipt", async () => {
+  const held = heldInference();
+  const f = await fixture(held.inference);
+  const ids = track(f);
+  const saveDelivery = f.api.delivery.bind(f.api);
+  let release!: () => void;
+  const receipt = new Promise<void>((resolve) => (release = resolve));
+  let waiting = false;
+  f.api.delivery = async (...args) => {
+    if (args[0] === ids.started[0]) {
+      waiting = true;
+      await receipt;
+    }
+    return saveDelivery(...args);
+  };
+  try {
+    await record(f);
+    f.controller.stop();
+    await record(f);
+    f.controller.stop();
+    await until(async () => (await f.api.get(ids.started[1]!)).capture?.state === "sealed");
+    held.release();
+    await until(() => waiting && f.deliveries() === 2);
+    expect(f.controller.result?.id).toBe(ids.started[1]);
+  } finally {
+    held.release();
+    release();
+  }
+  await f.controller.settled();
+  expect(ids.delivered).toEqual([ids.started[1]!, ids.started[0]!]);
+});
+
+test("server queue wait does not consume a take's processing deadline", async () => {
+  const f = await fixture();
+  const stop = f.api.stop.bind(f.api),
+    get = f.api.get.bind(f.api);
+  f.api.stop = async (...args) => ({ ...(await stop(...args)), status: "queued" });
+  let polls = 0;
+  f.controller.processingTimeoutMS = 200;
+  f.api.get = async (...args) => {
+    const result = await get(...args);
+    // Stay queued for longer than the processing deadline.
+    if (++polls <= 3) return { ...result, status: "queued" };
+    return result;
+  };
+  await record(f);
+  f.controller.stop();
+  await f.controller.settled();
+  expect(polls).toBe(4);
+  expect(f.deliveries()).toBe(1);
+  expect(f.controller.result?.delivery).toBe("inserted");
+});
+
+test("cancelAll revokes every queued destination before slow server cancellation", async () => {
+  for (const includeDelivery of [true, false]) {
+    const held = heldInference();
+    const f = await fixture(held.inference);
+    const ids = track(f);
+    const capture = f.desktop.capture,
+      cancel = f.api.cancel.bind(f.api);
+    let closed = 0;
+    f.desktop.capture = async () => {
+      const destination = await capture();
+      let revoked = false;
+      return {
+        deliver: destination.deliver,
+        close() {
+          if (!revoked) closed++;
+          revoked = true;
+          destination.close();
+        },
+      };
+    };
+    let release!: () => void;
+    const cleanupGate = new Promise<void>((resolve) => (release = resolve));
+    f.api.cancel = async (...args) => {
+      await cleanupGate;
+      return cancel(...args);
+    };
+    let cancelling: Promise<void> | undefined;
+    try {
+      await record(f);
+      f.controller.stop();
+      await record(f);
+      cancelling = f.controller.cancelAll(includeDelivery);
+      expect(closed).toBe(2);
+      held.release();
+      await until(async () => (await f.api.get(ids.started[0]!)).status === "completed");
+      await Bun.sleep(350);
+      expect(f.deliveries()).toBe(0);
+    } finally {
+      held.release();
+      release();
+      await cancelling;
+    }
+    await f.controller.settled();
+    expect(f.deliveries()).toBe(0);
+  }
+});
+
+test("a take started during the delivery unlock check holds earlier insertion until release", async () => {
+  const f = await fixture();
+  const ids = track(f);
+  await record(f);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let checking = false;
+  let checked = false;
+  const unlocked = f.desktop.unlocked;
+  f.desktop.unlocked = async (since) => {
+    if (!checking && f.controller.activity.phase === "processing") {
+      checking = true;
+      await gate;
+      checked = true;
+    }
+    return unlocked(since);
+  };
+  try {
+    f.controller.stop();
+    await until(() => checking);
+    await record(f);
+    release();
+    await until(() => checked);
+    await Bun.sleep(100);
+    expect(f.deliveries()).toBe(0);
+    expect(f.controller.activity.phase).toBe("recording");
+    f.controller.stop();
+    await f.controller.settled();
+    expect(ids.delivered).toEqual(ids.started);
+  } finally {
+    release();
+  }
+});
+
+test("cancelling the newest take keeps an earlier processing take", async () => {
+  const held = heldInference();
+  const f = await fixture(held.inference);
+  const ids = track(f);
+  await record(f);
+  f.controller.stop();
+  await record(f);
+  await f.controller.cancel();
+  expect(f.controller.state).toBe("Cancelled · earlier dictation is still processing");
+  expect(f.controller.activity.phase).toBe("processing");
+  held.release();
+  await f.controller.settled();
+  expect(ids.delivered).toEqual([ids.started[0]!]);
+  expect((await f.api.get(ids.started[1]!)).status).toBe("cancelled");
+});
+
+test("a repeated cancel during slow cleanup keeps the earlier processing take", async () => {
+  const held = heldInference();
+  const f = await fixture(held.inference);
+  const ids = track(f);
+  const cancel = f.api.cancel.bind(f.api);
+  let release!: () => void;
+  const cleanupGate = new Promise<void>((resolve) => (release = resolve));
+  f.api.cancel = async (...args) => {
+    await cleanupGate;
+    return cancel(...args);
+  };
+  try {
+    await record(f);
+    f.controller.stop();
+    await record(f);
+    const first = f.controller.cancel();
+    const repeated = f.controller.cancel();
+    release();
+    await Promise.all([first, repeated]);
+    expect(f.controller.activity.phase).toBe("processing");
+    held.release();
+    await f.controller.settled();
+    expect(ids.delivered).toEqual([ids.started[0]!]);
+  } finally {
+    held.release();
+    release();
+  }
+});
+
+test("a foreground capture or admission failure restores the earlier take's activity and feedback", async () => {
+  for (const failure of ["capture", "admission"]) {
+    const held = heldInference();
+    const f = await fixture(held.inference);
+    await record(f);
+    const feedback = f.controller.feedback;
+    const activity = f.controller.activity;
+    f.controller.stop();
+    await until(() => f.controller.activity.phase === "processing");
+    // A second activation is admitted once the first take has been sealed.
+    if (failure === "capture")
+      f.desktop.capture = async () => {
+        throw new Error("Destination unavailable");
+      };
+    else
+      f.api.start = async () => {
+        throw new Error("Admission unavailable");
+      };
+    try {
+      await until(() => f.controller.start());
+      await until(() => f.notices.some((notice) => notice.startsWith("Capture failed")));
+      await until(() => f.controller.state === "processing");
+      expect(f.controller.busy).toBe(true);
+      expect(f.controller.activity).toEqual({ ...activity, phase: "processing" });
+      expect(f.controller.feedback).toBe(feedback);
+    } finally {
+      held.release();
+    }
+    await f.controller.settled();
+    expect(f.deliveries()).toBe(1);
+  }
+});
+
+test("an earlier preview notifies about recovery while the newer take owns the overlay", async () => {
+  const held = heldInference();
+  const f = await fixture(held.inference);
+  const ids = track(f);
+  f.delivery("preview");
+  await record(f);
+  f.controller.stop();
+  await record(f);
+  f.controller.stop();
+  await until(async () => (await f.api.get(ids.started[1]!)).capture?.state === "sealed");
+  held.release();
+  await f.controller.settled();
+  expect(f.notices).toContain(
+    "Earlier dictation: Text ready. Use sottoduo result or sottoduo copy.",
+  );
+  expect(ids.delivered).toEqual(ids.started);
+});
+
+test("a completed take awaiting its receipt does not retake the overlay", async () => {
+  const f = await fixture();
+  const modes = ["preview", "inserted"] as const;
+  let captures = 0;
+  f.desktop.capture = async () => {
+    const mode = modes[captures++]!;
+    return { close() {}, deliver: async () => mode };
+  };
+  let release!: () => void;
+  const receipt = new Promise<void>((resolve) => (release = resolve));
+  const delivery = f.api.delivery.bind(f.api);
+  let receipts = 0;
+  f.api.delivery = async (...args) => {
+    if (receipts++ === 0) await receipt;
+    return delivery(...args);
+  };
+  let completed = 0;
+  f.controller.onComplete = () => completed++;
+  await record(f);
+  f.controller.stop();
+  await until(() => receipts === 1);
+  await record(f);
+  f.controller.stop();
+  await until(() => completed === 1);
+  expect(f.controller.state).toBe("Text inserted");
+  expect(f.controller.result?.delivery).toBe("inserted");
+  release();
+  await f.controller.settled();
+  expect(f.controller.state).toBe("Text inserted");
 });
