@@ -190,9 +190,9 @@ extension ServerClient {
                                 body: Self.encode(StopCaptureRequest(continuationID: continuationID)), timeout: 6)
     }
     /// Fixes the take's continuation, or none, so processing need not wait for the server's hold.
-    func setCaptureContext(_ id: UUID, continuationID: UUID?) async throws {
+    func setCaptureContext(_ id: UUID, continuationID: UUID?, timeout: TimeInterval = 12) async throws {
         try await send(path: "v2/recordings/\(id)/context", method: "POST",
-                       body: Self.encode(StopCaptureRequest(continuationID: continuationID)))
+                       body: Self.encode(StopCaptureRequest(continuationID: continuationID)), timeout: timeout)
     }
     func health() async throws -> ServerHealth { try await json(path: "v1/health") }
     func preferences() async throws -> PreferencesSnapshot { try await json(path: "v1/preferences") }

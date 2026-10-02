@@ -959,16 +959,16 @@ final class SottoDuoController: ObservableObject {
             let connection = activeClient
             let shouldCancel = remoteCapture?.shouldCancelServer ?? true
             if let spool = activeSpool {
-                // Explicit discard waits for the writer to close before removing
+                // Explicit discard waits for the writer to close before tombstoning
                 // files. Interruption and quit take a separate preservation path.
                 recorder.stopAcceptingAudio()
                 let stopped = recorder.stopCapture()
                 recorderStopTask = stopped
                 resetSession()
-                Task {
+                Task { [weak self] in
                     _ = try? await stopped.value
-                    try? spool.discard()
-                    if let generation, let connection { try? await connection.discardRecording(generation) }
+                    try? spool.requestDiscard()
+                    self?.finishDiscard(spool)
                 }
             } else {
                 resetSession()
@@ -1106,10 +1106,10 @@ final class SottoDuoController: ObservableObject {
         stopped?.cancel()
         if let spool = pending.spool {
             // Explicit discard: wait for this take's released writer, then remove both copies.
-            Task {
+            Task { [weak self] in
                 _ = try? await stopped?.value
-                try? spool.discard()
-                try? await pending.client.discardRecording(pending.id)
+                try? spool.requestDiscard()
+                self?.finishDiscard(spool)
             }
         } else if pending.shouldCancelServer {
             // A remote stop in flight may already have sealed the audio on the server.
@@ -1582,11 +1582,20 @@ final class SottoDuoController: ObservableObject {
             // Release the server's context hold as soon as the destination is known,
             // so speech is processed while the take records.
             let destinationCapture = destinationTask
+            // The hold starts once the capture is ready; a context sent after it is ignored.
+            let holdDeadline = ProcessInfo.processInfo.systemUptime + Self.remoteContextHold
             recordingContextTask = Task { [weak self] in
                 let destination: InsertionDestination = isTest ? .clipboard : (await destinationCapture?.value ?? .clipboard)
                 guard let self, !Task.isCancelled else { return }
                 let continuationID = continuationID(for: destination, isTest: isTest) { $0.id == created.id }
-                try? await connection.setCaptureContext(created.id, continuationID: continuationID)
+                // Retry transient failures while the hold lasts; a rejection is final.
+                while !Task.isCancelled {
+                    let remaining = holdDeadline - ProcessInfo.processInfo.systemUptime
+                    guard remaining > 0 else { return }
+                    do { try await connection.setCaptureContext(created.id, continuationID: continuationID, timeout: remaining); return }
+                    catch ServerClientError.rejected { return }
+                    catch { try? await Task.sleep(for: .milliseconds(200)) }
+                }
             }
             recordingStart = ProcessInfo.processInfo.systemUptime
             activity = .recording
@@ -1689,6 +1698,8 @@ final class SottoDuoController: ObservableObject {
 
     /// The server rejects shorter recordings, so they are discarded outright.
     private static let minimumTake: TimeInterval = 0.25
+    /// Mirrors the server's context hold for remote captures.
+    private static let remoteContextHold: TimeInterval = 3
 
     /// A cancelled take is processed exactly like a finished one, but only
     /// pasted if the user undoes the cancellation before its window closes.
