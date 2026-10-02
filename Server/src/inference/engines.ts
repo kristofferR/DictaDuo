@@ -20,6 +20,14 @@ export const recognitionEngine = (
   return (installed ?? ["whisper"]).includes(engine) ? engine : "whisper";
 };
 
+/** The engine that recognized a result, by the version its helper reported. */
+export const reportedEngine = (engineVersion: string | undefined): RecognitionEngine | undefined =>
+  engineVersion === undefined
+    ? undefined
+    : engineVersion.startsWith("parakeet.cpp/")
+      ? "parakeet"
+      : "whisper";
+
 /** Provenance for text a local engine recognized. */
 export const localSpeechModel = (engine: RecognitionEngine) => ({
   modelID: engine === "parakeet" ? "parakeet-tdt-0.6b-v3" : "whisper-large-v3-turbo",

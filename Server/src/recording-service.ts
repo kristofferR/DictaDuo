@@ -31,7 +31,12 @@ import type {
 } from "./inference/native-inference.ts";
 import { ServiceError } from "./errors.ts";
 import { InferenceError } from "./inference/inference-error.ts";
-import { detectedLanguage, localSpeechModel, recognitionEngine } from "./inference/engines.ts";
+import {
+  detectedLanguage,
+  localSpeechModel,
+  recognitionEngine,
+  reportedEngine,
+} from "./inference/engines.ts";
 import {
   startSonioxLiveStream,
   type SonioxConfiguration,
@@ -1609,11 +1614,13 @@ export class RecordingService {
                     processingSeconds: assembled.speechSeconds,
                   }
                 : {
+                    // The windows' engine, which a restart may have uninstalled since.
                     ...localSpeechModel(
-                      recognitionEngine(
-                        manifest.snapshot.settings.preferences,
-                        this.inference.engines,
-                      ),
+                      reportedEngine(assembled.speech.engineVersion) ??
+                        recognitionEngine(
+                          manifest.snapshot.settings.preferences,
+                          this.inference.engines,
+                        ),
                     ),
                     modelSHA256: assembled.speech.modelSHA256,
                     engineVersion: assembled.speech.engineVersion,

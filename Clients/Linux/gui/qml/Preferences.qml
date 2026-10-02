@@ -474,7 +474,7 @@ ColumnLayout {
                 }
                 SLabel {
                     ui: root.ui
-                    text: "Whisper audio is always kept. This also saves the original microphone audio for future dictations."
+                    text: "Recognition audio is always kept. This also saves the original microphone audio for future dictations."
                     color: root.ui.c.muted
                     font.pixelSize: 13
                     Layout.fillWidth: true

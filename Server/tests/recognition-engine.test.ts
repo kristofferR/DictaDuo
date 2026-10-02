@@ -49,7 +49,9 @@ class Engines extends FakeInference {
     if (this.failures-- > 0) throw new Error("Helper exited.");
     this.calls.push({ engine, terms });
     const speech = await super.transcribe(path, language, terms, progress);
-    return { ...speech, language: engine === "parakeet" ? "auto" : "en" };
+    return engine === "parakeet"
+      ? { ...speech, language: "auto", engineVersion: "parakeet.cpp/fixture" }
+      : { ...speech, language: "en" };
   }
   override async correct(text: string, _terms?: string[], language = "") {
     this.proofLanguages.push(language);

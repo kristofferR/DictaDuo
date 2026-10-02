@@ -285,7 +285,7 @@ struct ServerPreferencesPage: View {
                 Section {
                     Toggle("Keep original microphone audio", isOn: $draft.keepOriginalAudio)
                         .accessibilityIdentifier("preferences.keep-original")
-                    Text("Whisper audio is always kept. This also saves the original microphone audio for future dictations.")
+                    Text("Recognition audio is always kept. This also saves the original microphone audio for future dictations.")
                         .font(.caption)
                         .foregroundStyle(SottoDuoPalette.muted)
                 } header: { Text("Shared history").textCase(nil) }

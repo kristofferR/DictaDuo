@@ -206,7 +206,11 @@ export class API {
     const response = await fetch(`${this.endpoint}/v2/recordings/${id}/events`, {
       redirect: "error",
       signal,
-      headers: { Authorization: `Bearer ${this.token}`, Accept: "application/x-ndjson" },
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        Accept: "application/x-ndjson",
+        "X-SottoDuo-Recognition-Engine": "engine-v1",
+      },
     });
     if (!response.ok || !response.body) {
       await response.body?.cancel();
