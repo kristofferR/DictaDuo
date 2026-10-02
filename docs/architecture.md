@@ -42,7 +42,9 @@ An additive [remote capture coordinator](remote-capture.md) separates server-hos
 4. The server runs Whisper, mechanical cleanup, dictionary rules, and list formatting. Optional Qwen output passes through dictionary rules and deterministic rewrite checks. Rejection or proofreading failure retains the pre-proofreading text.
 5. NDJSON events carry progress and the saved final result. The client verifies focus/caret safety, makes one delivery attempt, and reports the outcome separately from inference completion.
 
-Interrupted partial uploads expire; a complete upload can finish after the client disconnects. Reconnecting or opening history never pastes an old result. Restarting the server marks unfinished generations failed and retains completed history. There is no offline queue or automatic retry.
+On the Mac, a released take keeps its own connection, destination, and delivery receipt, so a new hold can start while earlier takes upload and process. Deliveries run in recording order and wait while a hold is in progress. Escape cancels the take the HUD shows until its text is inserted; earlier takes keep running.
+
+Interrupted partial uploads expire; a complete upload can finish after the client disconnects. A pending take recovers a briefly interrupted result stream from the saved generation and still delivers once; remote-capture takes do not reconnect. Opening history never pastes an old result. Restarting the server marks unfinished generations failed and retains completed history. There is no offline queue or retry UI; only a sealed take's finish acknowledgement and result stream are retried automatically.
 
 ## Text delivery
 

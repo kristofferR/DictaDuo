@@ -21,9 +21,9 @@ enum DictationTrigger: Equatable {
 
     enum ButtonAction { case start, finish, ignore }
 
-    static func djiButtonAction(deviceID: UInt64, activity: DictationActivity, current: Self?) -> ButtonAction {
+    static func djiButtonAction(deviceID: UInt64, activity: DictationActivity, current: Self?, hasPendingWork: Bool) -> ButtonAction {
         if activity.isCapturing { return current == .dji(deviceID) ? .finish : .ignore }
-        return activity.isBusy ? .ignore : .start
+        return activity.isBusy || hasPendingWork ? .ignore : .start
     }
 }
 
