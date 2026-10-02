@@ -33,6 +33,7 @@
       ]
     },
     "buttonEnabled": true,
+    "activationMode": "hold",
     "muteOutputWhileRecording": false,
     "button": {
       "available": true,

@@ -23,7 +23,7 @@ ColumnLayout {
             radius: 16
             color: root.ui.c.line
             Accessible.role: Accessible.Graphic
-            Accessible.name: portalShortcuts.plasma ? "Hold " + (portalShortcuts.trigger || "your Plasma shortcut") + " to dictate" : root.ui.shortcut.key ? "Hold " + root.ui.shortcut.key + " to dictate" : "Dictation keyboard shortcut"
+            Accessible.name: portalShortcuts.plasma ? root.ui.triggerVerb + " " + (portalShortcuts.trigger || "your Plasma shortcut") + " to dictate" : root.ui.shortcut.key ? root.ui.triggerVerb + " " + root.ui.shortcut.key + " to dictate" : "Dictation keyboard shortcut"
             Rectangle {
                 width: parent.width
                 height: parent.height - 6
@@ -52,7 +52,7 @@ ColumnLayout {
         }
         SLabel {
             ui: root.ui
-            text: root.ui.shortcut.changing ? "Saving shortcut…" : !root.ui.busy && root.ui.shortcutBlocked ? "Checking shortcut…" : root.ui.activity.phase === "completed" ? "Hold to dictate." : root.ui.messageFor(root.ui.activity.phase)
+            text: root.ui.shortcut.changing ? "Saving shortcut…" : !root.ui.busy && root.ui.shortcutBlocked ? "Checking shortcut…" : root.ui.activity.phase === "completed" ? root.ui.triggerVerb + " to dictate." : root.ui.messageFor(root.ui.activity.phase)
             font.pixelSize: 34
             font.weight: Font.DemiBold
             Layout.fillWidth: true

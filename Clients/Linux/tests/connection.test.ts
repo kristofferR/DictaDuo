@@ -9,6 +9,7 @@ import { API } from "../src/api.ts";
 import { ConnectionSettings } from "../src/connection.ts";
 import { parseConfig } from "../src/config.ts";
 import { ClientRuntime } from "../src/runtime.ts";
+import { monotonicMS } from "../src/double-tap.ts";
 import type { Desktop } from "../src/controller.ts";
 import type { Source } from "../src/sources.ts";
 
@@ -193,6 +194,63 @@ test("runtime serializes a delayed press, key release, and GUI shutdown release 
   await Promise.all([press, release, shutdownRelease]);
   expect(checks).toBe(2);
   expect(actions).toEqual(["start", "stop", "stop"]);
+});
+
+test("double-tap mode toggles on a double tap from either shortcut source, never on the test's Stop", async () => {
+  const f = await fixture();
+  const settings = await ConnectionSettings.open("/sottoduo-destination", f.file);
+  const checked = await settings.test({
+    server: f.server,
+    name: "Desktop",
+    accessToken: "fixture-secret",
+  });
+  settings.commit(checked.ticket, checked.hostID);
+  const runtime = new ClientRuntime(settings, f.desktop);
+  cleanup.push(() => runtime.close());
+  runtime.start();
+  const actions: string[] = [];
+  const controller = runtime["current"]!.controller;
+  controller.start = () => (actions.push("start"), true);
+  controller.stop = () => void actions.push("stop");
+  controller.toggle = () => void actions.push("toggle");
+  await runtime.gui({ version: 1, action: "saveActivationMode", mode: "doubleTap" });
+  expect(parseConfig(await Bun.file(f.file).json()).activationMode).toBe("doubleTap");
+  // Hyprland binds, then Plasma portal edges.
+  for (const edge of ["start", "stop", "start", "stop"] as const) await runtime.command(edge);
+  for (const action of ["start", "stop", "start", "stop"])
+    await runtime.gui({ version: 1, action, shortcut: true });
+  expect(actions).toEqual(["toggle", "toggle"]);
+  // A tap during a take does not pair with one after it ends.
+  let busy = true;
+  Object.defineProperty(controller, "busy", { get: () => busy });
+  controller.activity = { phase: "processing", startedAt: 1 };
+  await runtime.command("start");
+  await runtime.command("stop");
+  busy = false;
+  await runtime.command("start");
+  await runtime.command("stop");
+  expect(actions).toEqual(["toggle", "toggle"]);
+  // A slow lock check delays processing, but each portal edge keeps the time it fired.
+  const unlocked = f.desktop.unlocked;
+  f.desktop.unlocked = async (...args) => (await Bun.sleep(600), unlocked(...args));
+  const base = monotonicMS();
+  for (const [action, offset] of [
+    ["start", 0],
+    ["stop", 80],
+    ["start", 200],
+    ["stop", 280],
+  ] as const)
+    await runtime.gui({ version: 1, action, shortcut: true, at: base + offset });
+  f.desktop.unlocked = unlocked;
+  expect(actions).toEqual(["toggle", "toggle", "toggle"]);
+  actions.pop();
+  // The microphone test's Stop button still stops.
+  await runtime.gui({ version: 1, action: "stop" });
+  expect(actions).toEqual(["toggle", "toggle", "stop"]);
+  await runtime.gui({ version: 1, action: "saveActivationMode", mode: "hold" });
+  await runtime.command("start");
+  await runtime.command("stop");
+  expect(actions.slice(3)).toEqual(["start", "stop"]);
 });
 
 test("failed authentication and edited or expired proposals preserve config; new origins require a new token", async () => {

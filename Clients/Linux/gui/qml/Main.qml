@@ -42,6 +42,7 @@ ApplicationWindow {
         })
     property var result: snapshot.result || null
     property var shortcut: snapshot.shortcut || ({})
+    readonly property string triggerVerb: snapshot.activationMode === "doubleTap" ? "Double tap" : "Hold"
     readonly property bool shortcutBlocked: !!shortcut.changing || (!!shortcut.check && !!shortcut.check.blocked)
     property bool shortcutCheckPending: false
     property bool finishShortcutCheckAfterReply: false
@@ -139,7 +140,7 @@ ApplicationWindow {
             return "Dictation cancelled";
         if (phase === "completed")
             return result && result.delivery === "inserted" ? "Inserted at your cursor" : result && result.delivery === "uncertain" ? "Check your text field" : "Text ready to copy";
-        return "Hold to dictate.";
+        return triggerVerb + " to dictate.";
     }
     Component.onCompleted: {
         wasConnected = bridge.connected;

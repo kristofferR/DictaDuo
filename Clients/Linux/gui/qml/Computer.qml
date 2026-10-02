@@ -63,6 +63,29 @@ ScrollView {
             title: "Desktop integration"
             Setting {
                 ui: root.ui
+                title: "Trigger"
+                detail: root.ui.snapshot.activationMode === "doubleTap" ? "Double tap your dictation key to start, and again to stop." : "Hold your dictation key to record; release to transcribe."
+                ComboBox {
+                    objectName: "activationMode"
+                    implicitWidth: 245
+                    Accessible.name: "Trigger"
+                    model: ["Hold to talk", "Double tap to toggle"]
+                    currentIndex: root.ui.snapshot.activationMode === "doubleTap" ? 1 : 0
+                    enabled: bridge.connected && root.ui.snapshot.activationMode !== undefined && !root.ui.busy && !bridge.preview
+                    onActivated: bridge.request("saveActivationMode", {
+                        mode: ["hold", "doubleTap"][currentIndex]
+                    })
+                }
+                Connections {
+                    target: bridge
+                    function onReply(action, data) {
+                        if (action === "saveActivationMode")
+                            bridge.request("snapshot");
+                    }
+                }
+            }
+            Setting {
+                ui: root.ui
                 title: "Shortcuts and text insertion"
                 detail: portalShortcuts.plasma ? "Use your Plasma shortcut while a text field is focused." : "Use your SottoDuo shortcut while a text field is focused."
             }

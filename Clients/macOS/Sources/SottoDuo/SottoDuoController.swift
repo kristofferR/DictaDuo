@@ -108,6 +108,13 @@ final class SottoDuoController: ObservableObject {
             hotkey.key = shortcut
         }
     }
+    @Published var activationMode: HotkeyActivationMode = .hold {
+        didSet {
+            guard activationMode != oldValue else { return }
+            if !applyingConfiguration { configuration.update { $0.activationMode = activationMode.rawValue } }
+            hotkey.mode = activationMode
+        }
+    }
     @Published var launchAtLogin = false {
         didSet {
             guard hasInitialized, !applyingConfiguration, !updatingLogin, launchAtLogin != oldValue else { return }
@@ -268,6 +275,7 @@ final class SottoDuoController: ObservableObject {
         if muteOutputWhileRecording != settings.muteOutputWhileRecording { muteOutputWhileRecording = settings.muteOutputWhileRecording }
         guard !isBusy else { return }
         if let key = HoldKey(rawValue: settings.holdKey), shortcut != key { shortcut = key }
+        if let mode = HotkeyActivationMode(rawValue: settings.activationMode), activationMode != mode { activationMode = mode }
         if launchAtLogin != settings.launchAtLogin { launchAtLogin = settings.launchAtLogin }
         if djiMicButtonEnabled != settings.djiMicButtonEnabled { djiMicButtonEnabled = settings.djiMicButtonEnabled }
     }
@@ -736,6 +744,7 @@ final class SottoDuoController: ObservableObject {
     }
 
     private func resetSession() {
+        hotkey.clearLatchedTake()
         liveTranscript = ""
         if let ticket = recordingTrigger?.buttonTicket { remoteButtons?.complete(ticket) }
         recordingTrigger = nil
@@ -851,9 +860,13 @@ final class SottoDuoController: ObservableObject {
             cancelDictation()
         }
         hotkey.onPress = { [weak self] in
-            guard let self else { return }
-            if isCheckingShortcut { appendShortcutCheck("Shortcut recognized. Recording was intentionally skipped.") }
-            else { beginDictation(trigger: .keyboard) }
+            guard let self else { return false }
+            if isCheckingShortcut {
+                appendShortcutCheck("Shortcut recognized. Recording was intentionally skipped.")
+                // No take started, so a double-tap monitor must not latch.
+                return false
+            }
+            return beginDictation(trigger: .keyboard)
         }
         hotkey.onRelease = { [weak self] in
             guard let self else { return }
@@ -881,12 +894,15 @@ final class SottoDuoController: ObservableObject {
         }
     }
 
-    private func beginDictation(trigger: DictationTrigger) {
-        guard !isBusy, !isShuttingDown else { return }
+    /// Returns whether a take actually started. A double-tap monitor latches
+    /// only on true, so a rejected start cannot leave a phantom recording.
+    @discardableResult
+    private func beginDictation(trigger: DictationTrigger) -> Bool {
+        guard !isBusy, !isShuttingDown else { return false }
         let isTest = trigger == .test
         let buttonSource = trigger.buttonTicket == nil ? nil : remoteButtonSource
         stopShortcutCheck()
-        guard isServerReady else { showError(serverStatusMessage); refreshServer(); onShowWindow?(); return }
+        guard isServerReady else { showError(serverStatusMessage); refreshServer(); onShowWindow?(); return false }
         hudTask?.cancel(); errorMessage = nil
         liveTranscript = ""
         sessionID = UUID()
@@ -968,6 +984,7 @@ final class SottoDuoController: ObservableObject {
                 refreshServer()
             }
         }
+        return true
     }
 
     private func startInput(_ input: AudioInputDevice, session current: UUID, requestID: UUID,
@@ -1057,6 +1074,9 @@ final class SottoDuoController: ObservableObject {
 
     private func finishDictation(atLimit: Bool = false) {
         guard isCapturing else { return }
+        // A take ended by the duration limit must not leave a double-tap
+        // latch behind, matching the failure and cancel paths.
+        hotkey.clearLatchedTake()
         recorder.stopAcceptingAudio()
         if remoteCapture == nil { outputMuter.restore() }
         guard activity == .recording else { cancelDictation(); return }
@@ -1138,6 +1158,9 @@ final class SottoDuoController: ObservableObject {
                 do { try await connection.delivery(id, receipt: receipt) }
                 catch { continuationAnchors.removeAll { $0.generationID == id } }
                 guard sessionID == current, !Task.isCancelled else { return }
+                // A tap made while the take was finishing must not pair with
+                // one made after it, matching the cancel and failure paths.
+                hotkey.clearLatchedTake()
                 capture?.cancelMonitoring(); remoteCapture = nil
                 activeGenerationID = nil; activeClient = nil; self.uploadTask = nil; self.uploadPipe = nil
                 destinationTask = nil; insertionDestination = nil; recordingListHint = nil; recordingInputName = nil

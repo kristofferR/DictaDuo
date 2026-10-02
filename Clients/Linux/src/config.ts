@@ -7,6 +7,8 @@ import { profileFields, type ConfiguredSources } from "./microphones.ts";
 import type { SourcePreferences } from "./sources.ts";
 export interface Config {
   buttonEnabled: boolean;
+  /** Hold the key to dictate, or double tap it to toggle recording. */
+  activationMode: "hold" | "doubleTap";
   muteOutputWhileRecording: boolean;
   server: string;
   tokenFile: string;
@@ -63,6 +65,7 @@ export function parseConfig(value: unknown): Config {
   if (s.mode === "fixed" && !fixed) throw new Error("Fixed selection needs a source identity.");
   return {
     buttonEnabled: value.buttonEnabled === true,
+    activationMode: value.activationMode === "doubleTap" ? "doubleTap" : "hold",
     muteOutputWhileRecording: value.muteOutputWhileRecording === true,
     server: endpoint(value.server),
     tokenFile: value.tokenFile,

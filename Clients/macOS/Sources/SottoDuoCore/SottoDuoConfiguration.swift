@@ -5,6 +5,7 @@ import Foundation
 public struct SottoDuoConfiguration: Codable, Equatable, Sendable {
     public let schemaVersion: Int
     public var holdKey: String
+    public var activationMode: String
     public var launchAtLogin: Bool
     public var djiMicButtonEnabled: Bool
     public var muteOutputWhileRecording: Bool
@@ -12,10 +13,12 @@ public struct SottoDuoConfiguration: Codable, Equatable, Sendable {
 
     public static let `default` = SottoDuoConfiguration()
 
-    public init(holdKey: String = "rightOption", launchAtLogin: Bool = false, djiMicButtonEnabled: Bool = false,
-                muteOutputWhileRecording: Bool = false, microphones: MicrophonePreferences = MicrophonePreferences()) {
+    public init(holdKey: String = "rightOption", activationMode: String = "hold", launchAtLogin: Bool = false,
+                djiMicButtonEnabled: Bool = false, muteOutputWhileRecording: Bool = false,
+                microphones: MicrophonePreferences = MicrophonePreferences()) {
         schemaVersion = 1
         self.holdKey = holdKey
+        self.activationMode = activationMode
         self.launchAtLogin = launchAtLogin
         self.djiMicButtonEnabled = djiMicButtonEnabled
         self.muteOutputWhileRecording = muteOutputWhileRecording
@@ -23,7 +26,7 @@ public struct SottoDuoConfiguration: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, holdKey, launchAtLogin, djiMicButtonEnabled, muteOutputWhileRecording, microphones
+        case schemaVersion, holdKey, activationMode, launchAtLogin, djiMicButtonEnabled, muteOutputWhileRecording, microphones
     }
 
     public init(from decoder: Decoder) throws {
@@ -36,7 +39,12 @@ public struct SottoDuoConfiguration: Codable, Equatable, Sendable {
         guard ["rightOption", "rightControl", "fn"].contains(holdKey) else {
             throw values.invalid(.holdKey, "Use rightOption, rightControl, or fn.")
         }
+        let activationMode = try values.value(String.self, for: .activationMode, default: "hold")
+        guard ["hold", "doubleTap"].contains(activationMode) else {
+            throw values.invalid(.activationMode, "Use hold or doubleTap.")
+        }
         self.init(holdKey: holdKey,
+                  activationMode: activationMode,
                   launchAtLogin: try values.value(Bool.self, for: .launchAtLogin, default: false),
                   djiMicButtonEnabled: try values.value(Bool.self, for: .djiMicButtonEnabled, default: false),
                   muteOutputWhileRecording: try values.value(Bool.self, for: .muteOutputWhileRecording, default: false),

@@ -4,7 +4,7 @@ Ref #8, #11. `Clients/Linux` adds a small Bun executable and an AT-SPI destinati
 
 ## Everyday workflow
 
-Start the daemon in your graphical session. Hold the configured key, wait for the **recording** notification, speak, then release. A short tap released before admission does not start a recording. `sottoduo toggle` supports a second shortcut if preferred; `sottoduo cancel` cancels this client's take. The DJI button is not claimed by this client.
+Start the daemon in your graphical session. Hold the configured key, wait for the **recording** notification, speak, then release. A short tap released before admission does not start a recording. `sottoduo toggle` supports a second shortcut if preferred; `sottoduo cancel` cancels this client's take. To dictate hands-free, set **Trigger** under **This computer** to **Double tap to toggle**: two taps of the dictation key within 0.45 seconds start recording, and another double tap stops it. A single tap or a longer press does nothing. The compositor only reports the dictation key, so unlike on the Mac, typing between the two taps does not break the pair. The DJI button is not claimed by this client.
 
 A completed take inserts once into the original accessible field only when the destination checks succeed. Otherwise a notification says the text is ready: `sottoduo result` prints it; `sottoduo copy` explicitly replaces the clipboard so you can paste it yourself. An uncertain insertion is identified separately; check the field before copying. Notifications never display dictated text. The last result lives only in this process and is cleared when starting a new take. Older results remain in shared server history.
 

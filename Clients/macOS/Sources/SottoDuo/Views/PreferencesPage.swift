@@ -41,10 +41,14 @@ private struct DevicePreferencesForm: View {
             } header: { Text("Connection").textCase(nil) }
 
             Section {
-                Picker("Hold to dictate", selection: $controller.shortcut) {
+                Picker("Dictation key", selection: $controller.shortcut) {
                     ForEach(HoldKey.allCases) { key in Text(key.title).tag(key) }
                 }
                 .accessibilityIdentifier("preferences.shortcut")
+                Picker("Trigger", selection: $controller.activationMode) {
+                    ForEach(HotkeyActivationMode.allCases) { mode in Text(mode.title).tag(mode) }
+                }
+                .accessibilityIdentifier("preferences.activation")
                 LabeledContent {
                     Button(controller.isCheckingShortcut ? "Stop checking" : "Check shortcut") {
                         if controller.isCheckingShortcut { controller.stopShortcutCheck() }
@@ -52,7 +56,9 @@ private struct DevicePreferencesForm: View {
                     }
                     .frame(width: 125)
                 } label: {
-                    Text(controller.isCheckingShortcut ? "Hold the key for a second" : "Shortcut check")
+                    Text(controller.isCheckingShortcut
+                         ? (controller.activationMode == .doubleTapToggle ? "Double tap the key" : "Hold the key for a second")
+                         : "Shortcut check")
                 }
                 if let note = controller.shortcut.note { Text(note).font(.caption).foregroundStyle(SottoDuoPalette.muted) }
                 DisclosureGroup("Shortcut diagnostics", isExpanded: $showingDiagnostics) {
@@ -100,7 +106,7 @@ private struct DevicePreferencesForm: View {
             Section {
                 PermissionRow(title: "Microphone", detail: "Capture audio while dictating.", granted: controller.permissions.microphone,
                               reviewGranted: true, action: controller.requestMicrophone)
-                PermissionRow(title: "Accessibility", detail: "Recognize your hold key and insert text.", granted: controller.permissions.accessibility,
+                PermissionRow(title: "Accessibility", detail: "Recognize your dictation key and insert text.", granted: controller.permissions.accessibility,
                               reviewGranted: true, action: controller.requestAccessibility)
                 HStack {
                     PermissionHelpButton()

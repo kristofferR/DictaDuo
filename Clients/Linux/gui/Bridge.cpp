@@ -1,4 +1,5 @@
 #include "Bridge.h"
+#include <chrono>
 #include <QApplication>
 #include <QClipboard>
 #include <QColor>
@@ -186,15 +187,21 @@ void Bridge::request(const QString &action, const QVariantMap &arguments,
 void Bridge::requestShortcutEdge(const QString &action) {
   if (action != "start" && action != "stop")
     return;
-  m_shortcutEdges.enqueue(action);
+  // CLOCK_MONOTONIC milliseconds, the same clock as the client's process.hrtime.
+  const double at = std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now().time_since_epoch())
+                        .count();
+  m_shortcutEdges.enqueue({action, at});
   sendNextShortcutEdge();
 }
 void Bridge::sendNextShortcutEdge() {
   if (m_shortcutEdgeInFlight || m_shortcutEdges.isEmpty())
     return;
   m_shortcutEdgeInFlight = true;
-  const QString action = m_shortcutEdges.dequeue();
-  sendRequest(action, {}, {}, [this] {
+  const auto [action, at] = m_shortcutEdges.dequeue();
+  // Tagged so the client can tell shortcut edges from the microphone test's Stop,
+  // and timed so a slow lock check cannot stretch or shrink the gesture.
+  sendRequest(action, {{"shortcut", true}, {"at", at}}, {}, [this] {
     m_shortcutEdgeInFlight = false;
     QTimer::singleShot(0, this, [this] { sendNextShortcutEdge(); });
   });
