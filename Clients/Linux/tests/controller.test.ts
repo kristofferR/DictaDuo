@@ -381,6 +381,35 @@ test("a capture the server stops mid-take is kept in history, not discarded", as
   expect(f.deliveries()).toBe(0);
   await until(async () => (await f.record(id)).status === "completed");
 });
+test("an interrupted capture restores muted output", async () => {
+  const f = await fixture();
+  let restored = 0;
+  f.controller.output = { mute: async () => {}, restore: async () => void restored++ };
+  f.controller.muteOutput = true;
+  f.controller.start();
+  await until(() => f.controller.state.startsWith("recording"));
+  f.lose();
+  await f.controller.settled();
+  expect(f.controller.state).toContain("saved in history");
+  expect(restored).toBe(1);
+});
+test("a cancel during a brief outage keeps retrying the discard", async () => {
+  const f = await fixture();
+  const cancel = f.api.cancel.bind(f.api);
+  let attempts = 0,
+    id = "";
+  f.api.cancel = async (...args) => {
+    id = args[0];
+    if (++attempts < 3) throw new Error("Offline");
+    return cancel(...args);
+  };
+  f.controller.discardRetryDelaysMS = [10, 10, 10];
+  f.controller.start();
+  await until(() => f.controller.state.startsWith("recording"));
+  await f.controller.cancel();
+  await until(() => attempts === 3);
+  await until(async () => (await f.record(id)).status === "cancelled");
+});
 test("recognition failing mid-take seals the capture instead of recording on", async () => {
   const f = await fixture();
   let stopped = "";

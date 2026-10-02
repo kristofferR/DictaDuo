@@ -372,16 +372,23 @@ export function registerRecordingRoutes(
       return reply.type("application/x-ndjson").send(events.source);
     });
     if (captures) {
-      routes.post("/v2/captures", async (request, reply) =>
-        reply
-          .code(201)
-          .send(
-            await captures.start(
-              validateBody("StartCaptureRequest", request.body),
-              captureOwner(request),
-            ),
-          ),
-      );
+      routes.post("/v2/captures", async (request, reply) => {
+        let abandoned = false;
+        reply.raw.once("close", () => {
+          abandoned = !reply.raw.writableFinished;
+        });
+        const snapshot = await captures.start(
+          validateBody("StartCaptureRequest", request.body),
+          captureOwner(request),
+        );
+        // A requester that gave up during startup never learns this ID, so it
+        // could neither renew nor discard the take; the lease would archive it.
+        if (abandoned) {
+          await service.discard(snapshot.id).catch(() => {});
+          return reply.code(499).send();
+        }
+        return reply.code(201).send(snapshot);
+      });
       routes.post<{ Params: IDParams }>(
         "/v2/recordings/:id/capture/heartbeat",
         async (request, reply) => {

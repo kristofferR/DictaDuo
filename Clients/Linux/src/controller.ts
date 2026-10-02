@@ -130,6 +130,8 @@ export class Controller {
   captureAllowed: () => boolean = () => true;
   output?: Output;
   muteOutput = false;
+  /** Background retries for a discard that failed transiently. */
+  discardRetryDelaysMS = [1_000, 2_000, 4_000, 8_000, 15_000];
   /**
    * Client deadline once a take leaves the server queue: two speech attempts
    * (120 s loading + 180 s each), cloud fallback, and proofreading (30 s
@@ -217,8 +219,8 @@ export class Controller {
         await this.cancelTake(take);
       })
       .finally(() => {
-        // A sealed take restored at its seal; a newer take may be muting now.
-        if (!take.sealed) void take.output?.restore();
+        // A take handed off at its seal restored then; a newer take may be muting now.
+        if (this.take === take) void take.output?.restore();
         take.feedbackAbort.abort();
         take.feedback.finish();
         take.destination?.close();
@@ -424,8 +426,32 @@ export class Controller {
     take.feedback.unavailable();
     take.destination?.close();
     if (take.id && !take.sealed && !take.sealMayHaveSucceeded)
-      await this.api.cancel(take.id, take.owner).catch(() => {});
-    // An admission with an unknown ID loses its server lease within five seconds.
+      await this.discard(take.id, take.owner);
+    // The server discards an admission whose requester gave up before learning its ID.
+  }
+  /**
+   * An explicit cancel must win over the server's archive-only sealing of an
+   * expired lease, so a discard that fails transiently keeps retrying in the
+   * background through a brief outage.
+   */
+  private async discard(id: string, owner: string) {
+    const transient = (error: unknown) =>
+      !(error instanceof APIError) || error.status >= 500 || [408, 429].includes(error.status);
+    try {
+      await this.api.cancel(id, owner);
+    } catch (error) {
+      if (!transient(error)) return;
+      void (async () => {
+        for (const delay of this.discardRetryDelaysMS) {
+          await Bun.sleep(delay);
+          try {
+            return await this.api.cancel(id, owner);
+          } catch (retry) {
+            if (!transient(retry)) return;
+          }
+        }
+      })();
+    }
   }
   /**
    * The server closed the capture: it seals recorded audio archive-only or drops

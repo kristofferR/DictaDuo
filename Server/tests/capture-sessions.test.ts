@@ -281,6 +281,29 @@ test("capture startup can be discarded without waiting for a stuck provider", as
   expect(discarded(await f.recordings.get(id))).toBe(true);
 });
 
+test("an admission whose requester gave up during startup is discarded, not archived", async () => {
+  const f = await fixture();
+  f.provider.writeAtStart = true;
+  let ready!: () => void;
+  f.provider.gate = new Promise((resolve) => (ready = resolve));
+  const address = await f.app.listen({ host: "127.0.0.1", port: 0 });
+  const abandon = new AbortController();
+  const starting = fetch(`${address}/v2/captures`, {
+    method: "POST",
+    headers: { ...f.headers, "content-type": "application/json" },
+    body: JSON.stringify(f.request),
+    signal: abandon.signal,
+  }).catch(() => undefined);
+  await until(() => f.provider.calls === 1);
+  abandon.abort();
+  await starting;
+  await Bun.sleep(50);
+  ready();
+  const id = f.provider.options!.generation.id;
+  await until(async () => discarded(await f.recordings.get(id)));
+  expect(f.provider.options!.signal.aborted).toBe(true);
+});
+
 test("startup timeout aborts hardware and releases admission", async () => {
   const f = await fixture();
   f.provider.gate = new Promise(() => {});
