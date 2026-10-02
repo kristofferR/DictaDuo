@@ -665,6 +665,13 @@ test("a retry that fails before new speech keeps the transcript it replaced", as
   expect(final.status).toBe("failed");
   expect(final.error).toBe("Helper exited.");
   expect(final.rawText).toBe("Recording 1.");
+  // Cancelling a retry, as shutdown does, gives the transcript back too.
+  failing.transcribe = (_path, _language, _terms, _progress, signal) =>
+    new Promise((_, reject) => signal?.addEventListener("abort", () => reject(signal.reason)));
+  await restarted.retry(record.id);
+  const cancelled = await restarted.cancel(record.id);
+  expect(cancelled.status).toBe("cancelled");
+  expect(cancelled.rawText).toBe("Recording 1.");
 });
 
 test("only failed or cancelled recordings with sealed audio can be retried", async () => {

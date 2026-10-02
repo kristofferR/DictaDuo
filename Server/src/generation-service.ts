@@ -1034,6 +1034,7 @@ export class GenerationService {
     if (record.recognition) delete record.recognition.partialText;
     record.error = message;
     delete record.progress;
+    await this.restorePreviousOutput(record);
     record.updatedAt = now();
     this.processingControllers.get(record.id)?.abort();
     await this.save(record).catch(() => this.publish(record));
