@@ -373,6 +373,7 @@ export class GenerationService {
       return {
         apiVersion: API_VERSION,
         generationRetry: true,
+        cloudRecognition: !!this.configuration.soniox,
         recognitionEngines: [...this.engines],
         serverVersion: "0.1.0",
         isDev: this.configuration.development,

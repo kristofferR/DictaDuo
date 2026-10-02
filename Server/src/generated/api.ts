@@ -761,6 +761,8 @@ export interface components {
       ready: boolean;
       /** @description Whether failed or cancelled generations with sealed audio can be retried. Request this field with X-SottoDuo-Generation-Retry: retry-v1. An omitted value means unsupported. */
       generationRetry?: boolean;
+      /** @description Whether cloud recognition (Soniox) is configured on this server. Request this field with X-SottoDuo-Cloud-Recognition: cloud-v1. An omitted value means unknown. */
+      cloudRecognition?: boolean;
       /** @description Local recognition engines installed on this server. Request this field with X-SottoDuo-Recognition-Engine: engine-v1. An omitted value means Whisper only. */
       recognitionEngines?: components["schemas"]["RecognitionEngine"][];
       speech: components["schemas"]["ModelRuntimeInfo"];
