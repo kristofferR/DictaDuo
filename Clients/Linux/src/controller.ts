@@ -304,8 +304,10 @@ export class Controller {
       this.openUndo(take);
       return;
     }
-    if (take !== this.take && take.gate.state === "discard") return;
-    if (take !== this.take && take.gate.hold()) {
+    // A take past recording, even one still sealing, is kept like queued work.
+    const sealed = take !== this.take || take.activity.phase === "processing";
+    if (sealed && take.gate.state === "discard") return;
+    if (sealed && take.gate.hold()) {
       this.openUndo(take);
       return;
     }

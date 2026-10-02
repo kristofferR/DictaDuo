@@ -688,3 +688,22 @@ test("a timed-out speech run is not retried", async () => {
   expect((await completed(service, record.id)).status).toBe("failed");
   expect(calls).toBe(1);
 });
+
+test("a late speech failure is not retried", async () => {
+  const inference = new FakeInference();
+  let calls = 0;
+  inference.transcribe = async () => {
+    calls++;
+    setSystemTime(Date.now() + 60_000);
+    throw new InferenceError("unavailable", "Helper exited.");
+  };
+  const { service } = await setup(inference);
+  try {
+    const record = await upload(service);
+    await service.finish(record.id, { inferenceFrames: 4000 });
+    expect((await completed(service, record.id)).status).toBe("failed");
+    expect(calls).toBe(1);
+  } finally {
+    setSystemTime();
+  }
+});

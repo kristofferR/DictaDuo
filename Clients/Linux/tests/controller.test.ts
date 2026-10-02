@@ -1006,6 +1006,34 @@ test("toggle inserts a cancelled take that is still sealing", async () => {
   }
 });
 
+test("a stopped take cancelled while sealing is kept in history", async () => {
+  const f = await fixture();
+  const ids = track(f);
+  const stop = f.api.stop.bind(f.api);
+  let release = () => {};
+  const sealing = new Promise<void>((resolve) => (release = resolve));
+  f.api.stop = async (...args) => {
+    await sealing;
+    return stop(...args);
+  };
+  try {
+    await record(f);
+    await Bun.sleep(300);
+    f.controller.stop();
+    await Bun.sleep(100);
+    await f.controller.cancel();
+    expect(f.controller.activity.undoUntil).toBeGreaterThan(Date.now());
+    await Bun.sleep(350);
+    await f.controller.cancel();
+    release();
+    await f.controller.settled();
+    expect(f.deliveries()).toBe(0);
+    expect((await f.api.get(ids.started[0]!)).delivery?.status).toBe("cancelled");
+  } finally {
+    release();
+  }
+});
+
 test("a short cancelled recording is discarded without an undo window", async () => {
   const f = await fixture();
   const ids = track(f);

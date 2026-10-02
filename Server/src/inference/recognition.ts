@@ -8,6 +8,9 @@ import {
   type StreamingSpeechSession,
 } from "./soniox.ts";
 
+/** A Whisper failure later than this is not retried. */
+const retryWithinMS = 30_000;
+
 /** Keeps provider policy out of the archive, text pipeline, and native helpers. */
 export class RecognitionSession {
   private stream?: StreamingSpeechSession;
@@ -89,14 +92,16 @@ export class RecognitionSession {
     const transcribe = () =>
       this.local.transcribe(path, this.settings.language, this.terms, progress, signal);
     // The sealed audio is still on disk, so a transient engine failure gets one
-    // more attempt before the recording is reported as failed. A timeout already
-    // spent the whole speech budget; a second one would outlive the client's
-    // event stream, so it fails immediately.
+    // more attempt before the recording is reported as failed. Only an early
+    // failure qualifies: after a timeout or a late failure, a second model load and
+    // run would outlive the clients' event streams, so it fails immediately.
+    const startedAt = Date.now();
     const speech = await transcribe().catch((error: unknown) => {
       this.checkCancellation(signal);
       if (
-        error instanceof InferenceError &&
-        (error.code === "cancelled" || error.code === "timeout")
+        Date.now() - startedAt > retryWithinMS ||
+        (error instanceof InferenceError &&
+          (error.code === "cancelled" || error.code === "timeout"))
       )
         throw error;
       return transcribe();
