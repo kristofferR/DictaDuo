@@ -80,7 +80,9 @@ export class Controller {
   private tasks = new Set<Promise<void>>();
   private deliveryTail: Promise<void> = Promise.resolve();
   /** The shown take's cancellation, until its server cleanup finishes. */
-  private cancelling?: Promise<void>;
+  private cancelling?: { take: Take; cleanup: Promise<void> };
+  /** The take whose state the overlay shows. */
+  private displayed?: Take;
   feedback = new RecordingFeedback();
   captureAllowed: () => boolean = () => true;
   output?: Output;
@@ -216,8 +218,8 @@ export class Controller {
   /** Cancels the take the overlay shows; earlier takes keep processing. */
   async cancel(): Promise<void> {
     // The overlay shows the cancelled take until its cleanup finishes, so a repeat
-    // joins that cancellation unless a new take has started since.
-    if (this.cancelling) return this.cancelling;
+    // joins that cancellation, unless a new take started or another take is shown.
+    if (this.cancelling && this.displayed === this.cancelling.take) return this.cancelling.cleanup;
     const take = this.foreground;
     if (take) await this.cancelOne(take);
     else {
@@ -263,8 +265,10 @@ export class Controller {
     const shown = take === this.foreground;
     take.state = state;
     take.activity = { ...take.activity, phase };
-    if (shown) this.announce(state, phase, take.activity);
-    else if (
+    if (shown) {
+      this.displayed = take;
+      this.announce(state, phase, take.activity);
+    } else if (
       phase === "failed" ||
       state.startsWith("Insertion uncertain") ||
       state.startsWith("Text ready")
@@ -276,10 +280,10 @@ export class Controller {
     if (!shown) return this.cancelTake(take);
     this.setState(take, "cancelled", "cancelled");
     const cleanup = this.cancelTake(take);
-    this.cancelling = cleanup;
+    this.cancelling = { take, cleanup };
     await cleanup;
     // A newer take or cancellation owns the overlay now.
-    if (this.cancelling !== cleanup) return;
+    if (this.cancelling?.cleanup !== cleanup) return;
     this.cancelling = undefined;
     const next = this.foreground;
     if (next) {

@@ -883,6 +883,38 @@ test("cancelling the newest take keeps an earlier processing take", async () => 
   expect((await f.api.get(ids.started[1]!)).status).toBe("cancelled");
 });
 
+test("a cancel targets an earlier take that took over the overlay during slow cleanup", async () => {
+  const held = heldInference();
+  const f = await fixture(held.inference);
+  const cancel = f.api.cancel.bind(f.api);
+  let releaseCleanup!: () => void;
+  const cleanupGate = new Promise<void>((resolve) => (releaseCleanup = resolve));
+  f.api.cancel = async (...args) => {
+    await cleanupGate;
+    return cancel(...args);
+  };
+  let releaseDelivery!: () => void;
+  f.waitForDelivery(new Promise<void>((resolve) => (releaseDelivery = resolve)));
+  let first: Promise<void> | undefined;
+  try {
+    await record(f);
+    f.controller.stop();
+    await record(f);
+    first = f.controller.cancel();
+    held.release();
+    // The earlier take now shows "Delivering text" while the newer take cleans up.
+    await until(() => f.controller.activity.phase === "delivering");
+    void f.controller.cancel();
+    await until(() => f.controller.activity.phase === "cancelled");
+  } finally {
+    held.release();
+    releaseDelivery();
+    releaseCleanup();
+    await first;
+  }
+  await f.controller.settled();
+});
+
 test("a repeated cancel during slow cleanup keeps the earlier processing take", async () => {
   const held = heldInference();
   const f = await fixture(held.inference);
