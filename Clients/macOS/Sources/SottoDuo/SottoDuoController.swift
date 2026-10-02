@@ -189,7 +189,7 @@ final class SottoDuoController: ObservableObject {
     var canCancelWithEscape: Bool { !hotkey.isHoldingFn }
     var isServerReady: Bool { serverHealth?.ready == true && serverHealth?.apiVersion == SottoDuoAPI.version }
     var canTest: Bool { isServerReady && microphones.resolution.device != nil && !isCapturing }
-    var selectedInputName: String { microphones.resolution.device?.displayName ?? "No microphone available" }
+    var selectedInputName: String { microphones.resolution.device.map(microphones.qualifiedName) ?? "No microphone available" }
     var usesRemoteInput: Bool { microphones.resolution.device?.remote != nil }
     var mayUseLocalMicrophone: Bool {
         guard let selected = microphones.resolution.device else { return false }
@@ -390,9 +390,10 @@ final class SottoDuoController: ObservableObject {
         let endpoint = preferences.endpoint
         let token = preferences.token
         do {
-            let sources = try await connection.audioSources()
+            let list = try await connection.audioSources()
             guard endpoint == preferences.endpoint, token == preferences.token, !Task.isCancelled else { return }
-            microphones.updateRemote(sources, server: connection.endpoint.absoluteString)
+            microphones.updateRemote(list.sources, server: connection.endpoint.absoluteString,
+                                     host: list.sharingHost, deviceID: preferences.deviceID)
         } catch {
             guard endpoint == preferences.endpoint, token == preferences.token, !Task.isCancelled else { throw error }
             microphones.clearRemote()
@@ -1564,7 +1565,7 @@ final class SottoDuoController: ObservableObject {
                 let selectedInput: AudioInputDevice?
                 if let buttonSource {
                     let connection = try client()
-                    let sources = try await connection.audioSources()
+                    let sources = try await connection.audioSources().sources
                     guard let source = sources.first(where: { $0.identity == buttonSource && $0.isEligible() }) else {
                         throw ServerClientError.captureUnavailable("The DJI receiver is unavailable. Button takes do not use microphone fallback.")
                     }
@@ -1575,11 +1576,27 @@ final class SottoDuoController: ObservableObject {
                 }
                 do {
                     try await startInput(input, session: current, requestID: current, isTest: isTest, deadline: deadline)
-                } catch ServerClientError.captureUnavailable(let message) {
-                    // Only a definitive pre-ready rejection permits one fresh admission.
+                } catch let error as ServerClientError {
+                    // Only a definitive pre-ready rejection, or the server busy with
+                    // another computer's take, permits one fresh admission.
+                    let busy: Bool
+                    switch error {
+                    case .captureUnavailable: busy = false
+                    case .captureBusy: busy = true
+                    default: throw error
+                    }
                     guard buttonSource == nil, input.remote != nil, sessionID == current, activity == .starting,
                           !Task.isCancelled, ProcessInfo.processInfo.systemUptime < deadline,
-                          let fallback = microphones.localFallback else { throw ServerClientError.captureUnavailable(message) }
+                          let fallback = microphones.localFallback else {
+                        if busy {
+                            // The server records one take at a time; name who holds it.
+                            try? await refreshAudioSources()
+                            let holder = microphones.busyFor(input)?.name ?? "another computer"
+                            throw ServerClientError.captureUnavailable(
+                                "\(microphones.hostName(input) ?? "The server") is busy with \(holder). Try again when it is free.")
+                        }
+                        throw error
+                    }
                     try await startInput(fallback, session: current, requestID: UUID(), isTest: isTest, deadline: deadline)
                 }
             } catch is CancellationError {
@@ -1597,7 +1614,8 @@ final class SottoDuoController: ObservableObject {
     private func startInput(_ input: AudioInputDevice, session current: UUID, requestID: UUID,
                             isTest: Bool, deadline: TimeInterval) async throws {
         try Task.checkCancellation()
-        recordingInputName = input.displayName
+        let inputName = microphones.qualifiedName(input)
+        recordingInputName = inputName
         let base = try client()
         let device = DeviceIdentity(id: preferences.deviceID, name: preferences.deviceName)
         let remaining = deadline - ProcessInfo.processInfo.systemUptime
@@ -1609,14 +1627,14 @@ final class SottoDuoController: ObservableObject {
             // The provider records one take at a time; an earlier take may still be draining.
             while pendingDictations.contains(where: { $0.capture.map { !$0.isSealed } ?? false }) {
                 guard ProcessInfo.processInfo.systemUptime < deadline else {
-                    throw ServerClientError.captureUnavailable("The remote microphone is still finishing the previous take. Try again.")
+                    throw ServerClientError.captureUnavailable("\(inputName) is still finishing your previous take. Try again.")
                 }
                 try await Task.sleep(for: .milliseconds(50))
                 guard sessionID == current, activity == .starting else { return }
             }
             let available = deadline - ProcessInfo.processInfo.systemUptime
             guard available > 0 else { throw ServerClientError.captureUnavailable("The microphone did not start in time. Try another take.") }
-            statusMessage = "Starting remote microphone…"
+            statusMessage = "Starting \(inputName)…"
             let created = try await connection.startCapture(.init(requestID: requestID, device: device,
                 mode: isTest ? .test : .dictation, source: source, buttonTicket: recordingTrigger?.buttonTicket), timeout: available)
             guard sessionID == current, activity == .starting, !Task.isCancelled else {
@@ -1647,7 +1665,7 @@ final class SottoDuoController: ObservableObject {
             }
             recordingStart = ProcessInfo.processInfo.systemUptime
             activity = .recording
-            statusMessage = "Listening · remote microphone → this Mac"
+            statusMessage = "Listening · \(inputName)"
             capture.monitor { [weak self] snapshot in
                 guard let self, sessionID == current else { return }
                 if isRecording {
@@ -1781,7 +1799,7 @@ final class SottoDuoController: ObservableObject {
         }
         stopRecordingTimer(); endCapturePowerActivity(); resetLevels()
         activity = .transcribing
-        statusMessage = remoteCapture == nil ? "Finishing dictation…" : "Stopping remote microphone…"
+        statusMessage = remoteCapture == nil ? "Finishing dictation…" : "Stopping \(recordingInputName ?? "the shared mic")…"
         let current = sessionID
         let test = isTestSession
         let clipboardCount = recordingClipboardChangeCount
@@ -2158,7 +2176,7 @@ final class SottoDuoController: ObservableObject {
         recordingConnected = false
         recordingClipboardChangeCount = NSPasteboard.general.changeCount
         insertionDestination = nil
-        recordingInputName = input.displayName
+        recordingInputName = microphones.qualifiedName(input)
         recordingFeedback.reset()
         onHUDVisibility?(true)
         if muteOutputWhileRecording { outputMuter.mute() }
@@ -2474,18 +2492,29 @@ final class SottoDuoController: ObservableObject {
                     cancelPending(pending)
                 }
                 if recordingTrigger?.buttonTicket != nil { cancelDictation(undoable: false) }
-            }, changed: { [weak self] in self?.remoteButtonState = $0 })
+            }, changed: { [weak self] state in
+                // An unregistered Mac polls the button's state instead; see refreshButtonState.
+                if let state { self?.remoteButtonState = state }
+            })
         remoteButtons?.start()
     }
 
-    func selectRemoteButtonDestination() {
-        Task { [weak self] in
-            guard let self, let remoteButtons else { return }
-            do { try await remoteButtons.select() } catch { errorMessage = error.localizedDescription }
-        }
+    /// Where the DJI button types, shared by every computer on the server.
+    func setButtonTarget(_ target: ButtonTarget) async throws {
+        let endpoint = preferences.endpoint
+        let state = try await client().setButtonTarget(target)
+        guard endpoint == preferences.endpoint else { return }
+        remoteButtonState = state
     }
 
-    func disarmRemoteButtonDestination() { remoteButtons?.disarm() }
+    /// While this Mac is not a registered destination, heartbeats do not report the button's state.
+    func refreshButtonState() async {
+        guard remoteButtons?.registrationID == nil, let connection = try? client() else { return }
+        let endpoint = preferences.endpoint
+        let state: ButtonDestinationState? = try? await connection.buttonDestination(method: "GET")
+        guard remoteButtons?.registrationID == nil, endpoint == preferences.endpoint else { return }
+        remoteButtonState = state
+    }
 
     private func refreshDJIMicButton() {
         guard hasInitialized, !isShuttingDown else { return }

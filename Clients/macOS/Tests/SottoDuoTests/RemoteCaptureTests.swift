@@ -178,7 +178,8 @@ final class RemoteCaptureTests: XCTestCase {
         defer { controller.shutdown() }
         let client = try ServerClient(endpoint: endpoint, token: token)
         let inventory = try await client.audioSources()
-        controller.microphones.updateRemote(inventory, server: client.endpoint.absoluteString)
+        controller.microphones.updateRemote(inventory.sources, server: client.endpoint.absoluteString,
+                                          host: inventory.sharingHost, deviceID: controller.preferences.deviceID)
         for source in sources {
             let device = try XCTUnwrap(controller.microphones.availableDevices.first { $0.uid == source })
             controller.microphones.addToPriority(device)

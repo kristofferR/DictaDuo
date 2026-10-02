@@ -116,8 +116,54 @@ final class ServerClientTests: XCTestCase {
         }
         fixture.respond = { _ in (404, Data()) }
         let sources = try await client.audioSources()
-        XCTAssertTrue(sources.isEmpty)
+        XCTAssertTrue(sources.sources.isEmpty)
+        XCTAssertNil(sources.sharingHost)
         XCTAssertEqual(fixture.requests.last?.timeoutInterval, 1)
+    }
+
+    func testBusySharedMicIsDistinctFromOtherConflicts() async throws {
+        let fixture = HTTPFixture()
+        defer { fixture.session.invalidateAndCancel() }
+        let client = try ServerClient(endpoint: fixture.endpoint, token: "", session: fixture.session).owningCapture()
+        let input = StartCaptureRequest(requestID: UUID(), device: .init(id: "mac", name: "Mac"), mode: .test,
+                                        source: .init(hostID: "desk", id: "dji"))
+        for code in ["capture_busy", "conflicting_request"] {
+            fixture.respond = { _ in (409, try SottoDuoAPI.encoder().encode(APIErrorResponse(code: code, message: "Fixture"))) }
+            do { _ = try await client.startCapture(input, timeout: 2); XCTFail("Expected rejection") }
+            catch ServerClientError.captureBusy { XCTAssertEqual(code, "capture_busy") }
+            catch ServerClientError.rejected(409, _) { XCTAssertEqual(code, "conflicting_request") }
+        }
+    }
+
+    func testSharingFieldsAreRequestedAndDecodedWithButtonTarget() async throws {
+        let fixture = HTTPFixture()
+        defer { fixture.session.invalidateAndCancel() }
+        let client = try ServerClient(endpoint: fixture.endpoint, token: "", session: fixture.session)
+        let holder = Data(#"{"id":"linux","name":"Linux desk"}"#.utf8)
+        fixture.respond = { request in
+            switch request.url!.path {
+            case "/v1/audio-sources":
+                return (200, Data("""
+                    {"sources":[{"identity":{"hostID":"omarchy-desktop","id":"dji"},"name":"DJI Mic Mini","transport":"usb",
+                    "present":true,"link":"connected","capture":"available","audioHealth":"healthy",
+                    "observedAt":"2026-10-02T12:00:00Z","shared":true,"recordingFor":\(String(decoding: holder, as: UTF8.self))}],
+                    "sharingHost":{"name":"omarchy","local":false}}
+                    """.utf8))
+            case "/v1/button-destinations/target":
+                XCTAssertEqual(request.httpMethod, "PUT")
+                let target = try SottoDuoAPI.decodeWire(ButtonTarget.self, from: requestBody(request))
+                return (200, try ServerClient.encode(ButtonDestinationState(destinations: [], available: false, buttonTarget: target)))
+            default: return (404, Data())
+            }
+        }
+        let list = try await client.audioSources()
+        XCTAssertEqual(list.sharingHost?.name, "omarchy")
+        XCTAssertEqual(list.sources.first?.shared, true)
+        XCTAssertEqual(list.sources.first?.recordingFor?.name, "Linux desk")
+        let state = try await client.setButtonTarget(ButtonTarget(mode: .device, device: .init(id: "mac", name: "Mac")))
+        XCTAssertEqual(state.buttonTarget?.mode, .device)
+        XCTAssertEqual(state.buttonTarget?.device?.id, "mac")
+        XCTAssertTrue(fixture.requests.allSatisfy { $0.value(forHTTPHeaderField: "X-SottoDuo-Microphone-Sharing") == "sharing-v1" })
     }
 
     @MainActor

@@ -17,9 +17,13 @@ public struct AudioInputDevice: Identifiable, Codable, Equatable, Hashable, Send
         guard let remote else { return "local:\(uid)" }
         return "remote:\(remote.server.utf8.count):\(remote.server)\(remote.hostID.utf8.count):\(remote.hostID)\(uid)"
     }
-    public var displayName: String {
-        let connection = transport == .bluetooth ? " · Bluetooth" : ""
-        return name + connection + (remote.map { " · \($0.hostID)" } ?? "")
+    /// The device name alone; a shared input's computer is shown separately.
+    public var displayName: String { name + (transport == .bluetooth ? " · Bluetooth" : "") }
+    /// Reads naturally in menus and status text, e.g. "DJI Mic Mini on omarchy".
+    /// `host` is the sharing computer's name; the host ID is only a fallback.
+    public func qualifiedName(host: String?) -> String {
+        guard let remote else { return displayName }
+        return "\(displayName) on \(host ?? remote.hostID)"
     }
 
     public init(uid: String, name: String, transport: AudioInputTransport, remote: RemoteInputHost? = nil) {

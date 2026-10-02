@@ -73,7 +73,7 @@ final class RemoteCaptureSession {
             if snapshot.capture?.state == .stopped, snapshot.captureState != .discarded {
                 // The server sealed what was captured and finishes it archive-only.
                 markSealed()
-                let reason = snapshot.error ?? "The remote microphone stopped."
+                let reason = snapshot.error ?? "The shared mic stopped."
                 onFailure(ServerClientError.captureUnavailable("\(reason) The recording is saved in history."))
                 return
             }
@@ -85,7 +85,7 @@ final class RemoteCaptureSession {
                 return
             }
             if snapshot.captureState != .recording {
-                onFailure(ServerClientError.captureUnavailable(snapshot.error ?? "The remote microphone stopped. Try another take."))
+                onFailure(ServerClientError.captureUnavailable(snapshot.error ?? "The shared mic stopped. Try another take."))
                 return
             }
         }

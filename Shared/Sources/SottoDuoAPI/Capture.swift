@@ -5,6 +5,7 @@ public typealias AudioSourceIdentity = Components.Schemas.AudioSourceIdentity
 public typealias AudioSource = Components.Schemas.AudioSource
 public typealias AudioSourceList = Components.Schemas.AudioSourceList
 public typealias RemoteCapture = Components.Schemas.RemoteCapture
+public typealias SharingHost = Components.Schemas.SharingHost
 
 extension AudioSourceList: APIWireModel { public typealias Wire = Self }
 
@@ -44,8 +45,10 @@ public typealias RegisterButtonDestination = Components.Schemas.RegisterButtonDe
 public typealias HeartbeatButtonDestination = Components.Schemas.HeartbeatButtonDestination
 public typealias SelectButtonDestination = Components.Schemas.SelectButtonDestination
 public typealias CompleteButtonTake = Components.Schemas.CompleteButtonTake
+public typealias ButtonTarget = Components.Schemas.ButtonTarget
 extension ButtonDestinationState: APIWireModel { public typealias Wire = Self }
 extension RegisterButtonDestination: APIWireModel { public typealias Wire = Self }
 extension HeartbeatButtonDestination: APIWireModel { public typealias Wire = Self }
 extension SelectButtonDestination: APIWireModel { public typealias Wire = Self }
 extension CompleteButtonTake: APIWireModel { public typealias Wire = Self }
+extension ButtonTarget: APIWireModel { public typealias Wire = Self }

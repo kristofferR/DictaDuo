@@ -21,6 +21,14 @@ final class RemoteMicrophonePreferencesTests: XCTestCase {
         XCTAssertEqual(restored.microphones.activeProfile.priority, entries)
     }
 
+    func testNamesLeaveHostIDsOutOfDeviceNames() {
+        XCTAssertEqual(remote.displayName, "DJI")
+        XCTAssertEqual(remote.qualifiedName(host: "desk"), "DJI on desk")
+        XCTAssertEqual(remote.qualifiedName(host: nil), "DJI on omarchy")
+        let headset = AudioInputDevice(uid: "headset", name: "AirPods", transport: .bluetooth)
+        XCTAssertEqual(headset.qualifiedName(host: "desk"), "AirPods · Bluetooth")
+    }
+
     func testLegacyJSONRemainsLocalAndDoesNotChangeItsOrder() throws {
         let old = Data(#"{"microphones":{"profiles":[{"id":"home","name":"Home","priority":[{"uid":"usb","name":"Desk","transport":"usb"},{"uid":"builtin","name":"Mac","transport":"builtIn"}]}],"activeProfileID":"home","selection":{"mode":"systemDefault"}}}"#.utf8)
         let preferences = try JSONDecoder().decode(SottoDuoConfiguration.self, from: old).microphones
