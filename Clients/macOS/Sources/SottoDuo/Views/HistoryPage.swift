@@ -207,14 +207,16 @@ struct HistoryPage: View {
                         .help("Copy transcript")
                         .accessibilityLabel("Copy transcript")
                     Button { confirmingDelete = true } label: { Image(systemName: "trash") }
-                        .disabled(!selected.status.isTerminal || controller.serverHealth == nil)
+                        .disabled(!(selected.status.isTerminal || controller.isPausedRecording(selected.id)) || controller.serverHealth == nil)
                         .help("Delete from server")
                         .accessibilityLabel("Delete dictation")
                 }
                 HStack(spacing: 12) {
                     Label(sourceLabel(selected),
                           systemImage: selected.importedSource == nil ? "laptopcomputer" : "square.and.arrow.down")
-                    if selected.importedSource == nil { Text(statusLabel(selected.status)) }
+                    if selected.importedSource == nil {
+                        Text(controller.isPausedRecording(selected.id) ? "Paused on \(selected.device.name)" : statusLabel(selected.status))
+                    }
                     if let delivery = deliveryLabel(selected.delivery?.status) { Text(delivery) }
                     if let sourceStatus = selected.importedSource?.sourceStatus, !sourceStatus.isEmpty {
                         Text("Wispr Flow: \(sourceStatus)")

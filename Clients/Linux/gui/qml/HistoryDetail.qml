@@ -13,6 +13,8 @@ ColumnLayout {
     readonly property var audio: record ? record.inferenceAudio || record.originalAudio : null
     readonly property var processing: record ? record.textProcessing : null
     readonly property bool terminal: !!record && ["completed", "failed", "cancelled"].includes(record.status)
+    // Paused long recordings can be deleted too; only their own computer can resume them.
+    readonly property bool deletable: terminal || (!!record && !!record.paused)
     // A listed session holds only the transcript's tail until its full record loads.
     readonly property bool partial: !!record && !!record.summaryOnly
     property string copiedID: ""
@@ -120,7 +122,7 @@ ColumnLayout {
             ui: root.ui
             objectName: "deleteHistory"
             text: root.history.deleting ? "Deleting…" : "Delete"
-            enabled: root.terminal && root.history.available && !root.history.acting && !root.history.loading && !bridge.preview
+            enabled: root.deletable && root.history.available && !root.history.acting && !root.history.loading && !bridge.preview
             onClicked: root.history.confirmDelete()
         }
 
@@ -132,7 +134,7 @@ ColumnLayout {
         visible: !!root.record
         color: root.ui.c.muted
         font.pixelSize: 12
-        text: root.record ? [root.record.device.name, root.record.importedSource ? "Wispr Flow" : "SottoDuo", root.statusLabel(root.record.status), root.duration(), root.deliveryLabel(root.record.delivery)].filter(part => !!part).join(" · ") : ""
+        text: root.record ? [root.record.device.name, root.record.importedSource ? "Wispr Flow" : "SottoDuo", root.record.paused ? "Paused on " + root.record.device.name : root.statusLabel(root.record.status), root.duration(), root.deliveryLabel(root.record.delivery)].filter(part => !!part).join(" · ") : ""
     }
 
     ScrollView {

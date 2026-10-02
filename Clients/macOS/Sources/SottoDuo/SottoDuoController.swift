@@ -941,6 +941,13 @@ final class SottoDuoController: ObservableObject {
         }
     }
 
+    /// A long recording paused before it finished; only the computer that made it can resume it.
+    func isPausedRecording(_ id: UUID) -> Bool {
+        guard let snapshot = recordingSnapshots[id] else { return false }
+        return snapshot.captureState == .interrupted && snapshot.processingState != .completed
+            && snapshot.processingState != .failed
+    }
+
     func recordingGapSeconds(_ id: UUID) -> TimeInterval {
         recordingSnapshots[id]?.runTimings?.reduce(0) { $0 + Double($1.gapBeforeMilliseconds ?? 0) / 1000 } ?? 0
     }

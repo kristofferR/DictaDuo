@@ -411,7 +411,7 @@ ColumnLayout {
 
                     SLabel {
                         ui: root.ui
-                        text: modelData.finalText || modelData.insertionText || modelData.previewText || ({ receiving: "Recording…", queued: "Waiting to transcribe", transcribing: "Transcribing…", proofreading: "Cleaning up text…", failed: "Transcription failed", cancelled: "Cancelled", completed: "No speech" })[modelData.status] || modelData.status
+                        text: modelData.finalText || modelData.insertionText || modelData.previewText || (modelData.paused ? "Paused" : "") || ({ receiving: "Recording…", queued: "Waiting to transcribe", transcribing: "Transcribing…", proofreading: "Cleaning up text…", failed: "Transcription failed", cancelled: "Cancelled", completed: "No speech" })[modelData.status] || modelData.status
                         maximumLineCount: 2
                         elide: Text.ElideRight
                         Layout.fillWidth: true
