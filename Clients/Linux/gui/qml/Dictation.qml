@@ -23,7 +23,7 @@ ColumnLayout {
             radius: 16
             color: root.ui.c.line
             Accessible.role: Accessible.Graphic
-            Accessible.name: portalShortcuts.plasma ? root.ui.triggerVerb + " " + (portalShortcuts.trigger || "your Plasma shortcut") + " to dictate" : root.ui.shortcut.key ? root.ui.triggerVerb + " " + root.ui.shortcut.key + " to dictate" : "Dictation keyboard shortcut"
+            Accessible.name: root.ui.dictationKey ? root.ui.triggerVerb + " " + root.ui.dictationKey + " to dictate" : portalShortcuts.plasma ? root.ui.triggerVerb + " your Plasma shortcut to dictate" : "Dictation keyboard shortcut"
             Rectangle {
                 width: parent.width
                 height: parent.height - 6
@@ -31,7 +31,7 @@ ColumnLayout {
                 color: root.ui.c.surface
                 border.color: root.ui.c.line
                 Image {
-                    visible: !(portalShortcuts.plasma ? portalShortcuts.trigger : root.ui.shortcut.key)
+                    visible: !root.ui.dictationKey
                     anchors.centerIn: parent
                     width: 36
                     height: 36
@@ -43,19 +43,87 @@ ColumnLayout {
                     objectName: "configuredShortcutKey"
                     ui: root.ui
                     anchors.centerIn: parent
-                    text: (portalShortcuts.plasma ? portalShortcuts.trigger : root.ui.shortcut.key) || ""
+                    text: root.ui.dictationKey
                     visible: text.length > 0
                     font.pixelSize: 18
                     font.weight: Font.DemiBold
                 }
             }
         }
-        SLabel {
-            ui: root.ui
-            text: root.ui.shortcut.changing ? "Saving shortcut…" : !root.ui.busy && root.ui.shortcutBlocked ? "Checking shortcut…" : root.ui.activity.phase === "completed" ? root.ui.triggerVerb + " to dictate." : root.ui.messageFor(root.ui.activity.phase)
-            font.pixelSize: 34
-            font.weight: Font.DemiBold
+        ColumnLayout {
             Layout.fillWidth: true
+            spacing: 8
+            SLabel {
+                ui: root.ui
+                objectName: "dictationHeadline"
+                text: root.ui.shortcut.changing ? "Saving shortcut…" : !root.ui.busy && root.ui.shortcutBlocked ? "Checking shortcut…" : root.ui.activity.phase === "completed" ? root.ui.triggerVerb + " to dictate." : root.ui.messageFor(root.ui.activity.phase)
+                font.pixelSize: 34
+                font.weight: Font.DemiBold
+                Layout.fillWidth: true
+            }
+            SLabel {
+                ui: root.ui
+                objectName: "undoNote"
+                text: "Saved to history"
+                visible: root.ui.undoSeconds > 0
+                color: root.ui.c.muted
+            }
+            Rectangle {
+                objectName: "recognitionFallback"
+                visible: root.ui.busy && root.ui.undoSeconds === 0 && root.ui.fallbackNote.length > 0
+                Layout.maximumWidth: parent.width
+                implicitWidth: fallbackLabel.implicitWidth + 24
+                implicitHeight: fallbackLabel.implicitHeight + 10
+                radius: height / 2
+                color: root.ui.c.tint
+                border.color: root.ui.c.line
+                SLabel {
+                    id: fallbackLabel
+                    ui: root.ui
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    verticalAlignment: Text.AlignVCenter
+                    text: root.ui.fallbackNote
+                    font.pixelSize: 13
+                }
+            }
+        }
+        // Take actions sit beside the status they change.
+        SButton {
+            objectName: "startDictationButton"
+            ui: root.ui
+            primary: true
+            text: "Start dictation"
+            visible: !root.ui.busy
+            enabled: root.ui.canStart
+            onClicked: bridge.request("start")
+        }
+        SButton {
+            objectName: "finishDictationButton"
+            ui: root.ui
+            primary: true
+            text: "Finish dictation"
+            visible: root.ui.busy && root.ui.undoSeconds === 0 && root.ui.activity.phase === "recording" && root.ui.activity.trigger === "shortcut"
+            onClicked: bridge.request("stop")
+        }
+        SButton {
+            objectName: "cancelDictationButton"
+            ui: root.ui
+            text: "Cancel"
+            visible: root.ui.busy && root.ui.undoSeconds === 0 && ["preparing", "recording", "processing"].includes(root.ui.activity.phase)
+            onClicked: bridge.request("cancel")
+        }
+        SButton {
+            objectName: "undoDictationButton"
+            ui: root.ui
+            primary: true
+            text: "Undo " + root.ui.undoSeconds + "s"
+            accessibleLabel: "Undo, paste the cancelled dictation"
+            visible: root.ui.undoSeconds > 0
+            ToolTip.visible: hovered && root.ui.dictationKey.length > 0
+            ToolTip.text: "Undo (" + root.ui.dictationKey + ")"
+            onClicked: bridge.request("undo")
         }
     }
     RowLayout {
@@ -202,7 +270,7 @@ ColumnLayout {
         Layout.fillWidth: true
         color: root.ui.c.muted
         font.pixelSize: 13
-        text: root.ui.activity.phase === "failed" ? root.ui.snapshot.message : root.ui.result ? root.ui.result.delivery === "uncertain" ? "Insertion could not be confirmed. Check your field before copying to avoid a duplicate." : root.ui.result.delivery === "inserted" ? "Inserted at your cursor." : "Nothing was inserted. Your transcript is ready to copy." : root.ui.busy ? root.ui.feedback.partialText ? "Live text may change. Only the finished dictation is delivered." : root.ui.feedback.streamAvailable === false ? "Live text is unavailable right now. Your dictation still records and finishes normally." : "You can cancel this take below." : ""
+        text: root.ui.activity.phase === "failed" ? root.ui.snapshot.message : root.ui.result ? root.ui.result.delivery === "uncertain" ? "Insertion could not be confirmed. Check your field before copying to avoid a duplicate." : root.ui.result.delivery === "inserted" ? "Inserted at your cursor." : "Nothing was inserted. Your transcript is ready to copy." : root.ui.busy ? root.ui.feedback.partialText ? "Live text may change. Only the finished dictation is delivered." : root.ui.feedback.streamAvailable === false ? "Live text is unavailable right now. Your dictation still records and finishes normally." : "" : ""
         visible: text.length > 0
     }
     Rectangle {
@@ -215,14 +283,12 @@ ColumnLayout {
         MicrophoneTestButton {
             objectName: "microphoneTestButton"
             ui: root.ui
-            Layout.fillWidth: true
+            // Start dictation is the page's primary action.
+            primary: false
+            Layout.preferredHeight: -1
         }
-        SButton {
-            objectName: "cancelDictationButton"
-            ui: root.ui
-            text: "Cancel"
-            visible: root.ui.busy && ["preparing", "recording", "processing"].includes(root.ui.activity.phase)
-            onClicked: bridge.request("cancel")
+        Item {
+            Layout.fillWidth: true
         }
         SButton {
             ui: root.ui

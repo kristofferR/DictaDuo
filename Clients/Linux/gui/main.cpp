@@ -5,6 +5,7 @@
 #include <LayerShellQt/Shell>
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QDateTime>
 #include <QDir>
 #include <QIcon>
 #include <QMenu>
@@ -15,6 +16,35 @@
 #include <QQuickWindow>
 #include <QSystemTrayIcon>
 #include <QTimer>
+
+namespace {
+QIcon dot(const QColor &color) {
+  QPixmap pixmap(12, 12);
+  pixmap.fill(Qt::transparent);
+  QPainter painter(&pixmap);
+  painter.setRenderHint(QPainter::Antialiasing);
+  painter.setPen(Qt::NoPen);
+  painter.setBrush(color);
+  painter.drawEllipse(QRectF(3, 3, 6, 6));
+  return QIcon(pixmap);
+}
+/** The tray mark with a static recording dot in its corner; no animation. */
+QIcon recordingIcon(const QIcon &mark) {
+  QIcon icon;
+  for (const int size : {16, 22, 24, 32, 48, 64}) {
+    QPixmap pixmap = mark.pixmap(size, size);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    const qreal diameter = size * 0.46;
+    painter.setPen(QPen(QColor("#ffffff"), std::max(1.0, size / 16.0)));
+    painter.setBrush(QColor("#e5484d"));
+    painter.drawEllipse(QRectF(size - diameter - 0.5, size - diameter - 0.5,
+                               diameter, diameter));
+    icon.addPixmap(pixmap);
+  }
+  return icon;
+}
+} // namespace
 
 int main(int argc, char **argv) {
 #if defined(__GNUC__)
@@ -91,23 +121,26 @@ int main(int argc, char **argv) {
   auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
   if (!window)
     return 1;
-  QSystemTrayIcon tray(QIcon(":/qt/qml/SottoDuo/mark.svg"));
+  const QIcon markIcon(":/qt/qml/SottoDuo/mark.svg");
+  const QIcon recordingMark = recordingIcon(markIcon);
+  QSystemTrayIcon tray(markIcon);
   QMenu menu;
-  auto *connectionStatus = menu.addAction("Checking server");
+  menu.setToolTipsVisible(true);
+  auto *status = menu.addAction("Checking server");
+  status->setEnabled(false);
   menu.addSeparator();
-  QObject::connect(&menu, &QMenu::aboutToShow, &app,
-                   [window, connectionStatus] {
-                     const bool ready = window->property("serverReady").toBool();
-                     QPixmap dot(12, 12);
-                     dot.fill(Qt::transparent);
-                     QPainter painter(&dot);
-                     painter.setRenderHint(QPainter::Antialiasing);
-                     painter.setPen(Qt::NoPen);
-                     painter.setBrush(QColor(ready ? "#4ade80" : "#fb923c"));
-                     painter.drawEllipse(QRectF(3, 3, 6, 6));
-                     connectionStatus->setIcon(QIcon(dot));
-                     connectionStatus->setText(window->property("connection").toString());
-                   });
+  // Menu text cannot tick while open, so Undo has no countdown and hides when it expires.
+  auto *undo = menu.addAction("Undo: paste it now", &bridge,
+                              [&bridge] { bridge.request("undo"); });
+  auto *finish = menu.addAction("Finish dictation", &bridge,
+                                [&bridge] { bridge.request("stop"); });
+  auto *cancel = menu.addAction("Cancel dictation", &bridge,
+                                [&bridge] { bridge.request("cancel"); });
+  auto *start = menu.addAction("Start dictation", &bridge,
+                               [&bridge] { bridge.request("start"); });
+  auto *copyLast = menu.addAction("Copy last dictation", &bridge,
+                                  [&bridge] { bridge.request("copyLast"); });
+  menu.addSeparator();
   auto show = [window] {
     window->show();
     window->raise();
@@ -124,10 +157,59 @@ int main(int argc, char **argv) {
       window->requestActivate();
     }
   };
-  menu.addAction(portalShortcuts.plasma()
-                     ? "Quit SottoDuo feedback (Plasma shortcut stops)"
-                     : "Quit SottoDuo feedback (dictation stays running)",
-                 &app, quit);
+  auto *quitAction = menu.addAction("Quit SottoDuo feedback", &app, quit);
+  quitAction->setToolTip(
+      portalShortcuts.plasma()
+          ? "Closes this window and the tray. The Plasma shortcut stops until "
+            "you open SottoDuo again."
+          : "Closes this window and the tray. Dictation keeps running in the "
+            "background.");
+  // Icons are only replaced when they change, since each update reaches the tray host.
+  auto recordingShown = std::make_shared<bool>(false);
+  auto statusColor = std::make_shared<QString>("unset");
+  auto updateTray = [&bridge, &menu, &tray, window, status, undo, finish,
+                     cancel, start, copyLast, markIcon, recordingMark,
+                     recordingShown, statusColor] {
+    const auto snapshot = bridge.snapshot();
+    const auto activity = snapshot.value("activity").toMap();
+    const QString phase = activity.value("phase").toString();
+    const bool busy = snapshot.value("busy").toBool();
+    const bool undoOpen = activity.value("undoUntil").toDouble() >
+                          double(QDateTime::currentMSecsSinceEpoch());
+    const bool recording = phase == "recording" && !undoOpen;
+    status->setText(window->property("trayStatus").toString());
+    const QString color = undoOpen    ? ""
+                          : recording ? "#e5484d"
+                          : window->property("serverReady").toBool()
+                              ? "#4ade80"
+                              : "#fb923c";
+    if (*statusColor != color) {
+      *statusColor = color;
+      status->setIcon(color.isEmpty() ? QIcon() : dot(QColor(color)));
+    }
+    undo->setVisible(undoOpen);
+    finish->setVisible(recording &&
+                       activity.value("trigger").toString() == "shortcut");
+    cancel->setVisible(
+        busy && !undoOpen &&
+        QStringList{"preparing", "recording", "processing"}.contains(phase));
+    start->setVisible(!busy || undoOpen);
+    start->setEnabled(window->property("canStart").toBool());
+    const QString key = window->property("dictationKey").toString();
+    // Text after a tab is drawn as the menu's shortcut hint.
+    start->setText(key.isEmpty() ? "Start dictation" : "Start dictation\t" + key);
+    copyLast->setEnabled(!snapshot.value("result").toMap().isEmpty());
+    menu.setDefaultAction(undoOpen    ? undo
+                          : recording ? finish
+                                      : nullptr);
+    if (*recordingShown != recording) {
+      *recordingShown = recording;
+      tray.setIcon(recording ? recordingMark : markIcon);
+    }
+  };
+  QObject::connect(&menu, &QMenu::aboutToShow, &app, updateTray);
+  QObject::connect(&bridge, &Bridge::snapshotChanged, &app, updateTray);
+  updateTray();
   QObject::connect(bridge.desktop(), &DesktopIntegration::quitRequested, &app,
                    quit);
   tray.setToolTip("SottoDuo");
@@ -144,21 +226,30 @@ int main(int argc, char **argv) {
     const QString directory = parser.value("capture");
     QDir().mkpath(directory);
     auto *timer = new QTimer(&app);
-    auto page = std::make_shared<int>(-1);
+    // Five pages, then each preview.json state on the Dictation page.
+    auto step = std::make_shared<int>(-1);
+    auto name = std::make_shared<QString>();
     auto success = std::make_shared<bool>(true);
     QObject::connect(
-        timer, &QTimer::timeout, &app, [&, timer, page, success, directory] {
-          if (*page >= 0)
-            *success = window->grabWindow().save(
-                           directory + QString("/page-%1.png").arg(*page)) &&
+        timer, &QTimer::timeout, &app,
+        [&, timer, step, name, success, directory] {
+          if (*step >= 0)
+            *success = window->grabWindow().save(directory + '/' + *name +
+                                                 ".png") &&
                        *success;
-          ++*page;
-          if (*page == 5) {
+          ++*step;
+          if (*step == 5 + bridge.previewStateCount()) {
             timer->stop();
             app.exit(*success ? 0 : 1);
             return;
           }
-          window->setProperty("page", *page);
+          if (*step < 5) {
+            *name = QString("page-%1").arg(*step);
+            window->setProperty("page", *step);
+          } else {
+            *name = "dictation-" + bridge.applyPreviewState(*step - 5);
+            window->setProperty("page", 0);
+          }
         });
     timer->start(400);
   }

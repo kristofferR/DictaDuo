@@ -37,6 +37,8 @@ public:
   void requestShortcutEdge(const QString &action);
   Q_INVOKABLE void copy(const QString &text);
   Q_INVOKABLE void previewPhase(const QString &phase);
+  int previewStateCount() const;
+  QString applyPreviewState(int index);
 signals:
   void snapshotChanged();
   void themeChanged();

@@ -52,6 +52,25 @@ ApplicationWindow {
     property bool microphoneTestStarting: false
     readonly property bool microphoneTestActive: microphoneTestStarting || (busy && activity.trigger === "test")
     property var feedback: snapshot.feedback || ({})
+    // The dictation shortcut, named on buttons, the overlay and the tray.
+    readonly property string dictationKey: (portalShortcuts.plasma ? portalShortcuts.trigger : shortcut.key) || ""
+    // Whether Start dictation can be offered, from the window or the tray.
+    readonly property bool canStart: bridge.connected && !snapshot.setupRequired && !shortcutBlocked && !microphoneTestActive
+    readonly property string fallbackNote: activity.cloudUnavailable ? "Using local recognition (cloud unavailable)" : ""
+    // Whole seconds left to undo a cancel; steps once per second, no continuous repaint.
+    property int undoSeconds: 0
+    function updateUndo() {
+        undoSeconds = activity.undoUntil ? Math.max(0, Math.ceil((activity.undoUntil - Date.now()) / 1000)) : 0;
+    }
+    onActivityChanged: updateUndo()
+    Timer {
+        interval: 1000
+        repeat: true
+        running: app.activity.undoUntil > 0
+        onTriggered: app.updateUndo()
+    }
+    // One line for the tray menu, read when it opens or the snapshot changes.
+    readonly property string trayStatus: undoSeconds > 0 ? "Not pasted · saved to history" : activity.phase === "recording" ? "Listening · " + duration(feedback.elapsedSeconds) : busy ? messageFor(activity.phase) : connection
     function duration(seconds) {
         const value = Math.max(0, Math.floor(seconds || 0));
         return Math.floor(value / 60) + ":" + String(value % 60).padStart(2, "0");
@@ -126,7 +145,7 @@ ApplicationWindow {
     }
     function messageFor(phase) {
         // A cancelled take keeps its recording or processing phase while it can be undone.
-        if (activity.undoUntil)
+        if (undoSeconds > 0)
             return "Not pasted";
         if (phase === "preparing")
             return "Starting microphone…";

@@ -66,7 +66,7 @@ test("GUI shortcut release waits for the preceding press check", async () => {
   expect(actions).toEqual(["start", "stop"]);
 });
 
-test("GUI undo and copy-last requests reach the controller", async () => {
+test("GUI start, undo and copy-last requests reach the controller", async () => {
   const config = parseConfig({
     server: "http://localhost:8394",
     tokenFile: "/private/token",
@@ -94,10 +94,20 @@ test("GUI undo and copy-last requests reach the controller", async () => {
     config.sources,
   );
   let undone = 0;
+  const actions: string[] = [];
   controller.undo = () => void undone++;
+  controller.closeUndo = () => void actions.push("keep");
+  controller.start = () => {
+    actions.push("start");
+    return true;
+  };
   const gui = createGUIHandler(new API(config.server, "t"), controller, desktop, config);
   await gui({ version: 1, action: "undo" });
   expect(undone).toBe(1);
+  // Start dictation keeps a cancelled take in history; the shortcut may still paste it.
+  await gui({ version: 1, action: "start" });
+  await gui({ version: 1, action: "start", shortcut: true });
+  expect(actions).toEqual(["keep", "start", "start"]);
   await expect(gui({ version: 1, action: "copyLast" })).rejects.toThrow("no dictation to copy");
 });
 test("GUI requests are versioned and scoped; source preferences persist without losing private configuration", async () => {

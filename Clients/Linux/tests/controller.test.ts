@@ -369,6 +369,31 @@ test("only outcomes that need attention notify; progress, a clean paste and a ca
     },
   ]);
 });
+test("a server falling back to local recognition marks the take as cloud unavailable", async () => {
+  const f = await fixture();
+  const events = f.api.events!.bind(f.api);
+  let fallback = false;
+  f.api.events = (id, signal, update) =>
+    events(id, signal, (snapshot) =>
+      update(
+        fallback
+          ? { ...snapshot, recognition: { provider: "whisper", fallbackReason: "Soniox is down." } }
+          : snapshot,
+      ),
+    );
+  f.controller.start();
+  await until(() => f.controller.activity.phase === "recording");
+  expect(f.controller.activity.cloudUnavailable).toBeFalsy();
+  fallback = true;
+  await until(() => {
+    f.level(0.5);
+    return f.controller.activity.cloudUnavailable === true;
+  });
+  expect(f.controller.activity.phase).toBe("recording");
+  f.controller.stop();
+  await f.controller.settled();
+  expect(f.notices).toEqual([]);
+});
 test("uncertain admission never opens a fallback microphone", async () => {
   const f = await fixture();
   let calls = 0;

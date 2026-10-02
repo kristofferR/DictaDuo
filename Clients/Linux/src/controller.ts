@@ -96,6 +96,8 @@ type Activity = {
   undoUntil?: number;
   /** A cancelled take that was saved to history without inserting. */
   kept?: boolean;
+  /** The server fell back from cloud to local recognition for this take. */
+  cloudUnavailable?: boolean;
 };
 type Take = {
   owner: string;
@@ -375,7 +377,7 @@ export class Controller {
     this.activity = { ...this.activity, undoUntil: undefined };
   }
   /** Keeps the cancelled take in history only. */
-  private closeUndo() {
+  closeUndo() {
     const take = this.undoTake;
     if (!take) return;
     this.clearUndo();
@@ -641,6 +643,7 @@ export class Controller {
                 );
                 void this.api.stop(record.id, take.owner).catch(() => {});
               }
+              this.noteRecognition(take, update);
               take.feedback.update(
                 update.capture.state === "recording" ? update.capture.peak : undefined,
                 update.previewText,
@@ -789,6 +792,14 @@ export class Controller {
       .catch(() => {
         console.warn("Delivery receipt could not be saved; insertion will not be retried.");
       });
+  }
+  /** Mirrors the Mac: local recognition with a fallback reason means cloud is unavailable. */
+  private noteRecognition(take: Take, update: Recording) {
+    const fallback =
+      update.recognition?.provider === "whisper" && !!update.recognition.fallbackReason;
+    if (fallback === !!take.activity.cloudUnavailable) return;
+    take.activity = { ...take.activity, cloudUnavailable: fallback };
+    if (take === this.foreground) this.activity = { ...this.activity, cloudUnavailable: fallback };
   }
   private verify(record: Recording, take: Take) {
     if (

@@ -85,6 +85,8 @@ export function createGUIHandler(
     if (!(await desktop.unlocked())) throw new ClientNotice("Unlock this computer first.");
     switch (request.action) {
       case "start":
+        // The window and tray start a new take; only the shortcut pastes a cancelled one.
+        if (request.shortcut !== true) controller.closeUndo();
         if (!controller.start())
           throw new ClientNotice("Finish dictation or the shortcut check first.");
         return {};
