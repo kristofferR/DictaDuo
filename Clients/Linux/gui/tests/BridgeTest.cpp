@@ -50,7 +50,6 @@ private slots:
         property bool busy: false
         property var activity: ({ phase: "idle", source: "No microphone in use" })
         property var feedback: ({})
-        property string limitNotice: ""
         function duration(seconds) { return "0:00"; }
         property var c: bridge.colors
         function messageFor(phase) { return "Dictation preview"; }
@@ -416,7 +415,7 @@ private slots:
     QVERIFY(window->isVisible());
     QCOMPARE(warnings.count(), 0);
   }
-  void liveFeedbackShowsTimePartialTextAndLimitWithoutActivatingOverlay() {
+  void liveFeedbackShowsTimeAndPartialTextWithoutActivatingOverlay() {
     Bridge bridge(true);
     bridge.setTheme("dark");
     QQmlApplicationEngine engine;
@@ -430,7 +429,6 @@ private slots:
     QVERIFY(window);
     QVariantMap feedback{
         {"elapsedSeconds", 145},
-        {"remainingSeconds", 27},
         {"partialText", "A provisional sentence"},
         {"streamAvailable", true},
         {"levels", QVariantList{0.05, 0.2, 0.5, 0.8, 0.4, 0.1, 0.3, 0.7, 0.2}}};
@@ -441,11 +439,11 @@ private slots:
                       {"feedback", feedback}};
     window->setProperty("snapshot", state);
     auto *clock = window->findChild<QQuickItem *>("recordingClock");
-    auto *limit = window->findChild<QQuickItem *>("recordingLimitNotice");
     auto *text = window->findChild<QQuickItem *>("dictationTranscript");
-    QVERIFY(clock && limit && text);
+    QVERIFY(clock && text);
     QCOMPARE(clock->property("text").toString(), "2:25");
-    QCOMPARE(limit->property("text").toString(), "Recording stops in 0:27");
+    // Recording sessions have no duration limit, so no countdown is shown.
+    QVERIFY(!window->findChild<QQuickItem *>("recordingLimitNotice"));
     QCOMPARE(text->property("text").toString(), "A provisional sentence");
     QTest::qWait(100);
     const QString capture = qEnvironmentVariable("SOTTODUO_GUI_LIVE_CAPTURE");
@@ -462,13 +460,10 @@ private slots:
       QVERIFY(hud->grabWindow().save(hudCapture));
       hud->hide();
     }
-    feedback["limitReached"] = true;
     feedback["levels"] = QVariantList{};
     state["feedback"] = feedback;
     state["activity"] = QVariantMap{{"phase", "processing"}};
     window->setProperty("snapshot", state);
-    QCOMPARE(limit->property("text").toString(),
-             "Stopped at the recording limit");
     state["busy"] = false;
     state["activity"] = QVariantMap{{"phase", "completed"}};
     state["result"] =

@@ -136,7 +136,7 @@ ColumnLayout {
     }
     RowLayout {
         Layout.fillWidth: true
-        visible: root.ui.busy || !!root.ui.feedback.limitReached
+        visible: root.ui.busy
         LevelMeter {
             ui: root.ui
             levels: root.ui.feedback.levels || []
@@ -151,8 +151,8 @@ ColumnLayout {
         SLabel {
             ui: root.ui
             Layout.fillWidth: true
-            objectName: "recordingLimitNotice"
-            text: root.ui.limitNotice || (root.ui.activity.phase === "recording" && !(root.ui.feedback.levels || []).length ? "Waiting for microphone levels" : "")
+            objectName: "recordingLevelNotice"
+            text: root.ui.activity.phase === "recording" && !(root.ui.feedback.levels || []).length ? "Waiting for microphone levels" : ""
             color: root.ui.c.muted
             font.pixelSize: 13
         }

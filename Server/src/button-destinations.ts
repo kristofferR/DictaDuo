@@ -49,7 +49,7 @@ export class ButtonDestinations {
   private timer: ReturnType<typeof setInterval>;
   private closed = false;
   constructor(
-    private service: Pick<GenerationService, "captures" | "get">,
+    private service: Pick<GenerationService, "captures" | "resolveResult">,
     private now = Date.now,
   ) {
     this.timer = setInterval(() => this.expire(), 250);
@@ -152,7 +152,7 @@ export class ButtonDestinations {
     let registration = this.authorize(id, owner);
     if (this.route || !this.eligible()) throw unavailable();
     if (request.generationID) {
-      const record = await this.service.get(request.generationID);
+      const record = await this.service.resolveResult(request.generationID);
       registration = this.authorize(id, owner);
       if (
         this.route ||

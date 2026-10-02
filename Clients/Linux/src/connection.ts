@@ -119,7 +119,7 @@ export class ConnectionSettings {
     let hosts: string[];
     try {
       health = await api.health();
-      if (health.apiVersion !== 2)
+      if (health.apiVersion !== 3)
         throw new ClientNotice(
           "This server uses an incompatible API version. Update SottoDuo on both computers.",
         );

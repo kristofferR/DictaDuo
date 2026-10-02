@@ -2,9 +2,8 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GenerationService } from "../../../Server/src/generation-service.ts";
 import { createHTTPServer } from "../../../Server/src/http-server.ts";
-import { FakeInference } from "../../../Server/tests/support.ts";
+import { FakeInference, openCaptureServices } from "../../../Server/tests/support.ts";
 import { API } from "../src/api.ts";
 import { ConnectionSettings } from "../src/connection.ts";
 import { parseConfig } from "../src/config.ts";
@@ -22,35 +21,33 @@ async function fixture() {
   cleanup.push(() => rm(dir, { recursive: true, force: true }));
   let starts = 0;
   let reportedHost = "desktop";
-  const service = await GenerationService.open(
+  const services = await openCaptureServices(
+    join(dir, "server"),
     {
-      dataDirectory: join(dir, "server"),
-      development: true,
-      captureProvider: {
-        sources: (): Source[] => [
-          {
-            identity: { hostID: reportedHost, id: "mic" },
-            name: "Mic",
-            transport: "usb",
-            present: true,
-            link: "connected",
-            capture: "available",
-            audioHealth: "unknown",
-            observedAt: new Date().toISOString(),
-          },
-        ],
-        start: async () => {
-          starts++;
-          return { stop: async () => ({ inferenceFrames: 0 }) };
+      sources: (): Source[] => [
+        {
+          identity: { hostID: reportedHost, id: "mic" },
+          name: "Mic",
+          transport: "usb",
+          present: true,
+          link: "connected",
+          capture: "available",
+          audioHealth: "unknown",
+          observedAt: new Date().toISOString(),
         },
+      ],
+      start: async () => {
+        starts++;
+        return { stop: async () => ({ inferenceFrames: 0 }) };
       },
     },
     new FakeInference(),
   );
-  const http = createHTTPServer(service, "fixture-secret");
+  const service = services.service;
+  const http = createHTTPServer(service, "fixture-secret", undefined, services.recordings);
   const server = await http.listen({ host: "127.0.0.1", port: 0 });
   cleanup.push(async () => {
-    await service.shutdown();
+    await services.close();
     await http.close();
   });
   const file = join(dir, "client", "config.json");

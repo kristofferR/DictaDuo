@@ -206,6 +206,8 @@ final class HotkeyMonitor {
     var onCancel: (() -> Void)?
     /// Explicit cancellation also applies to recordings started by a device.
     var onEscape: (() -> Void)?
+    /// System/input interruptions preserve audio; Escape remains explicit discard.
+    var onInterruption: (() -> Void)?
     /// Tap health, not a claim that a particular key event was delivered.
     var onStatusChange: ((Bool) -> Void)?
     /// Set only during an explicit, bounded shortcut check. No persistent log.
@@ -332,7 +334,7 @@ final class HotkeyMonitor {
             // take, including a double-tap latch. A latch-only cancel must not
             // arm the chord block, or the next tap is swallowed.
             let cancelsHold = physicalDown && active && mode == .hold
-            if physicalDown { blockCurrentHold() }
+            if physicalDown { blockCurrentHold(explicitDiscard: true) }
             active = false
             lastTapAt = nil
             if let onEscape { onEscape() } else if !cancelsHold { onCancel?() }
@@ -454,7 +456,7 @@ final class HotkeyMonitor {
         if physicalDown { blockCurrentHold() } else { lastTapAt = nil }
     }
 
-    private func blockCurrentHold() {
+    private func blockCurrentHold(explicitDiscard: Bool = false) {
         onDiagnostic?("Hold interrupted; release the key before trying again.")
         blockedUntilRelease = true
         pendingPress?.cancel()
@@ -466,8 +468,14 @@ final class HotkeyMonitor {
         // keeps recording; the blocked press just doesn't count as a tap.
         if active, mode == .hold {
             active = false
-            onCancel?()
+            if explicitDiscard { onCancel?() }
+            else { notifyInterruption() }
         }
+    }
+
+    private func notifyInterruption() {
+        if let onInterruption { onInterruption() }
+        else { onCancel?() }
     }
 
     private func release() {
@@ -597,7 +605,7 @@ final class HotkeyMonitor {
             return false
         }
         if let tap, tap.isValid(), tapAccess == access {
-            // All recovery paths cancel an in-flight hold and require a fresh
+            // All recovery paths interrupt an in-flight hold and require a fresh
             // release. start() used to re-enable blindly, retaining stale state.
             // A latched take survives: the rebuilt listener can still end it.
             reset(cancelActive: true, keepLatch: true)
@@ -661,7 +669,7 @@ final class HotkeyMonitor {
         lastTapAt = nil
         watchdog?.cancel()
         watchdog = nil
-        if cancelActive, wasActive, !latched { onCancel?() }
+        if cancelActive, wasActive, !latched { notifyInterruption() }
     }
 
     deinit {

@@ -1,34 +1,30 @@
 import Combine
 import Foundation
-import SottoDuoCore
 
-/// High-frequency feedback is observed only by the waveform and clock leaves,
-/// never forwarded through the dashboard's controller.
+/// High-frequency feedback is observed only by the waveform and clock leaves.
 @MainActor
 final class RecordingFeedback: ObservableObject {
     @Published private(set) var levels = Array(repeating: Float(0), count: 9)
     @Published private(set) var elapsedSeconds = 0
-    @Published private(set) var limitNotice: RecordingLimitNotice?
+    @Published private(set) var transferNotice: RecordingTransferNotice?
 
     func append(_ level: Float) {
         let sample = level.isFinite ? min(1, max(0, level)) : 0
         let next = Array(levels.dropFirst()) + [sample]
-        // Old peaks still drain through the history; settled silence is free.
         if next != levels { levels = next }
     }
 
-    func updateElapsed(_ elapsed: TimeInterval, maximumSeconds: TimeInterval = LifecyclePolicy.maximumRecordingSeconds) {
-        let bounded = elapsed.isFinite ? min(maximumSeconds, max(0, elapsed)) : 0
+    func updateElapsed(_ elapsed: TimeInterval) {
+        // Bound the conversion, rather than capture duration. Large/non-finite
+        // clock values must never trap or make a long take wrap its timer.
+        let bounded = elapsed.isFinite ? min(Double(Int.max / 2), max(0, elapsed)) : 0
         let seconds = Int(bounded)
         if seconds != elapsedSeconds { elapsedSeconds = seconds }
-        let remaining = Int(maximumSeconds) - seconds
-        let notice: RecordingLimitNotice? = (1...30).contains(remaining) ? .approaching(secondsRemaining: remaining) : nil
-        if limitNotice != notice { limitNotice = notice }
     }
 
-    func finish(atLimit: Bool) {
-        let notice: RecordingLimitNotice? = atLimit ? .stopped : nil
-        if limitNotice != notice { limitNotice = notice }
+    func updateTransfer(connected: Bool, catchingUp: Bool = false) {
+        let notice: RecordingTransferNotice? = !connected ? .savedLocally : catchingUp ? .transferring : nil
+        if transferNotice != notice { transferNotice = notice }
     }
 
     func clearLevels() {
@@ -39,25 +35,20 @@ final class RecordingFeedback: ObservableObject {
     func reset() {
         clearLevels()
         if elapsedSeconds != 0 { elapsedSeconds = 0 }
-        if limitNotice != nil { limitNotice = nil }
+        if transferNotice != nil { transferNotice = nil }
     }
 }
 
-enum RecordingLimitNotice: Equatable {
-    case approaching(secondsRemaining: Int)
-    case stopped
+enum RecordingTransferNotice: Equatable {
+    case savedLocally
+    case transferring
 
     var text: String {
         switch self {
-        case .approaching(let seconds): "Recording limit in \(sottoduoDuration(Double(seconds)))"
-        case .stopped: "Stopped at the recording limit"
+        case .savedLocally: "Saved locally"
+        case .transferring: "Transferring saved audio"
         }
     }
 
-    var accessibilityLabel: String {
-        switch self {
-        case .approaching: "Recording is approaching the three-minute limit"
-        case .stopped: text
-        }
-    }
+    var accessibilityLabel: String { text }
 }

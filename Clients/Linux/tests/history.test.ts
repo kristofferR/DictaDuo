@@ -6,8 +6,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { GenerationService } from "../../../Server/src/generation-service.ts";
 import { createHTTPServer } from "../../../Server/src/http-server.ts";
-import { FakeInference } from "../../../Server/tests/support.ts";
-import { API } from "../src/api.ts";
+import { sha256 } from "../../../Server/src/storage.ts";
+import { FakeInference, openCaptureServices } from "../../../Server/tests/support.ts";
+import { API, type Generation } from "../src/api.ts";
 import { HistoryTools } from "../src/history.ts";
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -179,4 +180,140 @@ test("saved Wispr Flow source files can be opened without a Linux importer", asy
   ).rejects.toThrow("PNG screenshot");
   await tools.action("deleteHistory", { id: record.id, server: address });
   expect(await readdir(join(runtime, "sottoduo-client", "history-audio"))).toEqual([]);
+});
+
+test("recording sessions join legacy history and are opened and deleted on their own routes", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sottoduo-history-sessions-"));
+  const runtime = join(directory, "runtime");
+  await mkdir(runtime, { mode: 0o700 });
+  const previous = process.env.XDG_RUNTIME_DIR;
+  process.env.XDG_RUNTIME_DIR = runtime;
+  const services = await openCaptureServices(join(directory, "data"), undefined);
+  const server = createHTTPServer(
+    services.service,
+    "history-fixture-token",
+    undefined,
+    services.recordings,
+  );
+  const address = await server.listen({ host: "127.0.0.1", port: 0 });
+  cleanup.push(async () => {
+    await services.close();
+    await server.close();
+    if (previous === undefined) delete process.env.XDG_RUNTIME_DIR;
+    else process.env.XDG_RUNTIME_DIR = previous;
+    await rm(directory, { recursive: true, force: true });
+  });
+  const legacy = await services.service.create({
+    requestID: randomUUID(),
+    device: { id: "desktop", name: "Desktop" },
+    mode: "test",
+  });
+  const created = await services.recordings.create({
+    requestID: randomUUID(),
+    device: { id: "desktop", name: "Desktop" },
+    mode: "test",
+  });
+  const session = await services.recordings.resume(created.id);
+  const runID = randomUUID().toUpperCase();
+  const pcm = Buffer.alloc(64_000);
+  const header = {
+    type: "audio",
+    epoch: session.epoch,
+    runID,
+    sequence: 0,
+    firstFrame: 0,
+  } as const;
+  const format = {
+    frameCount: 16_000,
+    format: { sampleRate: 16000, channels: 1 },
+    sha256: sha256(pcm),
+  };
+  await services.recordings.appendAudio(
+    session.id,
+    { ...header, kind: "inference", ...format },
+    pcm,
+  );
+  await services.recordings.appendAudio(
+    session.id,
+    { ...header, kind: "original", ...format },
+    pcm,
+  );
+  await services.recordings.stop(session.id, session.epoch, [
+    { runID, inferenceFrames: 16_000, originalFrames: 16_000 },
+  ]);
+  for (
+    let count = 0;
+    (await services.recordings.get(session.id)).processingState !== "completed";
+    count++
+  ) {
+    if (count > 400) throw Error("Session did not complete");
+    await Bun.sleep(5);
+  }
+  const tools = new HistoryTools(new API(address, "history-fixture-token"));
+  const page = await tools.list(undefined, undefined, "q");
+  expect(page.items.map((item) => item.id)).toEqual([session.id, legacy.id]);
+  expect(page.items[0]).toMatchObject({ status: "completed", finalText: "Hello world." });
+  expect(page.nextCursor).toBeUndefined();
+  expect((await tools.list(undefined, "wispr-flow", "q")).items).toEqual([]);
+  const audio = await tools.action("historyAudio", {
+    id: session.id,
+    kind: "original",
+    server: address,
+  });
+  if (typeof audio.url !== "string") throw Error("Expected local audio");
+  expect((await readFile(fileURLToPath(audio.url))).subarray(0, 4).toString()).toBe("RIFF");
+  await tools.action("deleteHistory", { id: session.id, server: address });
+  expect((await services.recordings.get(session.id)).captureState).toBe("discarded");
+  expect((await tools.list(undefined, undefined, "q")).items.map((item) => item.id)).toEqual([
+    legacy.id,
+  ]);
+});
+
+test("merged pages never show an entry before a newer unfetched one", async () => {
+  const api = new API("http://127.0.0.1:1", "token");
+  const at = (minute: number) => ({
+    id: randomUUID().toUpperCase(),
+    createdAt: new Date(Date.UTC(2026, 9, 1, 12, minute)).toISOString(),
+  });
+  const l10 = at(10),
+    l8 = at(8),
+    l6 = at(6),
+    l5 = at(5),
+    l4 = at(4),
+    r9 = at(9),
+    r7 = at(7),
+    r1 = at(1);
+  const pages = new Map<
+    string | undefined,
+    { items: { id: string; createdAt: string }[]; nextCursor?: string }
+  >([
+    [undefined, { items: [l10, l8, l6], nextCursor: l6.id }],
+    [l6.id, { items: [l5, l4] }],
+  ]);
+  api.history = async (before) => pages.get(before) as Awaited<ReturnType<API["history"]>>;
+  const sessions = {
+    items: [r9, r7, r1].map((item) => ({
+      ...item,
+      processingState: "queued",
+      captureState: "stopped",
+      streams: [],
+      previewText: "",
+    })),
+  };
+  api.recordingHistory = async (before) =>
+    ({
+      items: before
+        ? sessions.items.slice(sessions.items.findIndex((item) => item.id === before) + 1)
+        : sessions.items,
+    }) as unknown as Awaited<ReturnType<API["recordingHistory"]>>;
+  const tools = new HistoryTools(api);
+  const first = await tools.list(undefined, undefined, "q");
+  const ids = (items: Generation[]) => items.map((item) => item.id);
+  expect(ids(first.items)).toEqual([l10, r9, l8, r7, l6].map((item) => item.id));
+  const second = await tools.list(first.nextCursor, undefined, "q");
+  expect(ids(second.items)).toEqual([l5, l4, r1].map((item) => item.id));
+  expect(second.nextCursor).toBeUndefined();
+  await expect(tools.list("not a cursor", undefined, "q")).rejects.toThrow(
+    "Invalid history cursor",
+  );
 });

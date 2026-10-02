@@ -62,7 +62,7 @@ try {
     await Bun.sleep(25);
   }
   const health = await json("/v1/health");
-  assert.equal(health.apiVersion, 2);
+  assert.equal(health.apiVersion, 3);
   assert.equal(health.isDev, true);
   assert.equal(health.ready, false);
   const preferences = await json("/v1/preferences");

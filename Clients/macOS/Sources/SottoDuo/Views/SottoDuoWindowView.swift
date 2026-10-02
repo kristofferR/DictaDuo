@@ -168,6 +168,18 @@ struct DictationPage: View {
                     }
                 }
 
+                HStack(spacing: 10) {
+                    Text(controller.recoveryMessage ?? "")
+                        .font(.caption)
+                        .foregroundStyle(SottoDuoPalette.muted)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button("Retry synchronization", action: controller.retryPendingRecordings)
+                        .disabled(controller.pendingRecordingCount == 0 || controller.isBusy)
+                        .opacity(controller.pendingRecordingCount == 0 ? 0 : 1)
+                }
+                .frame(height: 34)
+
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Text(controller.isBusy ? "Current dictation" : "Last dictation").font(.headline)
@@ -197,6 +209,7 @@ struct DictationPage: View {
                 }
 
                 HStack(spacing: 12) {
+                    SottoDuoDictationButton(controller: controller, identifier: "dictation.toggle")
                     SottoDuoMicrophoneTestButton(controller: controller, identifier: "dictation.test")
                     Button("History", action: showHistory)
                     Button { showPreferences() } label: { Image(systemName: "gearshape") }
@@ -278,18 +291,36 @@ struct SottoDuoMicrophoneTestButton: View {
     @ObservedObject var controller: SottoDuoController
     var identifier: String
     var idleTitle = "Test microphone"
-    private var isHeldFn: Bool { controller.isCapturing && !controller.canCancelWithEscape }
+    private var isHeldFn: Bool { controller.isTestRecording && !controller.canCancelWithEscape }
 
     var body: some View {
         Button(action: controller.toggleTestRecording) {
-            Label(isHeldFn ? "Release fn to finish" : (controller.isCapturing ? "Finish dictation" : idleTitle),
-                  systemImage: controller.isCapturing ? "stop.fill" : "mic")
+            Label(isHeldFn ? "Release fn to finish" : (controller.isTestRecording ? "Finish test" : idleTitle),
+                  systemImage: controller.isTestRecording ? "stop.fill" : "mic")
+                .frame(maxWidth: .infinity)
+                .frame(height: 30)
+        }
+        .buttonStyle(SottoDuoPrimaryButtonStyle())
+        .disabled(isHeldFn || (!controller.canTest && !controller.isTestRecording))
+        .help("Test \(controller.selectedInputName) without pasting text")
+        .accessibilityIdentifier(identifier)
+    }
+}
+
+struct SottoDuoDictationButton: View {
+    @ObservedObject var controller: SottoDuoController
+    var identifier: String
+    private var isHeldFn: Bool { controller.isCapturing && !controller.canCancelWithEscape }
+
+    var body: some View {
+        Button(action: controller.toggleDictation) {
+            Label(isHeldFn ? "Release fn to finish" : controller.isCapturing ? "Finish dictation" : "Start dictation",
+                  systemImage: controller.isCapturing ? "stop.fill" : "mic.fill")
                 .frame(maxWidth: .infinity)
                 .frame(height: 30)
         }
         .buttonStyle(SottoDuoPrimaryButtonStyle())
         .disabled(isHeldFn || (!controller.canTest && !controller.isCapturing))
-        .help("Test \(controller.selectedInputName) without pasting text")
         .accessibilityIdentifier(identifier)
     }
 }

@@ -3,6 +3,9 @@ import type { components } from "./generated/api";
 type Schemas = components["schemas"];
 
 export type RecognitionState = Schemas["RecognitionState"];
+export type RemoteCapture = Schemas["RemoteCapture"];
+export type AudioSourceIdentity = Schemas["AudioSourceIdentity"];
+export type StartCaptureRequest = Schemas["StartCaptureRequest"];
 export type UUID = Schemas["UUID"];
 export type GenerationMode = Schemas["GenerationMode"];
 export type GenerationStatus = Schemas["GenerationStatus"];
@@ -69,7 +72,7 @@ export type WisprFlowImportResult = Omit<Schemas["WisprFlowImportResult"], "reco
 };
 export type APIErrorResponse = Schemas["APIErrorResponse"];
 
-export const API_VERSION = 2;
+export const API_VERSION = 3;
 export const DEFAULT_PORT = 8391;
 export const MAXIMUM_RECORDING_SECONDS = 180;
 export const MAXIMUM_CHUNK_BYTES = 1_048_576;

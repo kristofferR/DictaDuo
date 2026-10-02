@@ -368,7 +368,9 @@ struct RecordingElapsedTime: View {
     var body: some View {
         Text(sottoduoDuration(Double(seconds)))
             .monospacedDigit()
-            .frame(minWidth: 34, alignment: .trailing)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(width: 58, alignment: .trailing)
             .onReceive(feedback.$elapsedSeconds.removeDuplicates()) { seconds = $0 }
             .accessibilityLabel("Recording time")
             .accessibilityValue(sottoduoDuration(Double(seconds)))
@@ -449,7 +451,8 @@ struct InlineNotice: View {
 }
 
 func sottoduoDuration(_ seconds: Double) -> String {
-    let total = max(0, Int(seconds.isFinite ? seconds : 0))
+    let total = Int(seconds.isFinite ? min(Double(Int.max / 2), max(0, seconds)) : 0)
+    if total >= 3600 { return "\(total / 3600):" + String(format: "%02d:%02d", (total / 60) % 60, total % 60) }
     return String(format: "%d:%02d", total / 60, total % 60)
 }
 

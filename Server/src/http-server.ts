@@ -12,6 +12,8 @@ import {
 import { ServiceError } from "./errors.ts";
 import type { GenerationService } from "./generation-service.ts";
 import { validateBody } from "./validation.ts";
+import type { RecordingService } from "./recording-service.ts";
+import { registerRecordingRoutes } from "./recording-routes.ts";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const identifier = (value: string) => {
@@ -100,6 +102,7 @@ export function createHTTPServer(
   service: GenerationService,
   token?: string,
   beforeRoutes?: (app: FastifyInstance) => void,
+  recordings?: RecordingService,
 ) {
   const app = Fastify({ logger: false, bodyLimit: 262_144 });
   beforeRoutes?.(app);
@@ -140,8 +143,9 @@ export function createHTTPServer(
   app.addHook("onSend", async (_request, reply) => {
     reply.header("Cache-Control", "no-store");
   });
+  // Field negotiation is for v1 clients; v2 routes own their schemas and text bodies.
   app.addHook("preHandler", async (request, reply) => {
-    reply.serializer(encodeFor(request));
+    if (!request.url.startsWith("/v2/")) reply.serializer(encodeFor(request));
   });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof ServiceError)
@@ -164,6 +168,8 @@ export function createHTTPServer(
   app.setNotFoundHandler((_request, reply) =>
     reply.code(404).send({ code: "http_404", message: "Not found." }),
   );
+
+  if (recordings) registerRecordingRoutes(app, recordings, service.captures);
 
   app.get("/v1/health", () => service.health());
   app.get("/v1/audio-sources", () => service.captures.sources());
@@ -201,34 +207,6 @@ export function createHTTPServer(
   );
   app.delete<{ Params: IDParams }>("/v1/button-destinations/:id", (request) =>
     service.buttons.unregister(identifier(request.params.id), destinationOwner(request)),
-  );
-  app.post("/v1/captures", async (request, reply) =>
-    reply
-      .code(201)
-      .send(
-        await service.captures.start(
-          validateBody("StartCaptureRequest", request.body),
-          captureOwner(request),
-        ),
-      ),
-  );
-  app.post<{ Params: IDParams }>(
-    "/v1/generations/:id/capture/heartbeat",
-    async (request, reply) => {
-      await service.captures.heartbeat(identifier(request.params.id), captureOwner(request));
-      return reply.code(204).send();
-    },
-  );
-  app.post<{ Params: IDParams }>("/v1/generations/:id/capture/stop", async (request, reply) =>
-    reply
-      .code(202)
-      .send(
-        await service.captures.stop(
-          identifier(request.params.id),
-          validateBody("StopCaptureRequest", request.body),
-          captureOwner(request),
-        ),
-      ),
   );
   app.get("/v1/preferences", () => service.getPreferences());
   app.put("/v1/preferences", (request) =>

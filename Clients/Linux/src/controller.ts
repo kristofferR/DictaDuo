@@ -1,9 +1,8 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { APIError, type API, type Device, type Generation } from "./api.ts";
+import { APIError, type API, type Device, type Recording, type RecordingDetail } from "./api.ts";
 import { candidates, sourceKey, type SourceID, type SourcePreferences } from "./sources.ts";
 import { RecordingFeedback } from "./feedback.ts";
 import type { OutputMuter } from "./output.ts";
-const recordingLimitMS = 174000;
 /** The server rejects shorter recordings, so they are discarded outright. */
 const minimumTakeMS = 250;
 const undoWindowMS = 4000;
@@ -83,12 +82,13 @@ type Take = {
   gate: DeliveryGate;
   sealed: boolean;
   sealMayHaveSucceeded: boolean;
+  /** Set when the server closed the capture itself; it keeps any recorded audio. */
+  interrupted?: string;
   button?: { ticket: string; source: SourceID };
   completed?: boolean;
   preview: boolean;
   feedback: RecordingFeedback;
   feedbackAbort: AbortController;
-  atLimit: boolean;
   /** Fixed at start, so a settings change mid-take still restores the output. */
   output?: Output;
   muting?: Promise<void>;
@@ -157,7 +157,7 @@ export class Controller {
   constructor(
     private api: Pick<
       API,
-      "sources" | "start" | "heartbeat" | "stop" | "cancel" | "get" | "delivery"
+      "sources" | "start" | "heartbeat" | "stop" | "cancel" | "recording" | "delivery" | "context"
     > &
       Partial<Pick<API, "events">>,
     private desktop: Desktop,
@@ -190,7 +190,6 @@ export class Controller {
       preview,
       feedback: new RecordingFeedback(),
       feedbackAbort: new AbortController(),
-      atLimit: false,
       activity: {
         phase: "preparing",
         startedAt,
@@ -221,7 +220,7 @@ export class Controller {
         // A sealed take restored at its seal; a newer take may be muting now.
         if (!take.sealed) void take.output?.restore();
         take.feedbackAbort.abort();
-        take.feedback.finish(take.atLimit);
+        take.feedback.finish();
         take.destination?.close();
         clearInterval(take.watchdog);
         // A failed or cancelled take still frees its slot for later deliveries.
@@ -421,12 +420,21 @@ export class Controller {
     take.gate.decide(false);
     take.activity = { ...take.activity, phase: "cancelled" };
     take.feedbackAbort.abort();
-    take.feedback.finish(take.atLimit);
+    take.feedback.finish();
     take.feedback.unavailable();
     take.destination?.close();
     if (take.id && !take.sealed && !take.sealMayHaveSucceeded)
       await this.api.cancel(take.id, take.owner).catch(() => {});
     // An admission with an unknown ID loses its server lease within five seconds.
+  }
+  /**
+   * The server closed the capture: it seals recorded audio archive-only or drops
+   * an empty take, so this take ends without discarding the recording.
+   */
+  private interrupt(take: Take, reason: string) {
+    if (take.sealMayHaveSucceeded) return;
+    take.sealed = true;
+    take.interrupted ??= reason;
   }
   private async watch(take: Take) {
     if (take.watching || !this.live(take)) return;
@@ -446,16 +454,14 @@ export class Controller {
         try {
           await this.api.heartbeat(take.id, take.owner);
         } catch (error) {
-          if (
-            !take.sealed &&
-            !(
-              take.released &&
-              error instanceof APIError &&
-              error.status === 409 &&
-              error.code === "capture_closed"
-            )
-          )
-            throw error;
+          const closed =
+            error instanceof APIError && error.status === 409 && error.code === "capture_closed";
+          if (closed && !take.released)
+            this.interrupt(
+              take,
+              "The remote microphone stopped. Any recorded audio is saved in history.",
+            );
+          else if (!take.sealed && !closed) throw error;
         }
       }
     } catch {
@@ -516,8 +522,10 @@ export class Controller {
           record.requestID !== take.requestID
         )
           throw new Error("Invalid capture admission.");
+        // This client keeps no cross-take continuation; release the server's context hold.
+        void this.api.context(record.id, take.owner).catch(() => {});
         take.activity = { ...take.activity, source: source.name };
-        take.feedback.begin(take.startedAt + recordingLimitMS);
+        take.feedback.begin();
         if (this.api.events) {
           void this.api
             .events(record.id, take.feedbackAbort.signal, (update) => {
@@ -528,10 +536,27 @@ export class Controller {
                 sourceKey(update.capture.source) !== sourceKey(source.identity)
               )
                 throw new Error("Mismatched feedback source.");
+              if (update.capture.state === "stopped" && update.captureState !== "discarded")
+                this.interrupt(
+                  take,
+                  `${update.error ?? "The remote microphone stopped."} The recording is saved in history.`,
+                );
+              else if (
+                update.capture.state === "recording" &&
+                update.processingState === "failed" &&
+                !take.sealMayHaveSucceeded
+              ) {
+                // Recognition gave up mid-take: seal what was captured and keep it for retry.
+                this.interrupt(
+                  take,
+                  update.error ?? "Recognition failed. The recording is saved in history.",
+                );
+                void this.api.stop(record.id, take.owner).catch(() => {});
+              }
               take.feedback.update(
                 update.capture.state === "recording" ? update.capture.peak : undefined,
-                update.recognition?.partialText,
-                update.status,
+                update.previewText,
+                update.processingState === "processing" ? "transcribing" : update.processingState,
               );
             })
             .catch(() => {
@@ -549,19 +574,19 @@ export class Controller {
       }
     }
     if (!take.id) throw new Error("No available microphone.");
-    while (this.live(take) && !take.released) {
-      if (Date.now() >= take.startedAt + recordingLimitMS) {
-        take.atLimit = true;
-        take.released = true;
-      } else await Bun.sleep(40);
-    }
+    // Recording sessions have no duration limit; the take ends on release.
+    while (this.live(take) && !take.released && !take.interrupted) await Bun.sleep(40);
     if (!this.live(take)) return;
-    take.feedback.finish(take.atLimit);
+    if (take.interrupted) {
+      this.setState(take, take.interrupted);
+      return;
+    }
+    take.feedback.finish();
     this.setState(take, "processing", "processing");
     take.sealMayHaveSucceeded = true;
-    let record = await this.api.stop(take.id, take.owner);
-    this.verify(record, take);
-    if (record.capture?.state !== "sealed") throw new Error("Capture was not sealed.");
+    const stopped = await this.api.stop(take.id, take.owner);
+    this.verify(stopped, take);
+    if (stopped.capture?.state !== "sealed") throw new Error("Capture was not sealed.");
     take.sealed = true;
     // The microphone has stopped; processing runs with the output restored.
     void take.output?.restore();
@@ -577,20 +602,29 @@ export class Controller {
       take.turn = previous;
       this.deliveryTail = previous.then(() => slot);
     }
-    // Queue wait has no client deadline; allow cold loading and the server's
-    // speech and proofreading limits once this take starts processing.
+    // Speech is processed during capture. Once the server starts on this take
+    // (queue wait has no client deadline), allow two speech attempts with cold
+    // loading, cloud fallback and proofreading, or a backlog as long as the take.
+    const seconds =
+      (stopped.stopRuns ?? []).reduce((sum, run) => sum + run.inferenceFrames, 0) / 16000;
+    const budget = Math.max(this.processingTimeoutMS, seconds * 1000);
+    const settled = (value: Recording) =>
+      value.captureState === "discarded" || ["completed", "failed"].includes(value.processingState);
+    let detail: RecordingDetail = { snapshot: stopped };
     let deadline: number | undefined;
-    while (this.live(take) && !["completed", "failed", "cancelled"].includes(record.status)) {
-      if (record.status !== "queued") deadline ??= Date.now() + this.processingTimeoutMS;
+    while (this.live(take) && !settled(detail.snapshot)) {
+      if (detail.snapshot.processingState !== "queued") deadline ??= Date.now() + budget;
       if (deadline !== undefined && Date.now() >= deadline)
         throw new Error("Processing timed out.");
       await Bun.sleep(300);
       if (!this.live(take)) return;
-      record = await this.api.get(take.id);
+      detail = await this.api.recording(take.id);
     }
     if (!this.live(take)) return;
-    this.verify(record, take);
-    if (record.status !== "completed") throw new Error("Transcription did not complete.");
+    this.verify(detail.snapshot, take);
+    const record = detail.result;
+    if (detail.snapshot.processingState !== "completed" || !record)
+      throw new Error("Transcription did not complete.");
     // Deliver after every earlier take, and never while a newer take is held.
     await take.turn;
     if (!this.live(take)) return;
@@ -647,7 +681,7 @@ export class Controller {
         this.desktop.notify("Delivery receipt could not be saved; insertion will not be retried.");
       });
   }
-  private verify(record: Generation, take: Take) {
+  private verify(record: Recording, take: Take) {
     if (
       record.id !== take.id ||
       record.requestID !== take.requestID ||

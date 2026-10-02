@@ -39,7 +39,7 @@ Original audio uses the existing sequenced HTTP route. After all audio is acknow
 
 ## Keeping upstream merges small
 
-Provider protocol and selection live in `Server/src/inference/soniox.ts` and `recognition.ts`. `audio-stream.ts` registers the additional transport. `StreamingUpload.swift` holds the Mac streaming implementation. The existing native inference implementation, microphone capture, storage format, HTTP upload route, text pipeline, and delivery rules are reused.
+Provider protocol and selection live in `Server/src/inference/soniox.ts` and `recognition.ts`. `audio-stream.ts` registers the legacy v1 transport for older clients. Current clients upload durable recording sessions instead, and the server streams their acknowledged audio to Soniox itself (`recording-recognition.ts`). The existing native inference implementation, microphone capture, storage format, HTTP upload route, text pipeline, and delivery rules are reused.
 
 The coordinator changes are confined to session admission, forwarding accepted chunks, ending/cancelling sessions, and substituting the recognition result before the existing text pipeline. OpenAPI additions are optional, with Automatic as the historical preference default. Legacy preference updates which omit recognition mode preserve the current server selection. Regenerate both language bindings after schema changes; do not hand-edit generated files.
 
@@ -47,7 +47,7 @@ The coordinator changes are confined to session admission, forwarding accepted c
 
 `bun run check`, `bun run test`, and `bun run build:server` validate the server. Soniox tests use a local WebSocket peer and exercise incremental revisions, final tokens, protocol errors, disconnects, and cancellation without sending recordings to a cloud service.
 
-For the native transport contract, run `SOTTODUO_TEST_HOST=<Omarchy Tailscale IP> bun Server/tests/fixtures/streaming-client-server.ts` on Omarchy. On the Mac, set `SOTTODUO_STREAM_TEST_URL` to the printed URL and run `swift test --jobs 2 --filter StreamingUploadTests`. The fixture requires its built-in test bearer token and uses synthetic PCM only. Stop it after testing. Native tests check cloud success and mid-recording fallback while archiving both audio formats.
+`recording-live.test.ts` covers recording-session recognition with a fake provider: frame-exact commits, local fallback from the committed cursor, cloud-only retries, near real-time pacing, restart resumption and local retry of a failed session.
 
 A live Soniox account test is still needed to measure recognition quality and latency on actual dictation. Relevant measurements are first-preview latency and release-to-insertion latency, with proofreading and original retention measured separately.
 

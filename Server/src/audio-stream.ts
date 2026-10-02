@@ -5,8 +5,9 @@ import { ServiceError } from "./errors.ts";
 
 /** Additive transport; archive validation and acknowledgements remain in GenerationService. */
 export function registerAudioStream(app: FastifyInstance, service: GenerationService) {
-  app.register(websocket, { options: { maxPayload: 64_004 } });
+  // Encapsulated so the v2 recording routes can register their own socket options.
   app.register(async (routes) => {
+    await routes.register(websocket, { options: { maxPayload: 64_004 } });
     routes.get<{ Params: { id: string } }>(
       "/v1/generations/:id/stream",
       {

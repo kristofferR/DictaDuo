@@ -2,7 +2,7 @@ import Foundation
 @_exported import SottoDuoDomain
 
 public enum SottoDuoAPI {
-    public static let version = 2
+    public static let version = 3
     public static let defaultPort = 8391
     public static let maximumRecordingSeconds = 180
     public static let maximumChunkBytes = 1_048_576

@@ -6,8 +6,7 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { PipeWireCaptureProvider } from "../src/capture/pipewire-provider.ts";
-import { GenerationService } from "../src/generation-service.ts";
-import { FakeInference } from "./support.ts";
+import { openCaptureServices } from "./support.ts";
 
 // Explicit opt-in: a private PipeWire daemon with a tone generator, never desktop audio.
 const helper = process.env.SOTTODUO_TEST_CAPTURE_HELPER;
@@ -16,7 +15,7 @@ const exec = promisify(execFile);
 let directory: string,
   daemon: ReturnType<typeof spawn>,
   provider: PipeWireCaptureProvider,
-  service: GenerationService;
+  services: Awaited<ReturnType<typeof openCaptureServices>>;
 let previous: { runtime?: string; remote?: string };
 interface GraphObject {
   id: number;
@@ -78,15 +77,12 @@ beforeEach(async () => {
   });
   await configure(source.id, "Output");
   provider = await PipeWireCaptureProvider.open({ helper, hostID: "isolated-test" });
-  service = await GenerationService.open(
-    { dataDirectory: join(directory, "data"), development: true, captureProvider: provider },
-    new FakeInference(),
-  );
+  services = await openCaptureServices(join(directory, "data"), provider);
 }, 20_000);
 afterEach(async () => {
   if (!helper || process.platform !== "linux") return;
   try {
-    await service?.shutdown();
+    await services?.close();
     await provider?.close();
   } finally {
     if (daemon && daemon.exitCode === null && daemon.signalCode === null) {
@@ -102,10 +98,10 @@ afterEach(async () => {
   }
 });
 async function begin() {
-  await until(async () => ((await service.health()).ready ? true : undefined));
+  await until(async () => ((await services.service.health()).ready ? true : undefined));
   const source = provider.sources()[0]!;
   const owner = "a".repeat(64);
-  const starting = service.captures.start(
+  const starting = services.service.captures.start(
     {
       requestID: randomUUID(),
       device: { id: "mac", name: "Mac" },
@@ -122,26 +118,30 @@ nativeTest(
   "native PipeWire buffers reach existing generations with meters and matching retention intervals",
   async () => {
     for (const retained of [true, false]) {
-      const preferences = await service.getPreferences();
+      const preferences = await services.service.getPreferences();
       preferences.preferences.keepOriginalAudio = retained;
-      await service.updatePreferences(preferences);
+      await services.service.updatePreferences(preferences);
       const { record, owner } = await begin();
+      // Level peaks are published to watchers, never persisted.
+      let peak = 0;
+      const unsubscribe = services.recordings.subscribe(record.id, (snapshot) => {
+        peak = Math.max(peak, snapshot.capture?.peak ?? 0);
+      });
       await Bun.sleep(500);
-      expect((await service.get(record.id)).capture?.peak).toBeGreaterThan(0.1);
-      const stopped = await service.captures.stop(record.id, {}, owner);
+      expect(peak).toBeGreaterThan(0.1);
+      unsubscribe();
+      const stopped = await services.service.captures.stop(record.id, {}, owner);
       expect(stopped.capture?.state).toBe("sealed");
-      expect(stopped.inferenceAudio?.sampleRate).toBe(16000);
-      expect(stopped.inferenceAudio?.channels).toBe(1);
-      expect(stopped.inferenceAudio!.frameCount).toBeGreaterThan(4000);
+      const inference = stopped.streams.find((stream) => stream.kind === "inference")!;
+      const original = stopped.streams.find((stream) => stream.kind === "original");
+      expect(inference.format).toEqual({ sampleRate: 16000, channels: 1 });
+      expect(inference.frameCount).toBeGreaterThan(4000);
       if (retained) {
-        expect(stopped.originalAudio?.channels).toBe(2);
-        expect(stopped.originalAudio?.sampleRate).toBe(48000);
-        expect(
-          Math.abs(
-            stopped.originalAudio!.frameCount / 48000 - stopped.inferenceAudio!.frameCount / 16000,
-          ),
-        ).toBeLessThan(1 / 16000);
-      } else expect(stopped.originalAudio).toBeUndefined();
+        expect(original?.format).toEqual({ sampleRate: 48000, channels: 2 });
+        expect(Math.abs(original!.frameCount / 48000 - inference.frameCount / 16000)).toBeLessThan(
+          1 / 16000,
+        );
+      } else expect(original).toBeUndefined();
       await noCapture();
     }
   },
@@ -151,10 +151,10 @@ nativeTest(
   "cancellation releases native input and allows a new take",
   async () => {
     const { record } = await begin();
-    await service.cancel(record.id);
+    await services.recordings.discard(record.id);
     await noCapture();
     const next = await begin();
-    await service.cancel(next.record.id);
+    await services.recordings.discard(next.record.id);
     await noCapture();
   },
   20_000,
@@ -165,7 +165,7 @@ nativeTest(
     const { record } = await begin();
     await Bun.sleep(5300);
     await noCapture();
-    expect((await service.get(record.id)).capture?.state).toBe("stopped");
+    expect((await services.recordings.get(record.id)).capture?.state).toBe("stopped");
   },
   10_000,
 );
@@ -229,17 +229,14 @@ nativeTest("parent crash kills its native helper", async () => {
 });
 nativeTest("service shutdown releases capture and restart permits a fresh take", async () => {
   const { record } = await begin();
-  await service.shutdown();
+  await services.close();
   await provider.close();
   await noCapture();
   provider = await PipeWireCaptureProvider.open({ helper: helper!, hostID: "isolated-test" });
-  service = await GenerationService.open(
-    { dataDirectory: join(directory, "data"), development: true, captureProvider: provider },
-    new FakeInference(),
-  );
-  expect((await service.get(record.id)).capture?.state).toBe("stopped");
+  services = await openCaptureServices(join(directory, "data"), provider);
+  expect((await services.recordings.get(record.id)).capture?.state).toBe("stopped");
   const next = await begin();
-  await service.cancel(next.record.id);
+  await services.recordings.discard(next.record.id);
   await noCapture();
 });
 nativeTest("target removal cancels an active take without substituting audio", async () => {
@@ -249,5 +246,5 @@ nativeTest("target removal cancels an active take without substituting audio", a
   )!;
   await command("pw-cli", ["destroy", String(source.id)]);
   await noCapture();
-  expect((await service.get(record.id)).capture?.state).toBe("stopped");
+  expect((await services.recordings.get(record.id)).capture?.state).toBe("stopped");
 });
