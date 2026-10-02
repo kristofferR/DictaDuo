@@ -71,11 +71,14 @@ const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0)) await close();
 });
-async function fixture(provider: FakeCapture | undefined = new FakeCapture()) {
+async function fixture(
+  provider: FakeCapture | undefined = new FakeCapture(),
+  inference = new FakeInference(),
+) {
   const directory = await mkdtemp(join(tmpdir(), "sottoduo-capture-"));
   const service = await GenerationService.open(
     { dataDirectory: directory, development: true, captureProvider: provider },
-    new FakeInference(),
+    inference,
   );
   const app = createHTTPServer(service, "server-access");
   cleanup.push(async () => {
@@ -222,6 +225,7 @@ test("one admission wins racing clients; device labels and request IDs do not gr
     }),
   ]);
   expect(results.map((r) => r.statusCode).sort()).toEqual([201, 409]);
+  expect(results.find((r) => r.statusCode === 409)!.json().code).toBe("capture_busy");
   expect(f.provider.calls).toBe(1);
   const record = results.find((r) => r.statusCode === 201)!.json();
   for (const action of ["cancel", "capture/heartbeat", "capture/stop", "delivery"]) {
@@ -607,4 +611,38 @@ test("capture deadline and lease no longer cancel a take while its stop drains",
   }
   expect((await stopping).statusCode).toBe(202);
   expect((await f.service.get(id)).capture?.state).toBe("sealed");
+});
+
+test("a sealed remote take queues for processing while the next remote take records", async () => {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  class HeldInference extends FakeInference {
+    override async transcribe(...args: Parameters<FakeInference["transcribe"]>) {
+      await held;
+      return super.transcribe(...args);
+    }
+  }
+  const f = await fixture(new FakeCapture(), new HeldInference());
+  const next = () =>
+    f.app.inject({
+      method: "POST",
+      url: "/v1/captures",
+      headers: f.headers,
+      payload: { ...f.request, requestID: randomUUID() },
+    });
+  const first = (await f.start()).json();
+  const stopped = await f.app.inject({
+    method: "POST",
+    url: `/v1/generations/${first.id}/capture/stop`,
+    headers: f.headers,
+    payload: {},
+  });
+  expect(stopped.statusCode).toBe(202);
+  const second = await next();
+  expect(second.statusCode).toBe(201);
+  expect(["queued", "transcribing"]).toContain((await f.service.get(first.id)).status);
+  release();
+  await until(async () => (await f.service.get(first.id)).status === "completed");
+  expect((await f.service.get(second.json().id)).status).toBe("receiving");
+  await f.service.cancel(second.json().id);
 });

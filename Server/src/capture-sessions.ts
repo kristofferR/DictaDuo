@@ -62,7 +62,7 @@ const sameSource = (a: StartRequest["source"], b: StartRequest["source"]) =>
   a.hostID === b.hostID && a.id === b.id;
 const closed = () => new ServiceError(409, "capture_closed", "This capture is no longer active.");
 
-/** Coordinates a trusted local provider; the existing generation queue still owns admission. */
+/** Coordinates a trusted local provider and admits one remote capture at a time. */
 export class CaptureSessions {
   private active?: Session;
   private admission: Promise<unknown> = Promise.resolve();
@@ -138,6 +138,13 @@ export class CaptureSessions {
         if (this.active !== active) throw closed();
         return { ready: active.ready };
       }
+      // Recordings queue for processing, but one provider records one take at a time.
+      if (!existing && active)
+        throw new ServiceError(
+          409,
+          "capture_busy",
+          "The server microphone is recording another take. Try again when it stops.",
+        );
       if (!existing && (!this.provider || !this.eligible(request.source)))
         throw new ServiceError(
           503,

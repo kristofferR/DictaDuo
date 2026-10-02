@@ -36,9 +36,9 @@ The TypeScript server also supports [Soniox streaming with automatic Whisper fal
 
 An additive [remote capture coordinator](remote-capture.md) separates server-hosted audio from the destination client. It reuses generation admission and processing through a trusted local capture-provider interface. No hardware provider is configured by default; the following local-upload flow continues unchanged.
 
-1. The client asks the server to create a generation with its device identity. The server freezes shared settings and admits one active job at a time. Offline, busy, or unavailable speech recognition prevents capture.
+1. The client asks the server to create a generation with its device identity. The server freezes shared settings. Several recordings can upload at once; offline or unavailable speech recognition prevents capture.
 2. The client pins its microphone and uploads acknowledged, sequenced PCM chunks while recording. Inference audio is mono 16 kHz float32; optional original audio keeps the microphone rate/channels as float32.
-3. Release stops capture, drains uploads, and sends final frame counts. The server checks the complete intervals and seals WAV files. Recordings must be 0.25–180 seconds.
+3. Release stops capture, drains uploads, and sends final frame counts. The server checks the complete intervals, seals WAV files, and queues the recording. Sealed recordings are processed one at a time in the order they finished; cancelling one leaves the rest of the queue running. Recordings must be 0.25–180 seconds.
 4. The server runs Whisper, mechanical cleanup, dictionary rules, and list formatting. Optional Qwen output passes through dictionary rules and deterministic rewrite checks. Rejection or proofreading failure retains the pre-proofreading text.
 5. NDJSON events carry progress and the saved final result. The client verifies focus/caret safety, makes one delivery attempt, and reports the outcome separately from inference completion.
 
