@@ -478,7 +478,11 @@ extension ServerClient {
 
     func materializedRecording(_ id: UUID) async throws -> GenerationRecord {
         let detail = try await recordingDetail(id)
-        if let result = detail.result { return result }
+        if var result = detail.result {
+            // A failed retry of a finished take keeps its result and reports why on the session.
+            if result.error == nil { result.error = detail.snapshot.error }
+            return result
+        }
         return Self.generationSummary(detail.snapshot)
     }
 

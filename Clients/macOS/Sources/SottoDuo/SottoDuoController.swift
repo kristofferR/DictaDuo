@@ -1102,8 +1102,9 @@ final class SottoDuoController: ObservableObject {
         take.gate.decide(false)
     }
 
-    /// Re-runs transcription on a failed or cancelled recording's saved audio.
-    /// The result lands in history only; nothing is pasted.
+    /// Re-runs transcription on a finished, failed or cancelled recording's saved audio.
+    /// The result lands in history only; nothing is pasted. A failed retry of a
+    /// finished take keeps its transcript and reports why in `error`.
     func retryGeneration(_ id: UUID) {
         // One retry per recording at a time; a second would be rejected and
         // leave an error over the first one's result.
@@ -1124,6 +1125,7 @@ final class SottoDuoController: ObservableObject {
                     generationDetails[id] = nil
                     if settled.processingState != .completed { errorMessage = settled.error ?? "Transcription failed again." }
                     else {
+                        if let error = settled.error { errorMessage = error }
                         // The server now holds the result; a local copy left from the
                         // failed run is redundant, and discarding it would erase both.
                         if let spool = pendingSpools[id] {
@@ -1142,7 +1144,9 @@ final class SottoDuoController: ObservableObject {
                         await self?.replaceGeneration(record)
                     }
                     replaceGeneration(final)
-                    if final.status != .completed { errorMessage = final.error ?? "Transcription failed again." }
+                    if final.status != .completed || final.error != nil {
+                        errorMessage = final.error ?? "Transcription failed again."
+                    }
                 }
             } catch { errorMessage = error.localizedDescription }
             refreshServer()
