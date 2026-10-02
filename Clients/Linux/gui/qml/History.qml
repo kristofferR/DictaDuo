@@ -462,7 +462,7 @@ ColumnLayout {
         Layout.fillWidth: true
         SLabel {
             ui: root.ui
-            text: root.records.length + (root.cursor ? " sessions loaded" : " sessions")
+            text: root.records.length + (root.records.length === 1 ? " dictation" : " dictations") + (root.cursor ? " loaded" : "")
             color: root.ui.c.muted
             Layout.fillWidth: true
         }

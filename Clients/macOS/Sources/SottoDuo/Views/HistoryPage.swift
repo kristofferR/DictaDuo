@@ -61,7 +61,7 @@ struct HistoryPage: View {
             .layoutPriority(1)
 
             HStack {
-                Text("\(filtered.count) sessions\(controller.hasMoreHistory ? " loaded" : "")")
+                Text("\(filtered.count) \(filtered.count == 1 ? "dictation" : "dictations")\(controller.hasMoreHistory ? " loaded" : "")")
                     .font(.caption)
                     .foregroundStyle(SottoDuoPalette.muted)
                 Spacer()
@@ -279,31 +279,34 @@ struct HistoryPage: View {
                 .frame(maxHeight: .infinity)
                 Divider()
                 HStack {
-                    if selected.canTranscribeAgain && controller.serverHealth?.generationRetry == true {
+                    if selected.canTranscribeAgain {
+                        let supported = controller.serverHealth?.generationRetry == true
                         Button("Transcribe again") {
                             controller.errorMessage = nil
                             controller.retryGeneration(selected.id)
                         }
-                        .disabled(controller.serverHealth == nil || controller.retryingGenerationIDs.contains(selected.id))
-                        .help("Transcribe the saved audio again. Nothing is pasted.")
+                        .disabled(!supported || controller.retryingGenerationIDs.contains(selected.id))
+                        .help(supported ? "Transcribe the saved audio again. Nothing is pasted."
+                              : "Update SottoDuo on the server to transcribe recordings again.")
                     }
                     if selected.inferenceAudio != nil {
                         Button("Open audio") {
                             controller.errorMessage = nil
                             controller.openGenerationAudio(selected, kind: .inference)
                         }
+                        .help("The 16 kHz audio used for transcription.")
                     }
                     let originalRuns = controller.originalRecordingRuns(selected.id)
                     if originalRuns.count > 1 {
-                        Menu("Open original") {
+                        Menu("Open original recording") {
                             ForEach(Array(originalRuns.enumerated()), id: \.element.runID) { index, run in
-                                Button("Run \(index + 1) · \(run.format.sampleRate) Hz · \(run.format.channels) ch") {
+                                Button("Part \(index + 1)") {
                                     controller.openGenerationAudio(selected, kind: .original, runID: run.runID)
                                 }
                             }
                         }
                     } else if selected.originalAudio != nil || !originalRuns.isEmpty {
-                        Button("Open original") {
+                        Button("Open original recording") {
                             controller.errorMessage = nil
                             controller.openGenerationAudio(selected, kind: .original)
                         }

@@ -421,7 +421,7 @@ test("an incompatible server and missing credentials remain repairable without l
       name: "Desktop",
       accessToken: "fixture-secret",
     }),
-  ).rejects.toThrow("incompatible API");
+  ).rejects.toThrow("The server is newer than this app");
   expect(await Bun.file(f.file).exists()).toBe(false);
   const checked = await settings.test({
     server: f.server,

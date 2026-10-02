@@ -117,15 +117,18 @@ export class ConnectionSettings {
     const api = new API(server, secret);
     let health: Awaited<ReturnType<API["health"]>>;
     let hosts: string[];
+    let hostName: string | undefined;
     try {
       health = await api.health();
       if (health.apiVersion !== 3)
         throw new ClientNotice(
-          "This server uses an incompatible API version. Update SottoDuo on both computers.",
+          health.apiVersion > 3
+            ? "The server is newer than this app. Update SottoDuo on this computer."
+            : "The server is older than this app. Update SottoDuo on the server.",
         );
-      hosts = [
-        ...new Set((await api.sources()).sources.map((source) => source.identity.hostID)),
-      ].sort();
+      const list = await api.sources();
+      hostName = list.sharingHost?.name;
+      hosts = [...new Set(list.sources.map((source) => source.identity.hostID))].sort();
       const savedHost = this.config?.server === server ? this.config.sources.hostID : undefined;
       if (savedHost && !hosts.includes(savedHost)) hosts.push(savedHost);
       hosts.sort();
@@ -154,6 +157,7 @@ export class ConnectionSettings {
     return {
       ticket: this.verified.id,
       hosts,
+      hostName,
       hostID: hosts.includes(this.config?.sources.hostID ?? "")
         ? this.config!.sources.hostID
         : hosts.length === 1

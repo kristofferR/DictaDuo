@@ -245,7 +245,7 @@ ColumnLayout {
 
         SButton {
             ui: root.ui
-            text: "Open original"
+            text: "Open original recording"
             visible: !!root.record && !!root.record.originalAudio
             enabled: root.history.available && !root.history.acting && !bridge.preview
             onClicked: root.history.openAudio("original")
@@ -258,7 +258,7 @@ ColumnLayout {
                 required property var modelData
                 required property int index
                 ui: root.ui
-                text: "Open original run " + (index + 1)
+                text: "Open original recording, part " + (index + 1)
                 enabled: root.history.available && !root.history.acting && !bridge.preview
                 onClicked: root.history.openAudio("original", modelData.runID)
             }

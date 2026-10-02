@@ -8,6 +8,7 @@ Group {
     title: "Connection"
     property string ticket: ""
     property var hosts: []
+    property string hostName: ""
     property string message: ""
     property bool pending: false
     property bool tested: false
@@ -52,6 +53,7 @@ Group {
                     return;
                 root.ticket = data.ticket;
                 root.hosts = data.hosts;
+                root.hostName = data.hostName || "";
                 hostPicker.currentIndex = root.hosts.indexOf(data.hostID);
                 hostID.text = data.hostID || "";
                 root.tested = true;
@@ -227,14 +229,15 @@ Group {
         }
         SLabel {
             ui: root.ui
-            visible: root.tested
-            text: "Microphones provided by"
+            visible: root.tested && root.hosts.length > 0
+            // One computer provides the server's microphones in a normal setup.
+            text: root.hosts.length === 1 ? "Microphones on " + (root.hostName || root.hosts[0]) : "Microphones provided by"
         }
         ComboBox {
             id: hostPicker
             objectName: "connectionHostPicker"
             Layout.fillWidth: true
-            visible: root.tested && root.hosts.length > 0
+            visible: root.tested && root.hosts.length > 1
             model: root.hosts
             enabled: !root.pending
             Accessible.name: "Microphone computer"
@@ -245,7 +248,7 @@ Group {
             objectName: "connectionHostID"
             Layout.fillWidth: true
             visible: root.tested && root.hosts.length === 0
-            placeholderText: "Microphone computer ID from the server setup"
+            placeholderText: "Microphone computer ID (advanced)"
             placeholderTextColor: root.ui.c.muted
             Accessible.name: "Microphone computer ID"
             maximumLength: 200
@@ -255,7 +258,7 @@ Group {
             ui: root.ui
             Layout.fillWidth: true
             visible: root.tested && root.hosts.length === 0
-            text: "The server has no microphone sources yet. Enter its microphone computer ID, or configure server audio and test again."
+            text: "The server has no microphones yet. Set up audio on the server computer, then test again."
             color: root.ui.c.muted
         }
         SLabel {

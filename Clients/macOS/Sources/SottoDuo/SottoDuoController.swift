@@ -416,7 +416,9 @@ final class SottoDuoController: ObservableObject {
             let health = try await connection.health()
             guard endpoint == preferences.endpoint, !Task.isCancelled else { return }
             serverHealth = health
-            serverStatusMessage = health.apiVersion != SottoDuoAPI.version ? "Server API version is incompatible"
+            serverStatusMessage = health.apiVersion != SottoDuoAPI.version
+                ? (health.apiVersion > SottoDuoAPI.version ? "The server is newer than this app. Update SottoDuo on this Mac."
+                    : "The server is older than this app. Update SottoDuo on the server.")
                 : (health.ready ? "Server online" : (health.message ?? "Server models are not ready"))
             if !isBusy, activity == .idle { statusMessage = isServerReady ? "Ready when you are" : serverStatusMessage }
             if refreshData {

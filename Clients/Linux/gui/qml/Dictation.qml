@@ -202,7 +202,7 @@ ColumnLayout {
         Layout.fillWidth: true
         color: root.ui.c.muted
         font.pixelSize: 13
-        text: root.ui.activity.phase === "failed" ? root.ui.snapshot.message : root.ui.result ? root.ui.result.delivery === "uncertain" ? "Insertion could not be confirmed. Check your field before copying to avoid a duplicate." : root.ui.result.delivery === "inserted" ? "Inserted at your cursor." : "Nothing was inserted. Your transcript is ready to copy." : root.ui.busy ? root.ui.feedback.partialText ? "Live text may change. Only the finished dictation is delivered." : root.ui.feedback.streamAvailable === false ? "Live feedback is unavailable. Dictation is still controlled by its recording session." : "You can cancel this take below." : ""
+        text: root.ui.activity.phase === "failed" ? root.ui.snapshot.message : root.ui.result ? root.ui.result.delivery === "uncertain" ? "Insertion could not be confirmed. Check your field before copying to avoid a duplicate." : root.ui.result.delivery === "inserted" ? "Inserted at your cursor." : "Nothing was inserted. Your transcript is ready to copy." : root.ui.busy ? root.ui.feedback.partialText ? "Live text may change. Only the finished dictation is delivered." : root.ui.feedback.streamAvailable === false ? "Live text is unavailable right now. Your dictation still records and finishes normally." : "You can cancel this take below." : ""
         visible: text.length > 0
     }
     Rectangle {
