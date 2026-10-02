@@ -354,6 +354,23 @@ test("an interrupted take with audio is sealed and finishes archive-only", async
   expect((await f.recordings.detail(id)).result?.finalText).toBeTruthy();
 });
 
+test("a seal that fails transiently after an interruption is retried", async () => {
+  const provider = new FakeCapture();
+  provider.writeAtStart = true;
+  const f = await fixture(provider);
+  const stopCapture = f.recordings.stopCapture.bind(f.recordings);
+  let attempts = 0;
+  f.recordings.stopCapture = async (...args) => {
+    if (++attempts === 1) throw new Error("Disk briefly unavailable");
+    return stopCapture(...args);
+  };
+  const id = (await f.start()).json().id;
+  f.provider.available = false;
+  await until(async () => (await f.recordings.get(id)).capture?.state === "stopped", 2_000);
+  expect(attempts).toBe(2);
+  expect((await f.recordings.get(id)).stopRuns?.[0]?.inferenceFrames).toBe(16_000);
+});
+
 test("source loss waits for an in-flight append before sealing its counts", async () => {
   const f = await fixture();
   const preferences = await f.service.getPreferences();

@@ -19,6 +19,8 @@ export const captureLimits = {
   leaseMS: 6_000,
   drainMS: 5_000,
   sourceAgeMS: 3_500,
+  /** Backoff for sealing an interrupted take's checkpoint after a transient failure. */
+  sealRetryMS: [250, 1_000, 3_000, 10_000],
 } as const;
 type CaptureState = NonNullable<RecordingSnapshot["capture"]>["state"];
 type Counts = Omit<FinishGenerationRequest, "continuationID">;
@@ -454,18 +456,25 @@ export class CaptureSessions {
       await this.store.discard(session.id).catch(() => {});
       return;
     }
-    await this.store
-      .stopCapture(
-        session.id,
-        {
-          inferenceFrames: inference,
-          ...(session.retainsOriginal ? { originalFrames: original } : {}),
-        },
-        undefined,
-        message,
-      )
-      // Never discard retained audio here: startup recovery seals this prefix.
-      .catch(() => {});
+    const counts = {
+      inferenceFrames: inference,
+      ...(session.retainsOriginal ? { originalFrames: original } : {}),
+    };
+    // Nothing else retries this seal once the session left `active`, so a
+    // transient failure retries the same counts. Never discard retained audio
+    // here: if the server stops first, startup recovery seals this prefix.
+    for (const delay of [0, ...captureLimits.sealRetryMS]) {
+      if (delay) {
+        if (this.stopping) return;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      try {
+        await this.store.stopCapture(session.id, counts, undefined, message);
+        return;
+      } catch (error) {
+        if (error instanceof ServiceError && error.status < 500) return;
+      }
+    }
   }
   async shutdown() {
     this.stopping = true;
