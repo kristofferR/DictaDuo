@@ -1232,6 +1232,12 @@ final class SottoDuoController: ObservableObject {
                 pending.capture?.cancelMonitoring()
                 if let ticket = pending.trigger?.buttonTicket { remoteButtons?.complete(ticket) }
                 pendingDictations.removeAll { $0 === pending }
+                // A remote take that ends before its seal callback still owes its mute,
+                // unless a newer take is recording or still sealing.
+                if pending.capture != nil, !isCapturing,
+                   !pendingDictations.contains(where: { $0.capture.map { !$0.isSealed } ?? false }) {
+                    outputMuter.restore()
+                }
                 if pendingDictations.isEmpty {
                     deliveryTail = nil
                     applyConfiguration(configuration.configuration)
