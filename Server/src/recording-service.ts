@@ -267,6 +267,9 @@ export class RecordingService {
       for (const stream of manifest.snapshot.streams) {
         if (!isUUID(stream.runID))
           throw failure("invalid_archive", "Invalid capture run in archive.", 500);
+        // Completed audio is only exported, which walks its chunks in sequence.
+        // Indexing it would grow startup work and memory with all of history.
+        if (manifest.snapshot.processingState === "completed") continue;
         const positions: ChunkPosition[] = [];
         let sequence = 0,
           frameCount = 0;
@@ -1327,8 +1330,9 @@ export class RecordingService {
         }
       })
       .catch(() => {
-        // A checkpoint/storage failure must not delete audio or escape as an
-        // unhandled background rejection. A later explicit resume retries it.
+        // Storage failed even while recording the failure. Keep the audio and
+        // retry later, so queued sessions don't wait forever on a recovered disk.
+        setTimeout(() => this.schedule(), 5000).unref?.();
       })
       .finally(() => {
         this.worker = undefined;
@@ -1502,6 +1506,10 @@ export class RecordingService {
         return { manifest, runID: "", firstFrame: 0, frameCount: 0, final: true, finalize: true };
       }
       return undefined;
+    }).catch(async (error: unknown) => {
+      // A checkpoint failure before work starts must fail this take, not stall it.
+      if (!this.stopping) await this.failProcessing(id, error);
+      return undefined;
     });
     if (!work) return false;
     const job = new AbortController();
@@ -1573,6 +1581,8 @@ export class RecordingService {
           manifest.snapshot.previewText = result.finalText.slice(-4096);
           delete manifest.snapshot.error;
           await this.commit(manifest);
+          for (const stream of manifest.snapshot.streams)
+            this.chunks.delete(this.streamKey(id, stream.runID, stream.kind));
         });
       } else if ("segment" in work && work.segment) {
         await this.commitLiveSegment(id, work.manifest, work.segment, signal);
@@ -1792,21 +1802,24 @@ export class RecordingService {
       return true;
     } catch (error) {
       if (this.stopping) return false;
-      await this.mutate(async () => {
-        const manifest = copy(this.lookup(id));
-        if (manifest.snapshot.captureState === "discarded") return;
-        manifest.snapshot.processingState = "failed";
-        manifest.snapshot.error =
-          error instanceof Error
-            ? error.message
-            : "Speech processing failed. Audio has been preserved.";
-        await this.commit(manifest);
-      });
+      await this.failProcessing(id, error);
       return false;
     } finally {
       if (this.jobs.get(id) === job) this.jobs.delete(id);
       if (job.signal.aborted) await rm(join(this.directory(id), "window.wav"), { force: true });
     }
+  }
+  private failProcessing(id: string, error: unknown) {
+    return this.mutate(async () => {
+      const manifest = copy(this.lookup(id));
+      if (manifest.snapshot.captureState === "discarded") return;
+      manifest.snapshot.processingState = "failed";
+      manifest.snapshot.error =
+        error instanceof Error
+          ? error.message
+          : "Speech processing failed. Audio has been preserved.";
+      await this.commit(manifest);
+    });
   }
   /**
    * The window's audio is durable, so a transient engine failure gets one more
@@ -2119,9 +2132,9 @@ export class RecordingService {
       for (const stream of streams) {
         await requireRegularDirectory(join(this.directory(id), stream.runID));
         await requireRegularDirectory(this.chunkDirectory(id, stream.runID, audioKind));
-        for (const position of this.chunks.get(this.streamKey(id, stream.runID, audioKind)) ?? []) {
+        for (let sequence = 0; sequence < stream.nextSequence; sequence++) {
           const bytes = await readRegularFile(
-            this.chunkPath(id, stream.runID, audioKind, position.sequence, "pcm"),
+            this.chunkPath(id, stream.runID, audioKind, sequence, "pcm"),
             MAX_CHUNK_BYTES,
           );
           await output.writeFile(bytes);

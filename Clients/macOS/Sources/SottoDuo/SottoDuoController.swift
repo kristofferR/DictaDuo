@@ -1051,7 +1051,19 @@ final class SottoDuoController: ObservableObject {
                     }
                     generationDetails[id] = nil
                     if settled.processingState != .completed { errorMessage = settled.error ?? "Transcription failed again." }
-                    else if selectedGenerationDetailID == id { loadGenerationDetail(id) }
+                    else {
+                        // The server now holds the result; a local copy left from the
+                        // failed run is redundant, and discarding it would erase both.
+                        if let spool = pendingSpools[id] {
+                            recoveryTasks[id]?.cancel()
+                            recoveryTasks[id] = nil
+                            try? spool.discard()
+                            pendingSpools[id] = nil
+                            recoveredSpoolIDs.remove(id)
+                            updatePendingRecordingSummary()
+                        }
+                        if selectedGenerationDetailID == id { loadGenerationDetail(id) }
+                    }
                 } else {
                     replaceGeneration(try await connection.retry(id))
                     let final = try await connection.events(id) { [weak self] record in
