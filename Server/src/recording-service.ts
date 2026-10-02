@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { open, readdir, rm, statfs } from "node:fs/promises";
+import { open, readdir, rename, rm, statfs } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type {
@@ -79,6 +79,8 @@ const MINIMUM_WINDOW_FRAMES = 16_000 / 5;
 const MAX_LIFECYCLE_BYTES = MAXIMUM_RECORDING_CONTROL_MESSAGE_BYTES / 2;
 const SNAPSHOT_HEADROOM_BYTES = 64 * 1024;
 const MAX_MANIFEST_BYTES = MAXIMUM_RECORDING_CONTROL_MESSAGE_BYTES + 2 * 1024 * 1024;
+const PREVIOUS_RESULT = "previous-result.json";
+const PREVIOUS_MANIFEST = "previous-manifest.json";
 const uuid = () => randomUUID().toUpperCase();
 const date = () => new Date().toISOString();
 const copy = <T>(value: T): T => structuredClone(value);
@@ -273,6 +275,15 @@ export class RecordingService {
       manifest.snapshot.epoch++;
       if (manifest.snapshot.captureState === "recording")
         manifest.snapshot.captureState = "interrupted";
+      // A retry that stopped before committing its reset left the finished result aside;
+      // after a successful retry the leftover copy is stale.
+      if (manifest.snapshot.processingState === "completed") {
+        const result = join(directory, "result.json"),
+          previous = join(directory, PREVIOUS_RESULT);
+        if (!(await Bun.file(result).exists())) await rename(previous, result).catch(() => {});
+        else await rm(previous, { force: true });
+        await rm(join(directory, PREVIOUS_MANIFEST), { force: true });
+      }
       if (manifest.snapshot.captureState === "discarded") {
         manifest.snapshot.streams = [];
         manifest.cursors = [];
@@ -287,58 +298,7 @@ export class RecordingService {
         // Completed audio is only exported, which walks its chunks in sequence.
         // Indexing it would grow startup work and memory with all of history.
         if (manifest.snapshot.processingState === "completed") continue;
-        const positions: ChunkPosition[] = [];
-        let sequence = 0,
-          frameCount = 0;
-        // A receipt can outlive a failed manifest commit after its run was sealed.
-        // Audio past an accepted endpoint was never acknowledged, so stop there.
-        const endpoint = (manifest.snapshot.stopRuns ?? manifest.snapshot.closedRuns)?.find(
-          (run) => run.runID === stream.runID,
-        );
-        const limit = endpoint
-          ? stream.kind === "inference"
-            ? endpoint.inferenceFrames
-            : (endpoint.originalFrames ?? 0)
-          : Number.POSITIVE_INFINITY;
-        while (frameCount < limit) {
-          const path = service.chunkPath(id, stream.runID, stream.kind, sequence, "json");
-          let receipt: Receipt;
-          try {
-            receipt = JSON.parse((await readRegularFile(path, 4096)).toString()) as Receipt;
-          } catch (error) {
-            if (error instanceof Error && "code" in error && error.code === "ENOENT") break;
-            throw error;
-          }
-          if (
-            receipt.sequence !== sequence ||
-            receipt.firstFrame !== frameCount ||
-            receipt.runID !== stream.runID ||
-            receipt.kind !== stream.kind ||
-            !integer(receipt.frameCount) ||
-            receipt.frameCount === 0 ||
-            JSON.stringify(receipt.format) !== JSON.stringify(stream.format)
-          )
-            throw failure("invalid_archive", "Noncontiguous recording receipt journal.", 500);
-          const file = await open(
-            service.chunkPath(id, stream.runID, stream.kind, sequence, "pcm"),
-            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-          );
-          try {
-            const info = await file.stat();
-            if (!info.isFile() || info.size !== receipt.frameCount * stream.format.channels * 4)
-              throw failure("invalid_archive", "Acknowledged audio is missing or damaged.", 500);
-          } finally {
-            await file.close();
-          }
-          positions.push({ sequence, firstFrame: frameCount, frameCount: receipt.frameCount });
-          frameCount += receipt.frameCount;
-          sequence++;
-        }
-        if (sequence < stream.nextSequence || frameCount < stream.frameCount)
-          throw failure("invalid_archive", "Acknowledged recording audio is missing.", 500);
-        stream.nextSequence = sequence;
-        stream.frameCount = frameCount;
-        service.chunks.set(service.streamKey(id, stream.runID, stream.kind), positions);
+        await service.indexStream(id, manifest, stream);
       }
       manifest.snapshot.uploadedFrames = service.uploaded(manifest);
       // A server microphone cannot resume after restart: seal what it recorded,
@@ -1118,17 +1078,34 @@ export class RecordingService {
       const manifest = copy(this.lookup(id));
       if (
         manifest.snapshot.captureState !== "stopped" ||
-        manifest.snapshot.processingState !== "failed" ||
+        !["failed", "completed"].includes(manifest.snapshot.processingState) ||
         !manifest.snapshot.streams.some((stream) => stream.kind === "inference")
       )
         throw failure(
           "not_retryable",
-          "Only failed recordings with saved audio can be transcribed again.",
+          "Only finished recordings with saved audio can be transcribed again.",
         );
       if (!readiness.available) {
         // Verify and load the take's engine so a later retry can run.
         void this.inference.warmUp(false, undefined, engine).catch(() => {});
         throw failure("server_unavailable", readiness.message, 503);
+      }
+      if (manifest.snapshot.processingState === "completed") {
+        // Start over, but keep the finished result until the new one replaces it.
+        const directory = this.directory(manifest.snapshot.id);
+        await atomicPrivateWrite(join(directory, PREVIOUS_MANIFEST), JSON.stringify(manifest));
+        await rename(join(directory, "result.json"), join(directory, PREVIOUS_RESULT));
+        for (const cursor of manifest.cursors) {
+          cursor.frameCount = cursor.transcribedFrames = cursor.proofreadFrames = 0;
+          delete cursor.pending;
+        }
+        manifest.nextWindow = 0;
+        manifest.textState = createLongRecordingTextState(manifest.previous?.list);
+        manifest.snapshot.transcribedFrames = manifest.snapshot.proofreadFrames = 0;
+        manifest.snapshot.previewText = "";
+        // Finished audio is not indexed in memory; processing needs it again.
+        for (const stream of manifest.snapshot.streams)
+          await this.indexStream(manifest.snapshot.id, manifest, stream);
       }
       manifest.snapshot.processingState = "queued";
       delete manifest.snapshot.error;
@@ -1359,7 +1336,15 @@ export class RecordingService {
         const directory = join(this.directory(id), name);
         await requireRegularDirectory(directory);
         await rm(directory, { recursive: true });
-      } else if (["result.json", "transcript.txt", "window.wav"].includes(name)) {
+      } else if (
+        [
+          "result.json",
+          "transcript.txt",
+          "window.wav",
+          PREVIOUS_RESULT,
+          PREVIOUS_MANIFEST,
+        ].includes(name)
+      ) {
         await rm(join(this.directory(id), name), { force: true });
       }
     }
@@ -1640,6 +1625,8 @@ export class RecordingService {
           };
           await atomicPrivateWrite(join(this.directory(id), "transcript.txt"), result.finalText);
           await atomicPrivateWrite(join(this.directory(id), "result.json"), JSON.stringify(result));
+          for (const name of [PREVIOUS_RESULT, PREVIOUS_MANIFEST])
+            await rm(join(this.directory(id), name), { force: true });
           manifest.snapshot.processingState = "completed";
           manifest.snapshot.proofreadFrames = manifest.snapshot.transcribedFrames;
           manifest.snapshot.previewText = result.finalText.slice(-4096);
@@ -1898,10 +1885,95 @@ export class RecordingService {
       if (job.signal.aborted) await rm(join(this.directory(id), "window.wav"), { force: true });
     }
   }
+  /** Verifies one stream's acknowledged chunks and indexes them for processing. */
+  private async indexStream(
+    id: string,
+    manifest: Manifest,
+    stream: Manifest["snapshot"]["streams"][number],
+  ) {
+    const positions: ChunkPosition[] = [];
+    let sequence = 0,
+      frameCount = 0;
+    // A receipt can outlive a failed manifest commit after its run was sealed.
+    // Audio past an accepted endpoint was never acknowledged, so stop there.
+    const endpoint = (manifest.snapshot.stopRuns ?? manifest.snapshot.closedRuns)?.find(
+      (run) => run.runID === stream.runID,
+    );
+    const limit = endpoint
+      ? stream.kind === "inference"
+        ? endpoint.inferenceFrames
+        : (endpoint.originalFrames ?? 0)
+      : Number.POSITIVE_INFINITY;
+    while (frameCount < limit) {
+      const path = this.chunkPath(id, stream.runID, stream.kind, sequence, "json");
+      let receipt: Receipt;
+      try {
+        receipt = JSON.parse((await readRegularFile(path, 4096)).toString()) as Receipt;
+      } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") break;
+        throw error;
+      }
+      if (
+        receipt.sequence !== sequence ||
+        receipt.firstFrame !== frameCount ||
+        receipt.runID !== stream.runID ||
+        receipt.kind !== stream.kind ||
+        !integer(receipt.frameCount) ||
+        receipt.frameCount === 0 ||
+        JSON.stringify(receipt.format) !== JSON.stringify(stream.format)
+      )
+        throw failure("invalid_archive", "Noncontiguous recording receipt journal.", 500);
+      const file = await open(
+        this.chunkPath(id, stream.runID, stream.kind, sequence, "pcm"),
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      try {
+        const info = await file.stat();
+        if (!info.isFile() || info.size !== receipt.frameCount * stream.format.channels * 4)
+          throw failure("invalid_archive", "Acknowledged audio is missing or damaged.", 500);
+      } finally {
+        await file.close();
+      }
+      positions.push({ sequence, firstFrame: frameCount, frameCount: receipt.frameCount });
+      frameCount += receipt.frameCount;
+      sequence++;
+    }
+    if (sequence < stream.nextSequence || frameCount < stream.frameCount)
+      throw failure("invalid_archive", "Acknowledged recording audio is missing.", 500);
+    stream.nextSequence = sequence;
+    stream.frameCount = frameCount;
+    this.chunks.set(this.streamKey(id, stream.runID, stream.kind), positions);
+  }
+  /**
+   * A retry of a finished take that fails gives back the result it replaced,
+   * so transcribing again never loses a transcript.
+   */
+  private async restorePrevious(manifest: Manifest, error: unknown) {
+    const directory = this.directory(manifest.snapshot.id);
+    let previous: Manifest;
+    try {
+      previous = JSON.parse(
+        (await readRegularFile(join(directory, PREVIOUS_MANIFEST), MAX_MANIFEST_BYTES)).toString(),
+      ) as Manifest;
+      await rename(join(directory, PREVIOUS_RESULT), join(directory, "result.json"));
+    } catch {
+      return false;
+    }
+    await rm(join(directory, PREVIOUS_MANIFEST), { force: true });
+    previous.snapshot.epoch = manifest.snapshot.epoch;
+    previous.snapshot.revision = manifest.snapshot.revision;
+    const reason = error instanceof Error ? error.message : "Speech processing failed.";
+    previous.snapshot.error = `Transcribing again failed: ${reason} The previous transcript is kept.`;
+    await this.commit(previous);
+    for (const stream of previous.snapshot.streams)
+      this.chunks.delete(this.streamKey(previous.snapshot.id, stream.runID, stream.kind));
+    return true;
+  }
   private failProcessing(id: string, error: unknown) {
     return this.mutate(async () => {
       const manifest = copy(this.lookup(id));
       if (manifest.snapshot.captureState === "discarded") return;
+      if (await this.restorePrevious(manifest, error)) return;
       manifest.snapshot.processingState = "failed";
       manifest.snapshot.error =
         error instanceof Error

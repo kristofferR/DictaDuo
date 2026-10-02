@@ -506,6 +506,36 @@ test("admission checks readiness again when preferences change during the check"
   expect(snapshot.settings.revision).toBe(base.revision + 1);
 });
 
+test("a finished take can be transcribed again, and a failed retry keeps the old transcript", async () => {
+  const context = await setup();
+  const { service, inference } = context;
+  const snapshot = await service.resume((await service.create(request())).id);
+  const runID = randomUUID();
+  const bytes = Buffer.alloc(64000);
+  await service.appendAudio(snapshot.id, header(snapshot, runID, 0, 0, bytes), bytes);
+  await service.stop(snapshot.id, snapshot.epoch, [{ runID, inferenceFrames: 16000 }]);
+  await waitFor(service, snapshot.id, (value) => value.processingState === "completed");
+  expect((await service.detail(snapshot.id)).result?.finalText).toContain("Every window");
+
+  inference.text = "A second pass reads differently.";
+  expect((await service.retry(snapshot.id)).processingState).toBe("queued");
+  await waitFor(service, snapshot.id, (value) => value.processingState === "completed");
+  expect((await service.detail(snapshot.id)).result?.finalText).toContain("second pass");
+
+  inference.fail = true;
+  await service.retry(snapshot.id);
+  const kept = await waitFor(
+    service,
+    snapshot.id,
+    (value) => value.processingState === "completed" && !!value.error,
+  );
+  expect(kept.error).toContain("previous transcript is kept");
+  expect((await service.detail(snapshot.id)).result?.finalText).toContain("second pass");
+  // Nothing is left over to restore again after a restart.
+  const restarted = await restart(context);
+  expect((await restarted.detail(snapshot.id)).result?.finalText).toContain("second pass");
+});
+
 test("explicit discard deletes audio while keeping a restart-safe fenced tombstone", async () => {
   const context = await setup();
   const snapshot = await context.service.resume((await context.service.create(request())).id);

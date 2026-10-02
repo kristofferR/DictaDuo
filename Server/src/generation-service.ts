@@ -80,6 +80,8 @@ const outputKeys = [
   "proofreadingHints",
   "proofreading",
   "continuation",
+  // The previous text was delivered, not the retried one.
+  "delivery",
 ] as const;
 const MAX_PREFERENCES_BYTES = 262_144;
 const MAX_CHUNK_BYTES = 1_048_576;
@@ -887,11 +889,11 @@ export class GenerationService {
           "not_retryable",
           "This recording has no saved audio to transcribe again.",
         );
-      if (record.status !== "failed" && record.status !== "cancelled")
+      if (!terminal(record))
         throw new ServiceError(
           409,
           "not_retryable",
-          "Only failed or cancelled recordings can be transcribed again.",
+          "Only finished recordings can be transcribed again.",
         );
       if (!state.available) {
         // The take's frozen engine may differ from the shared preference.

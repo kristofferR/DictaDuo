@@ -674,7 +674,7 @@ test("a retry that fails before new speech keeps the transcript it replaced", as
   expect(cancelled.rawText).toBe("Recording 1.");
 });
 
-test("only failed or cancelled recordings with sealed audio can be retried", async () => {
+test("only finished recordings with sealed audio can be retried", async () => {
   const { service } = await setup();
   const receiving = await upload(service);
   await expect(service.retry(receiving.id)).rejects.toMatchObject({ code: "not_retryable" });
@@ -683,7 +683,15 @@ test("only failed or cancelled recordings with sealed audio can be retried", asy
   const done = await upload(service);
   await service.finish(done.id, { inferenceFrames: 4000 });
   expect((await completed(service, done.id)).status).toBe("completed");
-  await expect(service.retry(done.id)).rejects.toMatchObject({ code: "not_retryable" });
+  await service.recordDelivery(done.id, {
+    status: "inserted",
+    reportedAt: new Date().toISOString(),
+  });
+  // A finished take can be transcribed again; the new text was never pasted.
+  const retried = await service.retry(done.id);
+  expect(retried.status).toBe("queued");
+  expect(retried.delivery).toBeUndefined();
+  expect((await completed(service, done.id)).status).toBe("completed");
 });
 
 test("a transient speech failure is retried once before the recording fails", async () => {
