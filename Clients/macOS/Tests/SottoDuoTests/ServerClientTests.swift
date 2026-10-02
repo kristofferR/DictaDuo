@@ -108,23 +108,25 @@ final class ServerClientTests: XCTestCase {
         defer { fixture.session.invalidateAndCancel() }
         let connection = try ServerClient(endpoint: fixture.endpoint, token: "", session: fixture.session).owningCapture()
         let source = AudioSourceIdentity(hostID: "desk", id: "dji")
-        var record = GenerationRecord(requestID: UUID(), device: .init(id: "mac", name: "Mac"), settings: .init())
-        record.capture = .init(source: source, state: .recording)
-        let capture = try RemoteCaptureSession(record: record, connection: connection,
-                                              requestedAt: ProcessInfo.processInfo.systemUptime)
-        record.capture?.state = .sealed
-        record.status = .queued
-        let response = try SottoDuoAPI.encoder().encode(record)
-        fixture.respond = { _ in (200, response) }
+        var snapshot = RecordingSnapshot(id: UUID(), requestID: UUID(), device: .init(id: "mac", name: "Mac"), settings: .init())
+        snapshot.capture = .init(source: source, state: .recording)
+        let capture = try RemoteCaptureSession(snapshot: snapshot, connection: connection)
+        snapshot.capture?.state = .sealed
+        snapshot.captureState = .stopped
+        let sealed = try RecordingWire.encoder().encode(snapshot)
+        fixture.respond = { request in
+            guard request.url?.path.hasSuffix("/capture/stop") == true else { throw URLError(.badServerResponse) }
+            return (200, sealed)
+        }
         var notified = false
         do {
             _ = try await capture.stop(continuationID: nil) {
                 XCTAssertTrue(capture.isSealed)
                 notified = true
             }
-            XCTFail("No event monitor was started to provide the transcription result")
-        } catch ServerClientError.disconnected {
-            // Acknowledging the seal must not wait for a terminal event.
+            XCTFail("The processing stream failed, so no result can arrive")
+        } catch is URLError {
+            // Acknowledging the seal must not wait for processing to finish.
             XCTAssertTrue(notified)
         }
         capture.cancelMonitoring()
