@@ -400,7 +400,9 @@ export class GenerationService {
           message: this.preferences.preferences.textCorrectionEnabled
             ? state.proofLoaded
               ? undefined
-              : "Unavailable. Text is kept as transcribed."
+              : this.warming
+                ? "Loading…"
+                : "Unavailable. Text is kept as transcribed."
             : "Disabled",
         },
         message,

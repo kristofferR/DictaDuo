@@ -111,7 +111,7 @@ test("repeated requests return the same frozen generation while new recordings a
     code: "stale_preferences",
   });
 });
-test("Norwegian is a supported language and reaches recognition as \"no\"", async () => {
+test('Norwegian is a supported language and reaches recognition as "no"', async () => {
   const { service, inference } = await setup();
   const preferences = await service.getPreferences();
   preferences.preferences.language = "no";
@@ -122,6 +122,29 @@ test("Norwegian is a supported language and reaches recognition as \"no\"", asyn
   await service.finish(record.id, { inferenceFrames: 4000 });
   expect((await completed(service, record.id)).status).toBe("completed");
   expect(inference.languages).toEqual(["no"]);
+});
+test("health reports text cleanup as loading while warm-up loads it", async () => {
+  let loaded!: () => void;
+  const gate = new Promise<void>((resolve) => (loaded = resolve));
+  const inference = new (class extends FakeInference {
+    proofLoaded = false;
+    override async readiness() {
+      return { ...(await super.readiness()), proofLoaded: this.proofLoaded };
+    }
+    override async warmUp() {
+      await gate;
+      this.proofLoaded = true;
+    }
+  })();
+  const { service } = await setup(inference);
+  expect((await service.health()).proofreading).toMatchObject({
+    ready: false,
+    message: "Loading…",
+  });
+  loaded();
+  for (let attempt = 0; !(await service.health()).proofreading.ready && attempt < 50; attempt++)
+    await Bun.sleep(10);
+  expect((await service.health()).proofreading).toMatchObject({ ready: true, message: undefined });
 });
 test("generation timestamps retain milliseconds for cross-device ordering", async () => {
   const { service } = await setup();

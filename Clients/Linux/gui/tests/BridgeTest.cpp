@@ -954,6 +954,14 @@ private slots:
     auto *readiness = page->findChild<QQuickItem *>("speechModelReadiness");
     QVERIFY(cleanup && vocabulary && reset && save && dictionary && readiness);
     QTRY_COMPARE(readiness->property("status").toString(), "Ready");
+    // The sample server has no Soniox key and is still loading the cleanup model.
+    auto *cleanupStatus = page->findChild<QQuickItem *>("cleanupModelReadiness");
+    auto *cloudStatus = page->findChild<QQuickItem *>("cloudRecognitionStatus");
+    auto *mode = page->findChild<QQuickItem *>("recognitionMode");
+    QVERIFY(cleanupStatus && cloudStatus && mode);
+    QCOMPARE(cleanupStatus->property("status").toString(), "Loading");
+    QVERIFY(cloudStatus->property("off").toBool());
+    QVERIFY(!mode->property("choices").toList().at(1).toMap()["enabled"].toBool());
     QTRY_VERIFY(!page->property("defaultPrompt").toString().isEmpty());
     cleanup->forceActiveFocus();
     cleanup->setProperty("text", "Keep my wording.");
