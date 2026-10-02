@@ -215,6 +215,8 @@ final class HotkeyMonitor {
     /// Views use this same state to leave Escape available to the focused app.
     /// A double-tap take is latched, so Fn shortcuts during it stay ordinary.
     var isHoldingFn: Bool { mode == .hold && key == .fn && physicalDown && active }
+    /// An accepted hold or a press still inside its acceptance delay.
+    var isHoldInProgress: Bool { active || pendingPressID != nil }
 
     var key: HoldKey = .rightOption {
         didSet {

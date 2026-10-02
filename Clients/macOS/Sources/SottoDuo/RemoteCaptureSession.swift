@@ -30,7 +30,7 @@ final class RemoteCaptureSession {
                  onFailure: @escaping @MainActor (Error) -> Void) {
         eventTask = Task { [weak self, connection, id] in
             do {
-                return try await connection.events(id) { [weak self] record in
+                return try await connection.events(id, recover: false) { [weak self] record in
                     await self?.receive(record, onUpdate: onUpdate, onFailure: onFailure)
                 }
             } catch {

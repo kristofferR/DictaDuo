@@ -140,6 +140,7 @@ enum InsertionCaretPolicy {
 final class TextInserter {
     private let pasteboard: NSPasteboard
     private(set) var confirmedAnchor: InsertionTarget?
+    private(set) var dispatchedAt: TimeInterval?
 
     init(pasteboard: NSPasteboard? = nil) {
         self.pasteboard = pasteboard ?? .general
@@ -196,8 +197,11 @@ final class TextInserter {
     }
 
     func deliver(_ text: String, copying clipboardText: String, to destination: InsertionDestination,
-                 clipboardUnchangedSince changeCount: Int) async -> InsertionOutcome {
+                 clipboardUnchangedSince changeCount: Int,
+                 waitUntilReady: (() async -> Void)? = nil,
+                 isCaptureActive: (() -> Bool)? = nil) async -> InsertionOutcome {
         confirmedAnchor = nil
+        dispatchedAt = nil
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return .failed(reason: "There is no text to deliver.")
         }
@@ -207,13 +211,16 @@ final class TextInserter {
             let environment = TextDeliveryEnvironment(
                 validate: { await Self.validate(target) },
                 modifiersAreHeld: { Self.modifiersAreHeld },
-                replaceSelection: { Self.replaceSelection($0, in: target) },
+                replaceSelection: { Self.replaceSelection($0, in: target, willDispatch: $1) },
                 postPaste: { Self.postPaste(into: target, canDispatch: $0) },
                 confirmation: { [weak self] text in
                     guard let self else { return .blocked }
                     return await self.confirm(text, in: target)
                 },
-                pause: { try await Task.sleep(nanoseconds: $0) }
+                pause: { try await Task.sleep(nanoseconds: $0) },
+                waitUntilReady: waitUntilReady,
+                isCaptureActive: isCaptureActive,
+                willDispatch: { [weak self] in self?.dispatchedAt = ProcessInfo.processInfo.systemUptime }
             )
             return await TextDeliveryTransaction(pasteboard: pasteboard, environment: environment)
                 .deliver(text, copying: clipboardText, strategy: target.snapshot.strategy,
@@ -274,7 +281,7 @@ final class TextInserter {
         }
     }
 
-    private static func replaceSelection(_ text: String, in target: InsertionTarget) -> NativeTextWrite {
+    private static func replaceSelection(_ text: String, in target: InsertionTarget, willDispatch: () -> Void) -> NativeTextWrite {
         guard !Task.isCancelled, AXIsProcessTrusted(), !target.application.isTerminated else {
             return .uncertain(reason: "Insertion was interrupted.")
         }
@@ -288,6 +295,7 @@ final class TextInserter {
         default: return .uncertain(reason: "Native insertion access could not be verified.")
         }
         guard readyToDispatch(into: target) else { return .uncertain(reason: "The original cursor changed.") }
+        willDispatch()
         let result = AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString)
         switch result {
         case .success: return .acknowledged
@@ -631,12 +639,35 @@ enum DictationClipboard {
         let item = NSPasteboardItem()
         guard item.setString(text, forType: .string) else { return .failure(.unavailable) }
         guard !Task.isCancelled else { return .failure(.cancelled) }
-        guard expectedCount == nil || pasteboard.changeCount == expectedCount else { return .failure(.changed) }
-        let ownedCount = pasteboard.prepareForNewContents(with: .currentHostOnly)
+        guard expectedCount.map({ OwnedPasteboardRevisions.onlyOwnedChanges(on: pasteboard, since: $0) }) ?? true else {
+            return .failure(.changed)
+        }
+        let ownedCount = OwnedPasteboardRevisions.prepare(pasteboard)
         guard pasteboard.changeCount == ownedCount else { return .failure(.changed) }
         guard pasteboard.writeObjects([item]) else { return .failure(.unavailable) }
         guard pasteboard.changeCount == ownedCount else { return .failure(.changed) }
         return .success(())
+    }
+}
+
+/// Revisions this app wrote. Queued takes compare the clipboard with the one
+/// at their hold; an earlier take's paste lease or copy is not newer user data.
+@MainActor
+enum OwnedPasteboardRevisions {
+    private static var revisions: [NSPasteboard.Name: Set<Int>] = [:]
+
+    static func prepare(_ pasteboard: NSPasteboard) -> Int {
+        let count = pasteboard.prepareForNewContents(with: .currentHostOnly)
+        revisions[pasteboard.name, default: []].insert(count)
+        return count
+    }
+
+    /// Whether every change after `baseline`, through `count`, was this app's own write.
+    static func onlyOwnedChanges(on pasteboard: NSPasteboard, since baseline: Int, through count: Int? = nil) -> Bool {
+        let count = count ?? pasteboard.changeCount
+        guard count > baseline else { return count == baseline }
+        let owned = revisions[pasteboard.name] ?? []
+        return (baseline + 1 ... count).allSatisfy(owned.contains)
     }
 }
 
@@ -684,7 +715,7 @@ struct ClipboardSnapshot {
             return item
         }
         guard pasteboard.changeCount == expectedCount else { return }
-        let restoredCount = pasteboard.prepareForNewContents(with: .currentHostOnly)
+        let restoredCount = OwnedPasteboardRevisions.prepare(pasteboard)
         guard pasteboard.changeCount == restoredCount else { return }
         if !restored.isEmpty { pasteboard.writeObjects(restored) }
     }

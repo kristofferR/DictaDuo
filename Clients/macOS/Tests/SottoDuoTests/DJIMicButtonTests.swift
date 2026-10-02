@@ -50,16 +50,25 @@ final class DJIMicButtonTests: XCTestCase {
 
     func testButtonOnlyFinishesItsOwnCaptureAndNeverInterruptsProcessing() {
         for activity in [DictationActivity.idle, .success, .failed] {
-            XCTAssertEqual(DictationTrigger.djiButtonAction(deviceID: 1, activity: activity, current: nil), .start)
+            XCTAssertEqual(DictationTrigger.djiButtonAction(deviceID: 1, activity: activity, current: nil, hasPendingWork: false), .start)
         }
         for activity in [DictationActivity.starting, .recording] {
-            XCTAssertEqual(DictationTrigger.djiButtonAction(deviceID: 1, activity: activity, current: .dji(1)), .finish)
+            XCTAssertEqual(DictationTrigger.djiButtonAction(deviceID: 1, activity: activity, current: .dji(1), hasPendingWork: false), .finish)
             for trigger in [DictationTrigger.keyboard, .test, .dji(2)] {
-                XCTAssertEqual(DictationTrigger.djiButtonAction(deviceID: 1, activity: activity, current: trigger), .ignore)
+                XCTAssertEqual(DictationTrigger.djiButtonAction(deviceID: 1, activity: activity, current: trigger, hasPendingWork: false), .ignore)
             }
         }
         for activity in [DictationActivity.transcribing, .delivering] {
-            XCTAssertEqual(DictationTrigger.djiButtonAction(deviceID: 1, activity: activity, current: .dji(1)), .ignore)
+            XCTAssertEqual(DictationTrigger.djiButtonAction(deviceID: 1, activity: activity, current: .dji(1), hasPendingWork: false), .ignore)
         }
+    }
+
+    func testPendingTakesBlockStartsEvenWhenTheHUDShowsASettledResult() {
+        for activity in [DictationActivity.idle, .success, .failed] {
+            XCTAssertEqual(DictationTrigger.djiButtonAction(deviceID: 1, activity: activity, current: nil,
+                                                          hasPendingWork: true), .ignore)
+        }
+        XCTAssertEqual(DictationTrigger.djiButtonAction(deviceID: 1, activity: .recording, current: .dji(1),
+                                                      hasPendingWork: true), .finish)
     }
 }

@@ -1441,7 +1441,8 @@ private final class TextDeliveryFixture {
                 return onValidate?(validationReads) ?? validation
             },
             modifiersAreHeld: { [self] in modifiersHeld },
-            replaceSelection: { [self] text in
+            replaceSelection: { [self] text, willDispatch in
+                willDispatch()
                 nativeWrites.append(text)
                 return nativeResult
             },
