@@ -42,10 +42,23 @@ def silence(path, frames=16000, sample_rate=16000, floating=False):
             recording.writeframes(bytes(frames * 2))
 
 
+def assert_spans(result):
+    """Timed pieces and segments reproduce the text in order and in bounds."""
+    for key in ("spans", "segmentSpans"):
+        spans = result[key]
+        assert "".join(span["text"] for span in spans).strip() == result["text"], (key, result)
+        start = end = 0
+        for span in spans:
+            assert span["text"], (key, span)
+            assert start <= span["startSeconds"] <= span["endSeconds"] <= result["duration"], (key, span)
+            assert span["endSeconds"] >= end, (key, span)
+            start, end = span["startSeconds"], span["endSeconds"]
+
+
 class Engine:
-    def __init__(self, executable, model, diagnostics, vad_model=DEFAULT_VAD):
+    def __init__(self, executable, model, diagnostics, vad_model=DEFAULT_VAD, kind="whisper"):
         self.process = subprocess.Popen(
-            [str(executable), "--model", str(model), "--vad-model", str(vad_model)],
+            [str(executable), "--model", str(model), "--vad-model", str(vad_model), "--engine", kind],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=diagnostics, text=True, bufsize=1,
         )
@@ -91,11 +104,11 @@ class Engine:
         self.process.wait(timeout=10)
 
 
-def assert_parent_exit(executable, model, vad_model, audio):
+def assert_parent_exit(executable, model, vad_model, audio, kind):
     parent_source = """
 import json, subprocess, sys
-engine, model, vad, audio = sys.argv[1:]
-child = subprocess.Popen([engine, '--model', model, '--vad-model', vad], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+engine, model, vad, audio, kind = sys.argv[1:]
+child = subprocess.Popen([engine, '--model', model, '--vad-model', vad, '--engine', kind], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
 assert json.loads(child.stdout.readline())['type'] == 'ready'
 child.stdin.write(json.dumps({'type':'transcribe', 'id':'parent-exit', 'path':audio}) + '\\n')
 child.stdin.flush()
@@ -104,7 +117,7 @@ print(child.pid, flush=True)
 sys.stdin.read()
 """
     parent = subprocess.Popen(
-        [sys.executable, "-B", "-c", parent_source, str(executable), str(model), str(vad_model), str(audio)],
+        [sys.executable, "-B", "-c", parent_source, str(executable), str(model), str(vad_model), str(audio), kind],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
     )
     try:
@@ -133,7 +146,9 @@ def main():
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--vad-model", type=Path, default=DEFAULT_VAD)
     parser.add_argument("--audio", type=Path, default=ROOT / "vendor/whisper.cpp/bindings/go/samples/jfk.wav")
+    parser.add_argument("--speech-engine", choices=("whisper", "parakeet"), default="whisper")
     args = parser.parse_args()
+    parakeet = args.speech_engine == "parakeet"
 
     missing = subprocess.run(
         [str(args.engine), "--model", "/nonexistent/sottoduo-test-model"],
@@ -154,7 +169,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="sottoduo-engine-test-") as directory:
         temporary = Path(directory)
         with tempfile.TemporaryFile(mode="w+") as diagnostics:
-            engine = Engine(args.engine, args.model, diagnostics, args.vad_model)
+            engine = Engine(args.engine, args.model, diagnostics, args.vad_model, args.speech_engine)
             try:
                 engine.process.stdin.write("this is not JSON\n")
                 engine.process.stdin.flush()
@@ -196,36 +211,44 @@ def main():
                     assert engine.transcribe(pcm, f"invalid-terms-{index}", vocabularyTerms=terms)["type"] == "error"
                 print("Passed: duration, sample-rate, path, language, and prompt validation", flush=True)
 
-                # The caller supplies priority order. All diagnostics contain whole
-                # terms; a large tail cannot evict the preferred words at the front.
-                terms = ["auth", "Café", "auth middleware"] + [f"preferred vocabulary term {index}" for index in range(500)]
-                hints = engine.transcribe(pcm, "vocabulary-budget", vocabularyTerms=terms)
-                assert hints["type"] == "result", hints
-                included, omitted = hints["includedTerms"], hints["omittedTerms"]
-                assert included[:3] == terms[:3] and omitted, hints
-                assert included == [term for term in terms if term in included], hints
-                assert omitted == [term for term in terms if term in omitted], hints
-                assert set(included).isdisjoint(omitted) and set(included + omitted) == set(terms), hints
-                assert 0 < hints["tokenCount"] <= hints["tokenBudget"], hints
-                replay = engine.transcribe(pcm, "vocabulary-replay", vocabularyTerms=included)
-                assert replay["includedTerms"] == included and replay["omittedTerms"] == [], replay
-                assert replay["tokenCount"] == hints["tokenCount"], (hints, replay)
+                if parakeet:
+                    # Parakeet has no vocabulary prompting; every term is reported unused.
+                    terms = ["auth", "Café", "auth middleware"]
+                    hints = engine.transcribe(pcm, "vocabulary-unsupported", vocabularyTerms=terms)
+                    assert hints["includedTerms"] == [] and hints["omittedTerms"] == terms, hints
+                    assert hints["tokenCount"] == 0 and hints["tokenBudget"] == 0, hints
+                    print("Passed: Parakeet reports every vocabulary term as unused", flush=True)
+                else:
+                    # The caller supplies priority order. All diagnostics contain whole
+                    # terms; a large tail cannot evict the preferred words at the front.
+                    terms = ["auth", "Café", "auth middleware"] + [f"preferred vocabulary term {index}" for index in range(500)]
+                    hints = engine.transcribe(pcm, "vocabulary-budget", vocabularyTerms=terms)
+                    assert hints["type"] == "result", hints
+                    included, omitted = hints["includedTerms"], hints["omittedTerms"]
+                    assert included[:3] == terms[:3] and omitted, hints
+                    assert included == [term for term in terms if term in included], hints
+                    assert omitted == [term for term in terms if term in omitted], hints
+                    assert set(included).isdisjoint(omitted) and set(included + omitted) == set(terms), hints
+                    assert 0 < hints["tokenCount"] <= hints["tokenBudget"], hints
+                    replay = engine.transcribe(pcm, "vocabulary-replay", vocabularyTerms=included)
+                    assert replay["includedTerms"] == included and replay["omittedTerms"] == [], replay
+                    assert replay["tokenCount"] == hints["tokenCount"], (hints, replay)
 
-                oversized = "long vocabulary phrase " * 500
-                skipped = engine.transcribe(pcm, "vocabulary-whole-term", vocabularyTerms=[oversized.rstrip(), "auth"])
-                assert skipped["includedTerms"] == ["auth"] and skipped["omittedTerms"] == [oversized.rstrip()], skipped
-                unicode_terms = ["auth", "Café"] + [f"工程語彙{index}" + "界" * 100 for index in range(500)]
-                assert len(json.dumps(unicode_terms)) > 65536
-                unicode_result = engine.transcribe(pcm, "vocabulary-unicode", vocabularyTerms=unicode_terms)
-                assert unicode_result["type"] == "result", unicode_result
-                assert unicode_result["includedTerms"][:2] == ["auth", "Café"], unicode_result
-                assert set(unicode_result["includedTerms"] + unicode_result["omittedTerms"]) == set(unicode_terms), unicode_result
-                legacy = engine.transcribe(pcm, "legacy-prompt", prompt="auth, Café")
-                assert legacy["includedTerms"] == ["auth, Café"] and legacy["omittedTerms"] == [], legacy
-                empty_hints = engine.transcribe(pcm, "empty-vocabulary", vocabularyTerms=[])
-                assert empty_hints["includedTerms"] == [] and empty_hints["omittedTerms"] == [], empty_hints
-                assert empty_hints["tokenCount"] == 0, empty_hints
-                print(f"Passed: ordered complete vocabulary terms fit the actual {hints['tokenBudget']}-token carried prompt budget", flush=True)
+                    oversized = "long vocabulary phrase " * 500
+                    skipped = engine.transcribe(pcm, "vocabulary-whole-term", vocabularyTerms=[oversized.rstrip(), "auth"])
+                    assert skipped["includedTerms"] == ["auth"] and skipped["omittedTerms"] == [oversized.rstrip()], skipped
+                    unicode_terms = ["auth", "Café"] + [f"工程語彙{index}" + "界" * 100 for index in range(500)]
+                    assert len(json.dumps(unicode_terms)) > 65536
+                    unicode_result = engine.transcribe(pcm, "vocabulary-unicode", vocabularyTerms=unicode_terms)
+                    assert unicode_result["type"] == "result", unicode_result
+                    assert unicode_result["includedTerms"][:2] == ["auth", "Café"], unicode_result
+                    assert set(unicode_result["includedTerms"] + unicode_result["omittedTerms"]) == set(unicode_terms), unicode_result
+                    legacy = engine.transcribe(pcm, "legacy-prompt", prompt="auth, Café")
+                    assert legacy["includedTerms"] == ["auth, Café"] and legacy["omittedTerms"] == [], legacy
+                    empty_hints = engine.transcribe(pcm, "empty-vocabulary", vocabularyTerms=[])
+                    assert empty_hints["includedTerms"] == [] and empty_hints["omittedTerms"] == [], empty_hints
+                    assert empty_hints["tokenCount"] == 0, empty_hints
+                    print(f"Passed: ordered complete vocabulary terms fit the actual {hints['tokenBudget']}-token carried prompt budget", flush=True)
 
                 started = time.monotonic()
                 result = engine.transcribe(args.audio, "speech", language="en", vocabularyTerms=["country"])
@@ -235,7 +258,8 @@ def main():
                     normalized = re.sub(r"[^a-z ]", "", result["text"].lower())
                     assert "ask not what your country can do for you" in normalized, result
                     assert "ask what you can do for your country" in normalized, result
-                assert result["language"] == "en", result
+                assert result["language"] == ("auto" if parakeet else "en"), result
+                assert_spans(result)
                 print(f"Passed: real speech transcription ({time.monotonic() - started:.2f}s)", flush=True)
 
                 with wave.open(str(args.audio), "rb") as source:
@@ -263,6 +287,9 @@ def main():
                                    "ask what you can do for your country"):
                         assert normalized.count(phrase) == 3, result
                     assert "<|" not in result["text"], "Timestamp tokens leaked into plain text"
+                    assert_spans(result)
+                    # Bounded recording windows commit text at segment ends.
+                    assert len(result["segmentSpans"]) >= 3, result["segmentSpans"]
                     print("Passed: every repeated passage survives across decoding windows with vocabulary hints", flush=True)
 
                 # Silence after speech must not inherit the previous transcript.
@@ -285,10 +312,10 @@ def main():
         with wave.open(str(long_audio), "wb") as recording:
             recording.setparams(parameters)
             recording.writeframes((raw * 20)[:16000 * 2 * 120])
-        assert_parent_exit(args.engine, args.model, args.vad_model, long_audio)
+        assert_parent_exit(args.engine, args.model, args.vad_model, long_audio, args.speech_engine)
 
         with tempfile.TemporaryFile(mode="w+") as diagnostics:
-            engine = Engine(args.engine, args.model, diagnostics, args.vad_model)
+            engine = Engine(args.engine, args.model, diagnostics, args.vad_model, args.speech_engine)
             try:
                 engine.process.stdin.close()
                 assert engine.process.wait(timeout=10) == 0

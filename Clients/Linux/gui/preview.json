@@ -137,6 +137,7 @@
   },
   "connection": {
     "ready": true,
+    "recognitionEngines": ["whisper", "parakeet"],
     "speech": {
       "modelID": "stt-rt-v5",
       "backend": "soniox/websocket",
@@ -179,6 +180,7 @@
     "revision": 1,
     "preferences": {
       "recognitionMode": "automatic",
+      "recognitionEngine": "parakeet",
       "language": "auto",
       "vocabulary": "SottoDuo\nPipeWire\nKubernetes\nFjord",
       "dictionary": {

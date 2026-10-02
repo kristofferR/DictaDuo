@@ -52,13 +52,14 @@ Server-attached microphones record durable recording sessions through the [remot
 
 ## Shared preferences
 
-Send `X-SottoDuo-Recognition: streaming-v1` to receive the optional recognition fields in JSON and NDJSON. Without this header, responses retain the legacy v1 shape for strict older clients.
+Send `X-SottoDuo-Recognition: streaming-v1` to receive the optional recognition fields in JSON and NDJSON. Without this header, responses retain the legacy v1 shape for strict older clients. Likewise, send `X-SottoDuo-Recognition-Engine: engine-v1` to receive `recognitionEngine` in preferences and `recognitionEngines` in health.
 
 GET/PUT use `{ "revision": N, "preferences": { ... } }`. A save must include the current revision; successful validation returns the incremented snapshot. Active generations keep their admission-time snapshot.
 
 | Field | Default / limit |
 | --- | --- |
 | `recognitionMode` | `automatic`; also `cloud` or `local`. Missing values in legacy preference updates preserve the existing selection. |
+| `recognitionEngine` | `whisper`; also `parakeet` when the server lists it in health `recognitionEngines`. Choosing an engine that is not installed is rejected. Missing values in preference updates preserve the existing selection. Each take keeps the engine frozen in its settings, or runs on Whisper if that engine has since been uninstalled. |
 | `language` | `en`; `auto` and the languages declared in `ServerPreferences`. |
 | `proofreadingPrompt` | Editable default; nonempty, at most 4,096 UTF-8 bytes. |
 | `vocabulary` | Recognition hints; at most 16 KiB. |

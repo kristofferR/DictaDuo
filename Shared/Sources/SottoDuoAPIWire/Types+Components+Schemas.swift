@@ -250,13 +250,24 @@ extension Components {
             case cloud = "cloud"
             case local = "local"
         }
+        /// The local speech model. Whisper large-v3-turbo covers Whisper's languages and uses vocabulary hints; Parakeet TDT 0.6B v3 is faster, detects 25 European languages itself, and ignores vocabulary hints.
+        ///
+        /// - Remark: Generated from `#/components/schemas/RecognitionEngine`.
+        @frozen public enum RecognitionEngine: String, Codable, Hashable, Sendable, CaseIterable {
+            case whisper = "whisper"
+            case parakeet = "parakeet"
+        }
         /// - Remark: Generated from `#/components/schemas/RecognitionState`.
         public struct RecognitionState: Codable, Hashable, Sendable {
+            /// whisper means local server recognition, whichever recognition engine is selected.
+            ///
             /// - Remark: Generated from `#/components/schemas/RecognitionState/provider`.
             @frozen public enum ProviderPayload: String, Codable, Hashable, Sendable, CaseIterable {
                 case soniox = "soniox"
                 case whisper = "whisper"
             }
+            /// whisper means local server recognition, whichever recognition engine is selected.
+            ///
             /// - Remark: Generated from `#/components/schemas/RecognitionState/provider`.
             public var provider: Components.Schemas.RecognitionState.ProviderPayload
             /// - Remark: Generated from `#/components/schemas/RecognitionState/fallbackReason`.
@@ -266,7 +277,7 @@ extension Components {
             /// Creates a new `RecognitionState`.
             ///
             /// - Parameters:
-            ///   - provider:
+            ///   - provider: whisper means local server recognition, whichever recognition engine is selected.
             ///   - fallbackReason:
             ///   - partialText:
             public init(
@@ -308,6 +319,10 @@ extension Components {
         public struct ServerPreferences: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/ServerPreferences/recognitionMode`.
             public var recognitionMode: Components.Schemas.RecognitionMode?
+            /// Request this field with X-SottoDuo-Recognition-Engine: engine-v1. Missing values select Whisper; updates that omit it keep the server's selection.
+            ///
+            /// - Remark: Generated from `#/components/schemas/ServerPreferences/recognitionEngine`.
+            public var recognitionEngine: Components.Schemas.RecognitionEngine?
             /// - Remark: Generated from `#/components/schemas/ServerPreferences/language`.
             @frozen public enum LanguagePayload: String, Codable, Hashable, Sendable, CaseIterable {
                 case en = "en"
@@ -348,6 +363,7 @@ extension Components {
             ///
             /// - Parameters:
             ///   - recognitionMode:
+            ///   - recognitionEngine: Request this field with X-SottoDuo-Recognition-Engine: engine-v1. Missing values select Whisper; updates that omit it keep the server's selection.
             ///   - language:
             ///   - proofreadingPrompt: Missing values use the built-in cleanup prompt; maximum UTF-8 size is 4096 bytes.
             ///   - vocabulary: Maximum UTF-8 size is 16384 bytes.
@@ -356,6 +372,7 @@ extension Components {
             ///   - keepOriginalAudio:
             public init(
                 recognitionMode: Components.Schemas.RecognitionMode? = nil,
+                recognitionEngine: Components.Schemas.RecognitionEngine? = nil,
                 language: Components.Schemas.ServerPreferences.LanguagePayload,
                 proofreadingPrompt: Swift.String? = nil,
                 vocabulary: Swift.String,
@@ -364,6 +381,7 @@ extension Components {
                 keepOriginalAudio: Swift.Bool
             ) {
                 self.recognitionMode = recognitionMode
+                self.recognitionEngine = recognitionEngine
                 self.language = language
                 self.proofreadingPrompt = proofreadingPrompt
                 self.vocabulary = vocabulary
@@ -373,6 +391,7 @@ extension Components {
             }
             public enum CodingKeys: String, CodingKey {
                 case recognitionMode
+                case recognitionEngine
                 case language
                 case proofreadingPrompt
                 case vocabulary
@@ -385,6 +404,10 @@ extension Components {
                 self.recognitionMode = try container.decodeIfPresent(
                     Components.Schemas.RecognitionMode.self,
                     forKey: .recognitionMode
+                )
+                self.recognitionEngine = try container.decodeIfPresent(
+                    Components.Schemas.RecognitionEngine.self,
+                    forKey: .recognitionEngine
                 )
                 self.language = try container.decode(
                     Components.Schemas.ServerPreferences.LanguagePayload.self,
@@ -412,6 +435,7 @@ extension Components {
                 )
                 try decoder.ensureNoAdditionalProperties(knownKeys: [
                     "recognitionMode",
+                    "recognitionEngine",
                     "language",
                     "proofreadingPrompt",
                     "vocabulary",
@@ -533,6 +557,10 @@ extension Components {
             ///
             /// - Remark: Generated from `#/components/schemas/ServerHealth/generationRetry`.
             public var generationRetry: Swift.Bool?
+            /// Local recognition engines installed on this server. Request this field with X-SottoDuo-Recognition-Engine: engine-v1. An omitted value means Whisper only.
+            ///
+            /// - Remark: Generated from `#/components/schemas/ServerHealth/recognitionEngines`.
+            public var recognitionEngines: [Components.Schemas.RecognitionEngine]?
             /// - Remark: Generated from `#/components/schemas/ServerHealth/speech`.
             public var speech: Components.Schemas.ModelRuntimeInfo
             /// - Remark: Generated from `#/components/schemas/ServerHealth/proofreading`.
@@ -547,6 +575,7 @@ extension Components {
             ///   - isDev:
             ///   - ready:
             ///   - generationRetry: Whether failed or cancelled generations with sealed audio can be retried. Request this field with X-SottoDuo-Generation-Retry: retry-v1. An omitted value means unsupported.
+            ///   - recognitionEngines: Local recognition engines installed on this server. Request this field with X-SottoDuo-Recognition-Engine: engine-v1. An omitted value means Whisper only.
             ///   - speech:
             ///   - proofreading:
             ///   - message:
@@ -556,6 +585,7 @@ extension Components {
                 isDev: Swift.Bool,
                 ready: Swift.Bool,
                 generationRetry: Swift.Bool? = nil,
+                recognitionEngines: [Components.Schemas.RecognitionEngine]? = nil,
                 speech: Components.Schemas.ModelRuntimeInfo,
                 proofreading: Components.Schemas.ModelRuntimeInfo,
                 message: Swift.String? = nil
@@ -565,6 +595,7 @@ extension Components {
                 self.isDev = isDev
                 self.ready = ready
                 self.generationRetry = generationRetry
+                self.recognitionEngines = recognitionEngines
                 self.speech = speech
                 self.proofreading = proofreading
                 self.message = message
@@ -575,6 +606,7 @@ extension Components {
                 case isDev
                 case ready
                 case generationRetry
+                case recognitionEngines
                 case speech
                 case proofreading
                 case message
@@ -601,6 +633,10 @@ extension Components {
                     Swift.Bool.self,
                     forKey: .generationRetry
                 )
+                self.recognitionEngines = try container.decodeIfPresent(
+                    [Components.Schemas.RecognitionEngine].self,
+                    forKey: .recognitionEngines
+                )
                 self.speech = try container.decode(
                     Components.Schemas.ModelRuntimeInfo.self,
                     forKey: .speech
@@ -619,6 +655,7 @@ extension Components {
                     "isDev",
                     "ready",
                     "generationRetry",
+                    "recognitionEngines",
                     "speech",
                     "proofreading",
                     "message"

@@ -47,6 +47,7 @@ export class API {
         // Legacy routes negotiate these fields; recording routes ignore the headers.
         "X-SottoDuo-Capture": "capture-v1",
         "X-SottoDuo-Recognition": "streaming-v1",
+        "X-SottoDuo-Recognition-Engine": "engine-v1",
         ...(owner ? { "X-SottoDuo-Capture-Owner": owner } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),

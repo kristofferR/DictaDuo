@@ -71,6 +71,11 @@ const encodeFor = (request: FastifyRequest) => {
       )
         return undefined;
       if (
+        (key === "recognitionEngine" || key === "recognitionEngines") &&
+        request.headers["x-sottoduo-recognition-engine"] !== "engine-v1"
+      )
+        return undefined;
+      if (
         (key === "recognitionMode" || key === "recognition") &&
         request.headers["x-sottoduo-recognition"] !== "streaming-v1"
       )

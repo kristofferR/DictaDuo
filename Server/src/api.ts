@@ -36,6 +36,7 @@ export type PreferencesSnapshot = Omit<Schemas["PreferencesSnapshot"], "preferen
   preferences: ServerPreferences;
 };
 
+export type RecognitionEngine = Schemas["RecognitionEngine"];
 export type DeviceIdentity = Schemas["DeviceIdentity"];
 export type ModelRuntimeInfo = Schemas["ModelRuntimeInfo"];
 export type ServerHealth = Schemas["ServerHealth"];

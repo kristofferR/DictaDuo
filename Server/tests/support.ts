@@ -23,7 +23,7 @@ export class FakeInference implements InferenceBackend {
       engineVersion: "fixture",
     };
   }
-  async correct(text: string) {
+  async correct(text: string, _terms?: string[], _language?: string) {
     return { text, processingSeconds: 0.01, engineVersion: "fixture" };
   }
   async cancel() {}

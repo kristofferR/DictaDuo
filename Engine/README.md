@@ -1,17 +1,17 @@
-# Whisper helper
+# Speech helper
 
-`sottoduo-engine` is the server's persistent whisper.cpp process. It reads audio files supplied by the server; it never opens a microphone or network connection. Builds use Metal on macOS and CPU or CUDA on Linux. See [server setup](../Server/README.md) for packaging and models.
+`sottoduo-engine` is the server's persistent speech process. `--engine whisper` (the default) loads Whisper large-v3-turbo; `--engine parakeet` loads Parakeet TDT 0.6B v3 through the Parakeet implementation in the vendored whisper.cpp. The server runs one warm process per installed engine. It reads audio files supplied by the server; it never opens a microphone or network connection. Builds use Metal on macOS and CPU or CUDA on Linux. See [server setup](../Server/README.md) for packaging and models.
 
 ## Protocol
 
-After loading Whisper and Silero VAD, the helper emits a `ready` JSON object with an `engineVersion`. Send one UTF-8 JSON object per line on stdin; replies are flushed JSON lines on stdout. Diagnostics go to stderr without transcript text.
+After loading its model and Silero VAD, the helper emits a `ready` JSON object with an `engineVersion` (`parakeet.cpp/…` for Parakeet). Send one UTF-8 JSON object per line on stdin; replies are flushed JSON lines on stdout. Diagnostics go to stderr without transcript text.
 
 ```json
 {"type":"transcribe","id":"request-1","path":"/absolute/path/to/recording.wav","language":"en","vocabularyTerms":["SottoDuo","SwiftUI","Metal"]}
 ```
 
-- `language` defaults to `en`; `auto` enables language detection.
-- `vocabularyTerms` is an ordered list of recognition hints. Whole terms are fitted into the loaded model's token budget. Responses report `includedTerms`, `omittedTerms`, `tokenCount`, and `tokenBudget`.
+- `language` defaults to `en`; `auto` enables language detection. Parakeet always detects the spoken language itself among its 25 European languages (not Norwegian) and returns `language: "auto"`, since it exposes no language ID.
+- `vocabularyTerms` is an ordered list of recognition hints. Whole terms are fitted into the loaded model's token budget. Responses report `includedTerms`, `omittedTerms`, `tokenCount`, and `tokenBudget`. Parakeet has no vocabulary prompting: every term is omitted and both counts are zero.
 - WAV input must be mono 16 kHz PCM16 or float32, 0.2–180 seconds long and at most 32 MiB. These are per-processing-window bounds, not the long-recording session duration. The legacy HTTP server uses a 0.25-second minimum.
 - Progress: `{"type":"progress","id":"request-1","value":0.5}`.
 - Results contain `type: "result"`, `id`, `text`, audio `duration`, processing `elapsed`, detected `language`, `spans`, `segmentSpans`, and hint diagnostics. Each span has exact `text` plus request-relative `startSeconds` and `endSeconds`. Joining either span array's text and trimming the outside must reproduce `text` exactly. BPE pieces that split a Unicode codepoint are joined into one valid UTF-8 span. `segmentSpans` retain whole decoder utterances for source checkpoints.
@@ -26,6 +26,8 @@ A CPU Silero pass rejects nonspeech (threshold 0.5, minimum speech segment 120 m
 
 The TypeScript coordinator selects bounded 45-second windows from canonical audio, preferring conservative Silero nonspeech gaps and then sustained near-zero amplitude after 30 seconds. These cuts do not remove any captured silence. With no safe quiet cut, timing-capable backends use two seconds of overlap. Checkpoints retain whole decoder utterances around an eight-second provisional tail, including at quiet cuts: speech recognition can autocomplete a phrase whose actual ending is in the next window. The next pass freshly decodes the complete provisional source interval (at most 90 seconds), replacing only provisional evidence while preserving the committed prefix. This avoids joining an autocompleted quote to its actual spoken continuation. Other overlap reconciliation requires matching text pieces at matching acoustic times; it never removes a repeated phrase by text alone. Invalid or failed replacement coverage stays incomplete. Backends without timing use nonoverlapping windows and preserve every returned phrase.
 
+Parakeet decodes the complete window with greedy TDT decoding and returns punctuated, capitalized text. Its token times come from 10 ms mel frames; punctuation takes the preceding word's end. It returns one decoder segment per window, so the helper splits `segmentSpans` at sentence-ending punctuation and pauses of a second or more, keeping source checkpoints as fine-grained as Whisper's.
+
 The server keeps the model warm. Terminating the helper cancels active work. `{"type":"quit"}`, stdin EOF, or parent death releases it. Native dependencies and Metal source are embedded in the speech executable.
 
 ## Verify
@@ -33,6 +35,7 @@ The server keeps the model warm. Terminating the helper cancels active work. `{"
 ```sh
 ./scripts/build-server.sh
 python3 scripts/test-engine.py --help
+python3 scripts/test-engine.py --model PATH/ggml-parakeet-tdt-0.6b-v3-f16.bin --speech-engine parakeet
 ```
 
 The test harness exercises protocol bounds, public sample recordings, vocabulary, passage retention, and process lifetime. For the full API path, use `scripts/smoke-test.sh` against an idle Dev server.

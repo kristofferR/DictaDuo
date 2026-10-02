@@ -1115,12 +1115,17 @@ components:
     RecognitionMode:
       type: "string"
       enum: ["automatic", "cloud", "local"]
+    RecognitionEngine:
+      type: "string"
+      description: "The local speech model. Whisper large-v3-turbo covers Whisper's languages and uses vocabulary hints; Parakeet TDT 0.6B v3 is faster, detects 25 European languages itself, and ignores vocabulary hints."
+      enum: ["whisper", "parakeet"]
     RecognitionState:
       type: "object"
       additionalProperties: false
       properties:
         provider:
           type: "string"
+          description: "whisper means local server recognition, whichever recognition engine is selected."
           enum: ["soniox", "whisper"]
         fallbackReason:
           type: "string"
@@ -1133,6 +1138,9 @@ components:
       properties:
         recognitionMode:
           "$ref": "#/components/schemas/RecognitionMode"
+        recognitionEngine:
+          "$ref": "#/components/schemas/RecognitionEngine"
+          description: "Request this field with X-SottoDuo-Recognition-Engine: engine-v1. Missing values select Whisper; updates that omit it keep the server's selection."
         language:
           type: "string"
           enum:
@@ -1218,6 +1226,11 @@ components:
         generationRetry:
           type: "boolean"
           description: "Whether failed or cancelled generations with sealed audio can be retried. Request this field with X-SottoDuo-Generation-Retry: retry-v1. An omitted value means unsupported."
+        recognitionEngines:
+          type: "array"
+          description: "Local recognition engines installed on this server. Request this field with X-SottoDuo-Recognition-Engine: engine-v1. An omitted value means Whisper only."
+          items:
+            "$ref": "#/components/schemas/RecognitionEngine"
         speech:
           "$ref": "#/components/schemas/ModelRuntimeInfo"
         proofreading:

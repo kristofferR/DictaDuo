@@ -45,8 +45,8 @@ class InferenceScope implements InferenceBackend {
   ) {
     const boundary = backend.findSpeechBoundary;
     this.findSpeechBoundary = boundary
-      ? (audioPath, signal) =>
-          this.run((combined) => boundary.call(backend, audioPath, combined), signal)
+      ? (audioPath, signal, engine) =>
+          this.run((combined) => boundary.call(backend, audioPath, combined, engine), signal)
       : undefined;
   }
 
@@ -54,8 +54,12 @@ class InferenceScope implements InferenceBackend {
     return this.backend.timedSpeechSpans;
   }
 
-  readiness(proofreadingEnabled?: boolean) {
-    return this.backend.readiness(proofreadingEnabled);
+  get engines() {
+    return this.backend.engines;
+  }
+
+  readiness(...args: Parameters<InferenceBackend["readiness"]>) {
+    return this.backend.readiness(...args);
   }
 
   private run<T>(operation: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal) {
@@ -73,14 +77,18 @@ class InferenceScope implements InferenceBackend {
     return result;
   }
 
-  warmUp(proofreadingEnabled?: boolean, signal?: AbortSignal) {
-    return this.run((combined) => this.backend.warmUp(proofreadingEnabled, combined), signal);
+  warmUp(...args: Parameters<InferenceBackend["warmUp"]>) {
+    const [proofreadingEnabled, signal, engine] = args;
+    return this.run(
+      (combined) => this.backend.warmUp(proofreadingEnabled, combined, engine),
+      signal,
+    );
   }
 
   transcribe(...args: Parameters<InferenceBackend["transcribe"]>) {
-    const [path, language, terms, progress, signal] = args;
+    const [path, language, terms, progress, signal, engine] = args;
     return this.run(
-      (combined) => this.backend.transcribe(path, language, terms, progress, combined),
+      (combined) => this.backend.transcribe(path, language, terms, progress, combined, engine),
       signal,
     );
   }

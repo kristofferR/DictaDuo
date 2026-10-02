@@ -31,6 +31,7 @@ import type {
 } from "./inference/native-inference.ts";
 import { ServiceError } from "./errors.ts";
 import { InferenceError } from "./inference/inference-error.ts";
+import { detectedLanguage, localSpeechModel, recognitionEngine } from "./inference/engines.ts";
 import {
   startSonioxLiveStream,
   type SonioxConfiguration,
@@ -1095,7 +1096,10 @@ export class RecordingService {
    * real time. The result lands in history; nothing is delivered.
    */
   async retry(id: string) {
-    const readiness = await this.inference.readiness(false);
+    const readiness = await this.inference.readiness(
+      false,
+      recognitionEngine(this.lookup(id).snapshot.settings.preferences, this.inference.engines),
+    );
     return this.mutate(async () => {
       this.assertRunning();
       const manifest = copy(this.lookup(id));
@@ -1591,7 +1595,7 @@ export class RecordingService {
             formattingRejectionReason: assembled.formatted.formattingRejectionReason,
             inferenceAudio: this.audioMetadata(manifest.snapshot, "inference"),
             originalAudio: this.audioMetadata(manifest.snapshot, "original"),
-            detectedLanguage: assembled.speech?.language,
+            detectedLanguage: assembled.speech && detectedLanguage(assembled.speech.language),
             speech: assembled.speech
               ? manifest.snapshot.recognition?.provider === "soniox" && this.configuration.soniox
                 ? {
@@ -1600,9 +1604,13 @@ export class RecordingService {
                     processingSeconds: assembled.speechSeconds,
                   }
                 : {
-                    modelID: "whisper-large-v3-turbo",
+                    ...localSpeechModel(
+                      recognitionEngine(
+                        manifest.snapshot.settings.preferences,
+                        this.inference.engines,
+                      ),
+                    ),
                     modelSHA256: assembled.speech.modelSHA256,
-                    backend: process.platform === "darwin" ? "whisper.cpp/Metal" : "whisper.cpp",
                     engineVersion: assembled.speech.engineVersion,
                     processingSeconds: assembled.speechSeconds,
                   }
@@ -1680,7 +1688,11 @@ export class RecordingService {
               bytes,
             ]),
           );
-          const boundary = await this.inference.findSpeechBoundary(wavPath, signal);
+          const boundary = await this.inference.findSpeechBoundary(
+            wavPath,
+            signal,
+            recognitionEngine(settings, this.inference.engines),
+          );
           if (boundary !== undefined) {
             const offset = Math.round(boundary * 16000);
             if (
@@ -1892,6 +1904,7 @@ export class RecordingService {
         recognitionVocabularyTerms(settings.dictionary, settings.vocabulary),
         undefined,
         signal,
+        recognitionEngine(settings, this.inference.engines),
       );
     return transcribe().catch((error: unknown) => {
       signal.throwIfAborted();

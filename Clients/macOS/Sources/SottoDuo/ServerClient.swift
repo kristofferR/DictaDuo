@@ -87,6 +87,7 @@ struct ServerClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("streaming-v1", forHTTPHeaderField: "X-SottoDuo-Recognition")
         request.setValue("retry-v1", forHTTPHeaderField: "X-SottoDuo-Generation-Retry")
+        request.setValue("engine-v1", forHTTPHeaderField: "X-SottoDuo-Recognition-Engine")
         request.setValue("capture-v1", forHTTPHeaderField: "X-SottoDuo-Capture")
         if let destinationOwner { request.setValue(destinationOwner, forHTTPHeaderField: "X-SottoDuo-Destination-Owner") }
         if let captureOwner { request.setValue(captureOwner, forHTTPHeaderField: "X-SottoDuo-Capture-Owner") }

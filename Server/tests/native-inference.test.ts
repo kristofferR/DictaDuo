@@ -103,6 +103,53 @@ describe("native inference subprocess protocol", () => {
     ).toMatchObject({ text: "Hello world.", engineVersion: "fixture-1" });
   });
 
+  test("each engine runs its own helper and Parakeet reports unsupported hints honestly", async () => {
+    const whisperOnly = await fixture();
+    expect(whisperOnly.inference.engines).toEqual(["whisper"]);
+    expect((await whisperOnly.inference.readiness(false, "parakeet")).available).toBe(false);
+    await expect(
+      whisperOnly.inference.transcribe(
+        whisperOnly.model,
+        "en",
+        [],
+        undefined,
+        undefined,
+        "parakeet",
+      ),
+    ).rejects.toMatchObject({ code: "unavailable" });
+
+    const { configuration, directory, model } = await fixture();
+    const missing = new NativeInference(
+      { ...configuration, parakeetModel: join(directory, "missing") },
+      {},
+    );
+    fixtures.push({ directory, inference: missing });
+    // A configured but missing model is unavailable without affecting Whisper.
+    expect((await missing.readiness(false, "parakeet")).available).toBe(false);
+    expect((await missing.readiness(false)).available).toBe(true);
+    const parakeet = new NativeInference({ ...configuration, parakeetModel: model }, {});
+    fixtures.push({ directory, inference: parakeet });
+    expect(parakeet.engines).toEqual(["whisper", "parakeet"]);
+    const speech = await parakeet.transcribe(
+      model,
+      "en",
+      ["auth"],
+      undefined,
+      undefined,
+      "parakeet",
+    );
+    expect(speech).toMatchObject({ language: "auto", engineVersion: "parakeet-fixture" });
+    expect(speech.hints).toEqual({
+      includedTerms: [],
+      omittedTerms: ["auth"],
+      tokenCount: 0,
+      tokenBudget: 0,
+    });
+    expect((await parakeet.readiness(false, "parakeet")).speechLoaded).toBe(true);
+    expect((await parakeet.readiness(false, "whisper")).speechLoaded).toBe(false);
+    expect((await parakeet.transcribe(model, "en", ["auth"])).engineVersion).toBe("fixture-1");
+  });
+
   test("requests may span stdout reads and diagnostics are drained", async () => {
     for (const mode of ["split-json", "stderr"]) {
       const { inference, model } = await fixture(mode);
