@@ -50,6 +50,7 @@ export interface LiveRunState {
 interface LiveStream {
   state: LiveRunState;
   stream: LiveSpeechStream;
+  /** Times are monotonic, so wall-clock changes never stall pacing or deadlines. */
   startedAt: number;
   startFrame: number;
   fedFrame: number;
@@ -149,7 +150,7 @@ export class LiveRecognition {
   }
 
   private open(id: string, state: LiveRunState) {
-    const now = Date.now();
+    const now = performance.now();
     const live: LiveStream = {
       state,
       startedAt: now,
@@ -180,7 +181,7 @@ export class LiveRecognition {
           endFrame: live.finalizing.endFrame,
           text,
           language,
-          processingSeconds: (Date.now() - live.finalizing.sentAt) / 1000,
+          processingSeconds: (performance.now() - live.finalizing.sentAt) / 1000,
         });
         live.commitFrame = live.finalizing.endFrame;
         live.finalizing = undefined;
@@ -197,7 +198,7 @@ export class LiveRecognition {
   }
 
   private tick() {
-    const now = Date.now();
+    const now = performance.now();
     for (const [id, live] of this.streams) {
       const state = live.state;
       const target = state.endFrame ?? state.availableFrames;
@@ -269,7 +270,7 @@ export class LiveRecognition {
       if (this.streams.get(id) !== live) return;
       live.stream.send(audio);
       live.fedFrame = until;
-      live.lastSentAt = Date.now();
+      live.lastSentAt = performance.now();
     } catch {
       if (this.streams.get(id) === live)
         this.fail(id, "Saved audio could not be read for live recognition.");

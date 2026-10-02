@@ -1235,8 +1235,13 @@ export class RecordingService {
       const manifest = copy(this.lookup(id));
       if (!manifest.snapshot.capture || manifest.snapshot.captureState === "discarded")
         return copy(manifest.snapshot);
+      const ready = state === "recording" && manifest.snapshot.capture.state === "preparing";
       manifest.snapshot.capture.state = state;
+      // The client can only fix a continuation once startup returns.
+      if (ready && manifest.contextDeadline !== undefined)
+        manifest.contextDeadline = Date.now() + CONTEXT_HOLD_MS;
       await this.commit(manifest);
+      if (ready) this.schedule();
       return copy(manifest.snapshot);
     });
   }
@@ -1392,6 +1397,8 @@ export class RecordingService {
         await this.commit(manifest);
       }
       if (manifest.contextDeadline !== undefined) {
+        // Readiness restarts the hold and wakes processing.
+        if (manifest.snapshot.capture?.state === "preparing") return undefined;
         const remaining = manifest.contextDeadline - Date.now();
         if (remaining > 0) {
           setTimeout(() => this.schedule(), remaining).unref?.();

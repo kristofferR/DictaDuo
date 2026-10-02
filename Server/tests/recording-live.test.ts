@@ -284,9 +284,9 @@ test("retrying a failed session resumes locally without the provider or delivery
 }, 20_000);
 
 test("a rollover drains the provider session under continuous audio", async () => {
-  const now = Date.now.bind(Date);
+  const now = performance.now.bind(performance);
   let offset = 0;
-  const clock = spyOn(Date, "now").mockImplementation(() => now() + offset);
+  const clock = spyOn(performance, "now").mockImplementation(() => now() + offset);
   const streams: { frames: number; closed: boolean; handlers: LiveSpeechHandlers }[] = [];
   let wokeAfterClose = false;
   const recognition = new LiveRecognition(

@@ -408,12 +408,13 @@ extension RecordingSnapshot {
 /// wire models. Requests still use this take's immutable endpoint/credential.
 extension ServerClient {
     private func recordingJSON<Response: Decodable>(path: String, method: String = "GET", body: Data? = nil,
-                                                    query: [URLQueryItem] = [], timeout: TimeInterval = 12) async throws -> Response {
+                                                    query: [URLQueryItem] = [], timeout: TimeInterval = 12,
+                                                    maxBytes: Int = 16 * 1_024 * 1_024) async throws -> Response {
         var request = try request(path: path, method: method, body: body, query: query)
         request.timeoutInterval = timeout
         let (data, response) = try await session.data(for: request)
         try Self.validate(response, data: data)
-        guard data.count <= 16 * 1_024 * 1_024 else { throw ServerClientError.invalidResponse }
+        guard data.count <= maxBytes else { throw ServerClientError.invalidResponse }
         do { return try RecordingWire.decoder().decode(Response.self, from: data) }
         catch { throw ServerClientError.invalidResponse }
     }
@@ -427,7 +428,8 @@ extension ServerClient {
     }
 
     func recordingDetail(_ id: UUID) async throws -> RecordingDetail {
-        try await recordingJSON(path: "v2/recordings/\(id)")
+        // The server stores a completed result of up to 64 MiB beside the snapshot.
+        try await recordingJSON(path: "v2/recordings/\(id)", maxBytes: 80 * 1_024 * 1_024)
     }
 
     func recording(_ id: UUID) async throws -> RecordingSnapshot { try await recordingDetail(id).snapshot }
