@@ -18,6 +18,8 @@ ColumnLayout {
     property string message: ""
     property string defaultPrompt: ""
     property var health: null
+    // Recognition runs locally with Parakeet, which ignores language and vocabulary.
+    readonly property bool parakeet: !!draft && draft.preferences.recognitionEngine === "parakeet" && !!health && (health.recognitionEngines || []).includes("parakeet")
     readonly property bool editable: !!draft && bridge.connected && !ui.snapshot.setupRequired && !ui.snapshot.connectionChanging && !saving && !discardOnRead && !bridge.preview && draftServer === ui.snapshot.server
 
     function clone(value) {
@@ -317,8 +319,9 @@ ColumnLayout {
                 Setting {
                     ui: root.ui
                     title: "Local engine"
-                    // Offered only when the server has another engine installed and reports its selection.
+                    // A choice only when the server has both engines installed and reports its selection.
                     visible: !!(root.draft && root.draft.preferences.recognitionEngine && root.health && root.health.recognitionEngines && root.health.recognitionEngines.length > 1)
+                    detail: root.parakeet ? "Faster. Detects 25 European languages on its own, not Norwegian, and ignores recognition vocabulary." : "Slower. Follows the Language setting and uses recognition vocabulary."
 
                     ComboBox {
                         objectName: "recognitionEngine"
@@ -334,7 +337,21 @@ ColumnLayout {
 
                 Setting {
                     ui: root.ui
+                    title: "Local engine"
+                    visible: !!(root.health && root.health.recognitionEngines && root.health.recognitionEngines.length === 1)
+                    detail: "The only engine installed on the server."
+
+                    SLabel {
+                        ui: root.ui
+                        text: root.health && root.health.recognitionEngines && root.health.recognitionEngines[0] === "parakeet" ? "Parakeet v3" : "Whisper large-v3-turbo"
+                    }
+
+                }
+
+                Setting {
+                    ui: root.ui
                     title: "Language"
+                    detail: root.parakeet ? "Used for cloud recognition. Parakeet detects the language itself." : ""
 
                     ComboBox {
                         property var codes: ["auto", "en", "es", "fr", "de", "it", "pt", "nl", "ja", "zh", "ko", "hi", "ar", "pl", "ru", "uk", "sv"]
@@ -417,6 +434,7 @@ ColumnLayout {
                 Setting {
                     ui: root.ui
                     title: "Recognition vocabulary"
+                    detail: root.parakeet ? "Parakeet ignores this list. Dictionary replacements and text cleanup still apply." : "Names and specialized terms that help recognition."
                 }
 
                 ScrollView {

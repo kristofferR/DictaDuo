@@ -269,10 +269,10 @@ struct HistoryPage: View {
                             }
                         }
                         if let hints = selected.recognitionHints, !hints.omittedTerms.isEmpty {
-                            hintDetails("Voice vocabulary", hints: hints)
+                            hintDetails("Recognition vocabulary", hints: hints)
                         }
                         if let hints = selected.proofreadingHints, !hints.omittedTerms.isEmpty {
-                            hintDetails("Cleanup vocabulary", hints: hints)
+                            hintDetails("Text cleanup vocabulary", hints: hints)
                         }
                     }
                 }

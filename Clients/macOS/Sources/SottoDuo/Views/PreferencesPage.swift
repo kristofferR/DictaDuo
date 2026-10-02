@@ -137,6 +137,9 @@ struct ServerPreferencesPage: View {
     private var engineChoice: Bool {
         draft.recognitionEngine != nil && (controller.serverHealth?.recognitionEngines?.count ?? 0) > 1
     }
+    private var installedEngines: [RecognitionEngine] { controller.serverHealth?.recognitionEngines ?? [] }
+    /// Recognition runs locally with Parakeet, which ignores language and vocabulary.
+    private var parakeet: Bool { draft.recognitionEngine == .parakeet && installedEngines.contains(.parakeet) }
     private var engine: Binding<RecognitionEngine> {
         Binding { draft.recognitionEngine ?? .whisper } set: { draft.recognitionEngine = $0 }
     }
@@ -147,6 +150,13 @@ struct ServerPreferencesPage: View {
         ("Russian", "ru"), ("Ukrainian", "uk"), ("Swedish", "sv")
     ]
 
+
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(SottoDuoPalette.muted)
+            .fixedSize(horizontal: false, vertical: true)
+    }
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
@@ -193,15 +203,27 @@ struct ServerPreferencesPage: View {
                     .help("Automatic uses Soniox when configured on the server. Local only never sends audio to Soniox.")
                     .accessibilityIdentifier("preferences.recognition-mode")
                     if engineChoice {
-                        Picker("Local engine", selection: engine) {
-                            Text("Whisper large-v3-turbo").tag(RecognitionEngine.whisper)
-                            Text("Parakeet v3").tag(RecognitionEngine.parakeet)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Picker("Local engine", selection: engine) {
+                                Text("Whisper large-v3-turbo").tag(RecognitionEngine.whisper)
+                                Text("Parakeet v3").tag(RecognitionEngine.parakeet)
+                            }
+                            .accessibilityIdentifier("preferences.recognition-engine")
+                            caption(parakeet
+                                ? "Faster. Detects 25 European languages on its own, not Norwegian, and ignores recognition vocabulary."
+                                : "Slower. Follows the Language setting and uses recognition vocabulary.")
                         }
-                        .help("Parakeet is faster but recognizes only 25 European languages, not Norwegian, and ignores recognition vocabulary.")
-                        .accessibilityIdentifier("preferences.recognition-engine")
+                    } else if installedEngines.count == 1 {
+                        VStack(alignment: .leading, spacing: 4) {
+                            LabeledContent("Local engine", value: installedEngines[0] == .parakeet ? "Parakeet v3" : "Whisper large-v3-turbo")
+                            caption("The only engine installed on the server.")
+                        }
                     }
-                    Picker("Language", selection: $draft.language) {
-                        ForEach(languages, id: \.1) { name, code in Text(name).tag(code) }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Picker("Language", selection: $draft.language) {
+                            ForEach(languages, id: \.1) { name, code in Text(name).tag(code) }
+                        }
+                        if parakeet { caption("Used for cloud recognition. Parakeet detects the language itself.") }
                     }
                     Toggle("Clean up text after transcribing", isOn: $draft.textCorrectionEnabled)
                     VStack(alignment: .leading, spacing: 8) {
@@ -224,11 +246,13 @@ struct ServerPreferencesPage: View {
                             .accessibilityLabel("Text cleanup instructions")
                             .accessibilityIdentifier("preferences.cleanup-prompt")
                     }
-                    TextField("Recognition vocabulary", text: $draft.vocabulary, axis: .vertical)
-                        .lineLimit(3...5)
-                        .help(draft.recognitionEngine == .parakeet
-                            ? "Parakeet ignores recognition vocabulary. Dictionary replacements and cleanup still apply."
-                            : "Names and specialized terms to help voice recognition.")
+                    VStack(alignment: .leading, spacing: 4) {
+                        TextField("Recognition vocabulary", text: $draft.vocabulary, axis: .vertical)
+                            .lineLimit(3...5)
+                        caption(parakeet
+                            ? "Parakeet ignores this list. Dictionary replacements and text cleanup still apply."
+                            : "Names and specialized terms that help recognition.")
+                    }
                 } header: { Text("Processing").textCase(nil) }
                 .disabled(!available)
 

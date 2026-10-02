@@ -18,6 +18,15 @@ ColumnLayout {
     property string copiedID: ""
     onRecordChanged: copiedID = ""
 
+    // A zero budget means the engine has no vocabulary prompting at all.
+    function hintText(title, hints) {
+        if (!hints || !hints.omittedTerms.length)
+            return "";
+        if (hints.tokenBudget === 0)
+            return title + ": not used by this engine";
+        return title + ": " + hints.omittedTerms.length + (hints.omittedTerms.length === 1 ? " term" : " terms") + " did not fit (" + hints.omittedTerms.join(", ") + ")";
+    }
+
     function model(value) {
         return value ? value.modelID + " · " + value.backend : "";
     }
@@ -195,7 +204,7 @@ ColumnLayout {
                 color: root.ui.c.muted
                 font.pixelSize: 12
                 visible: !!text
-                text: root.record && root.record.recognitionHints && root.record.recognitionHints.omittedTerms.length ? "Voice vocabulary omitted: " + root.record.recognitionHints.omittedTerms.join(", ") : ""
+                text: root.record ? root.hintText("Recognition vocabulary", root.record.recognitionHints) : ""
             }
 
             SLabel {
@@ -204,7 +213,7 @@ ColumnLayout {
                 color: root.ui.c.muted
                 font.pixelSize: 12
                 visible: !!text
-                text: root.record && root.record.proofreadingHints && root.record.proofreadingHints.omittedTerms.length ? "Cleanup vocabulary omitted: " + root.record.proofreadingHints.omittedTerms.join(", ") : ""
+                text: root.record ? root.hintText("Text cleanup vocabulary", root.record.proofreadingHints) : ""
             }
 
             SLabel {
