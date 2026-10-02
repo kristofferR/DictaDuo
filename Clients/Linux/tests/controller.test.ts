@@ -407,8 +407,10 @@ test("a cancel during a brief outage keeps retrying the discard", async () => {
   f.controller.start();
   await until(() => f.controller.state.startsWith("recording"));
   await f.controller.cancel();
-  await until(() => attempts === 3);
-  await until(async () => (await f.record(id)).status === "cancelled");
+  // Quitting waits for the retries instead of abandoning them.
+  await f.controller.discardsSettled();
+  expect(attempts).toBe(3);
+  expect((await f.record(id)).status).toBe("cancelled");
 });
 test("recognition failing mid-take seals the capture instead of recording on", async () => {
   const f = await fixture();

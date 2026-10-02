@@ -132,6 +132,7 @@ export class Controller {
   muteOutput = false;
   /** Background retries for a discard that failed transiently. */
   discardRetryDelaysMS = [1_000, 2_000, 4_000, 8_000, 15_000];
+  private readonly retryingDiscards = new Set<Promise<void>>();
   /**
    * Client deadline once a take leaves the server queue: two speech attempts
    * (120 s loading + 180 s each), cloud fallback, and proofreading (30 s
@@ -441,7 +442,7 @@ export class Controller {
       await this.api.cancel(id, owner);
     } catch (error) {
       if (!transient(error)) return;
-      void (async () => {
+      const retrying = (async () => {
         for (const delay of this.discardRetryDelaysMS) {
           await Bun.sleep(delay);
           try {
@@ -450,8 +451,13 @@ export class Controller {
             if (!transient(retry)) return;
           }
         }
-      })();
+      })().finally(() => this.retryingDiscards.delete(retrying));
+      this.retryingDiscards.add(retrying);
     }
+  }
+  /** Quitting waits for discards still retrying, so a cancelled take is never archived. */
+  async discardsSettled() {
+    await Promise.allSettled([...this.retryingDiscards]);
   }
   /**
    * The server closed the capture: it seals recorded audio archive-only or drops

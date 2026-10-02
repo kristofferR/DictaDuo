@@ -1256,6 +1256,10 @@ final class SottoDuoController: ObservableObject {
             .write(to: file, options: .atomic)
     }
 
+    private func forgetAdmission(_ requestID: UUID) {
+        try? FileManager.default.removeItem(at: admissionRoot.appendingPathComponent("\(requestID.uuidString).json"))
+    }
+
     private func reconcileAdmissions() {
         guard let connection = try? client(),
               let files = try? FileManager.default.contentsOfDirectory(at: admissionRoot, includingPropertiesForKeys: nil)
@@ -1679,12 +1683,18 @@ final class SottoDuoController: ObservableObject {
                 throw ServerClientError.rejected(409, "This server does not support compatible long recordings. Update the server, then try again.")
             }
             let admission = CreateGenerationRequest(requestID: requestID, device: device, mode: isTest ? .test : .dictation)
+            // Journaled before sending: the server may commit a session whose
+            // response is lost to an outage or a crash. While in flight it is
+            // this take's own admission, not an orphan to reconcile.
+            journalAdmission(admission, endpoint: connection.endpoint)
+            reconcilingAdmissionIDs.insert(requestID)
             let created: RecordingSnapshot
             do { created = try await connection.createRecording(admission) }
             catch {
-                // The server may have admitted a session whose response was lost.
-                if case ServerClientError.rejected(let status, _) = error, (400..<500).contains(status) { throw error }
-                journalAdmission(admission, endpoint: connection.endpoint)
+                reconcilingAdmissionIDs.remove(requestID)
+                if case ServerClientError.rejected(let status, _) = error, (400..<500).contains(status) {
+                    forgetAdmission(requestID); throw error
+                }
                 Task { [weak self] in
                     for delay in [1, 5, 30] {
                         try? await Task.sleep(for: .seconds(delay))
@@ -1693,14 +1703,17 @@ final class SottoDuoController: ObservableObject {
                 }
                 throw error
             }
-            // The server is reachable again, so settle any earlier uncertain admission.
-            reconcileAdmissions()
+            reconcilingAdmissionIDs.remove(requestID)
+            // Until the spool owns the session, the journal still settles it.
             guard sessionID == current, activity == .starting, !Task.isCancelled else {
                 Task { await connection.discardRecordingRetrying(created.id) }; return
             }
             activeGenerationID = created.id; activeClient = connection
             let spool = try RecordingSpool(directory: recordingRoot.appendingPathComponent(created.id.uuidString),
                 snapshot: created, endpoint: connection.endpoint, deviceIdentity: preferences.deviceID)
+            forgetAdmission(requestID)
+            // The server is reachable again, so settle any earlier uncertain admission.
+            reconcileAdmissions()
             activeSpool = spool
             sharedPreferences = created.settings
             let destinationCapture = destinationTask
