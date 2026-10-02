@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { DoubleTap, doubleTapWindowMS } from "../src/double-tap.ts";
+import { DoubleTap, doubleTapWindowMS, edgeTime } from "../src/double-tap.ts";
 
 function taps() {
   let now = 0;
@@ -37,4 +37,12 @@ test("a hold is not a tap and breaks a pending pair", () => {
   detector.reset();
   expect(tap(1000)).toBe(false);
   expect(tap(1200)).toBe(true);
+});
+
+test("bridge timestamps are used only when they come from the same monotonic clock", () => {
+  expect(edgeTime(9_800, 10_000)).toBe(9_800);
+  expect(edgeTime(undefined, 10_000)).toBe(10_000);
+  // A wall-clock or foreign timestamp is far outside the monotonic window.
+  expect(edgeTime(Date.now(), 10_000)).toBe(10_000);
+  expect(edgeTime(-50_000, 10_000)).toBe(10_000);
 });

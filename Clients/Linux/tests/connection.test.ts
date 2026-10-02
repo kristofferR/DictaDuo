@@ -9,6 +9,7 @@ import { API } from "../src/api.ts";
 import { ConnectionSettings } from "../src/connection.ts";
 import { parseConfig } from "../src/config.ts";
 import { ClientRuntime } from "../src/runtime.ts";
+import { monotonicMS } from "../src/double-tap.ts";
 import type { Desktop } from "../src/controller.ts";
 import type { Source } from "../src/sources.ts";
 
@@ -229,6 +230,20 @@ test("double-tap mode toggles on a double tap from either shortcut source, never
   await runtime.command("start");
   await runtime.command("stop");
   expect(actions).toEqual(["toggle", "toggle"]);
+  // A slow lock check delays processing, but each portal edge keeps the time it fired.
+  const unlocked = f.desktop.unlocked;
+  f.desktop.unlocked = async (...args) => (await Bun.sleep(600), unlocked(...args));
+  const base = monotonicMS();
+  for (const [action, offset] of [
+    ["start", 0],
+    ["stop", 80],
+    ["start", 200],
+    ["stop", 280],
+  ] as const)
+    await runtime.gui({ version: 1, action, shortcut: true, at: base + offset });
+  f.desktop.unlocked = unlocked;
+  expect(actions).toEqual(["toggle", "toggle", "toggle"]);
+  actions.pop();
   // The microphone test's Stop button still stops.
   await runtime.gui({ version: 1, action: "stop" });
   expect(actions).toEqual(["toggle", "toggle", "stop"]);

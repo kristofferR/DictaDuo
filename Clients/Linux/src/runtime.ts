@@ -6,7 +6,7 @@ import { Controller, type Desktop } from "./controller.ts";
 import { command } from "./desktop.ts";
 import { ClientNotice } from "./errors.ts";
 import { createGUIHandler } from "./gui.ts";
-import { DoubleTap } from "./double-tap.ts";
+import { DoubleTap, edgeTime } from "./double-tap.ts";
 import { OutputMuter } from "./output.ts";
 import type { Command } from "./ipc.ts";
 import type { ShortcutSettings } from "./shortcuts.ts";
@@ -138,9 +138,11 @@ export class ClientRuntime {
       input.shortcut === true &&
       this.doubleTapping
     ) {
+      // Time the edge when the portal fired it, not after the lock check below.
+      const at = edgeTime(input.at);
       if (action === "start" && !(await this.desktop.unlocked()))
         throw new ClientNotice("Unlock this computer first.");
-      this.edge(action);
+      this.edge(action, at);
       return {};
     }
     if (action !== "stop" && !(await this.desktop.unlocked()))
@@ -198,7 +200,7 @@ export class ClientRuntime {
     return this.settings.config?.activationMode === "doubleTap";
   }
   /** A shortcut press or release. In double-tap mode only a double tap toggles recording. */
-  private edge(edge: "start" | "stop") {
+  private edge(edge: "start" | "stop", at?: number) {
     const controller = this.current?.controller;
     if (!controller) return;
     if (!this.doubleTapping) {
@@ -209,8 +211,8 @@ export class ClientRuntime {
     const take = controller.busy ? controller.activity.startedAt : undefined;
     if (take !== this.tapTake) this.doubleTap.reset();
     this.tapTake = take;
-    if (edge === "start") this.doubleTap.press();
-    else if (this.doubleTap.release()) controller.toggle();
+    if (edge === "start") this.doubleTap.press(at);
+    else if (this.doubleTap.release(at)) controller.toggle();
   }
   async command(action: Command): Promise<string> {
     if (this.shortcuts?.check.consume(action))

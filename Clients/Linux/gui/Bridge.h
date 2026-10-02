@@ -1,6 +1,7 @@
 #pragma once
 #include "DesktopIntegration.h"
 #include <QObject>
+#include <QPair>
 #include <QQueue>
 #include <QSet>
 #include <QSettings>
@@ -63,7 +64,8 @@ private:
   QVariantMap m_colors;
   QVariantMap m_fixture;
   QSet<QString> m_pending;
-  QQueue<QString> m_shortcutEdges;
+  /** Each edge keeps the monotonic time it fired, since sends are serialized. */
+  QQueue<QPair<QString, double>> m_shortcutEdges;
   bool m_shortcutEdgeInFlight = false;
   QTimer m_poll;
   QTimer m_themePoll;
