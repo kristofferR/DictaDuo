@@ -54,6 +54,23 @@ import { maxInputCharacters, modelHints, processingRecord } from "./domain/corre
 
 const MAX_METADATA_BYTES = 1_048_576;
 const CONTINUATION_INPUT = "continuation-input.json";
+/** Private copy of the output a retry replaced, restored if the retry fails. */
+const PREVIOUS_OUTPUT = "previous-output.json";
+const outputKeys = [
+  "rawText",
+  "finalText",
+  "insertionText",
+  "previewText",
+  "detectedLanguage",
+  "recognitionHints",
+  "speech",
+  "formattingRejectionReason",
+  "consumedListControls",
+  "textProcessing",
+  "proofreadingHints",
+  "proofreading",
+  "continuation",
+] as const;
 const MAX_PREFERENCES_BYTES = 262_144;
 const MAX_CHUNK_BYTES = 1_048_576;
 const terminal = (record: GenerationRecord) =>
@@ -228,6 +245,7 @@ export class GenerationService {
         if (record.capture) record.capture.state = "stopped";
         record.status = "failed";
         record.error = "Server restarted before this generation completed.";
+        await this.restorePreviousOutput(record);
         if (record.recognition) delete record.recognition.partialText;
         record.updatedAt = now();
         delete record.progress;
@@ -810,19 +828,14 @@ export class GenerationService {
         throw new ServiceError(503, "server_unavailable", state.message);
       }
       // Keep the saved audio and metadata, but drop the previous run's output.
-      for (const key of [
-        "error",
-        "detectedLanguage",
-        "recognitionHints",
-        "speech",
-        "formattingRejectionReason",
-        "consumedListControls",
-        "textProcessing",
-        "proofreadingHints",
-        "proofreading",
-        "continuation",
-      ] as const)
-        delete record[key];
+      // A transcript it replaces stays recoverable until the retry succeeds.
+      if (record.rawText)
+        await atomicPrivateWrite(
+          join(this.directory(record.id), PREVIOUS_OUTPUT),
+          JSON.stringify(Object.fromEntries(outputKeys.map((key) => [key, record[key]]))),
+        );
+      delete record.error;
+      for (const key of outputKeys) delete record[key];
       record.rawText = record.finalText = record.insertionText = record.previewText = "";
       const session = new RecognitionSession(
         this.inference,
@@ -845,6 +858,23 @@ export class GenerationService {
       this.enqueueProcessing(record.id, await this.savedContinuation(record.id));
       return copy(record);
     });
+  }
+  /**
+   * A retry that failed before producing new speech gives back the transcript
+   * it replaced; newer text from the retry wins.
+   */
+  private async restorePreviousOutput(record: GenerationRecord) {
+    const path = join(this.directory(record.id), PREVIOUS_OUTPUT);
+    if (!record.rawText) {
+      try {
+        const previous = JSON.parse(
+          (await readRegularFile(path, MAX_METADATA_BYTES)).toString("utf8"),
+        ) as Partial<GenerationRecord>;
+        for (const key of outputKeys)
+          if (previous[key] !== undefined) Object.assign(record, { [key]: previous[key] });
+      } catch {}
+    }
+    await rm(path, { force: true }).catch(() => {});
   }
   private async savedContinuation(id: string): Promise<DictationContinuation | undefined> {
     try {
@@ -1326,6 +1356,7 @@ export class GenerationService {
         if (terminal(this.getInternal(id))) return;
         await atomicPrivateWrite(join(this.directory(id), "transcript.txt"), record!.finalText);
         await this.save(record!);
+        await rm(join(this.directory(id), PREVIOUS_OUTPUT), { force: true }).catch(() => {});
       });
     } catch (error) {
       await this.mutate(async () => {
@@ -1334,6 +1365,7 @@ export class GenerationService {
         // A retry may have queued the record again since, so leave it alone.
         if (!record || terminal(record) || signal.aborted) return;
         const failed = copy(record);
+        await this.restorePreviousOutput(failed);
         if (failed.recognition) delete failed.recognition.partialText;
         failed.status = "failed";
         failed.error = error instanceof Error ? error.message : "Processing failed.";

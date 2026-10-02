@@ -881,9 +881,12 @@ final class SottoDuoController: ObservableObject {
     /// Re-runs transcription on a failed or cancelled recording's saved audio.
     /// The result lands in history only; nothing is pasted.
     func retryGeneration(_ id: UUID) {
-        guard serverHealth?.generationRetry == true else { return }
+        // One retry per recording at a time; a second would be rejected and
+        // leave an error over the first one's result.
+        guard serverHealth?.generationRetry == true, retryingGenerationIDs.insert(id).inserted else { return }
         Task { [weak self] in
             guard let self else { return }
+            defer { retryingGenerationIDs.remove(id) }
             do {
                 let connection = try client()
                 replaceGeneration(try await connection.retry(id))
@@ -896,6 +899,8 @@ final class SottoDuoController: ObservableObject {
             refreshServer()
         }
     }
+
+    @Published private(set) var retryingGenerationIDs = Set<UUID>()
 
     private func replaceGeneration(_ record: GenerationRecord) {
         guard let index = generations.firstIndex(where: { $0.id == record.id }) else { return }

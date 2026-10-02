@@ -638,6 +638,35 @@ test("a cancelled sealed recording can be transcribed again without overwriting 
   expect(final.finalText).toBe("Recording 2.");
 });
 
+test("a retry that fails before new speech keeps the transcript it replaced", async () => {
+  const inference = new QueuedInference();
+  inference.proofRelease = deferred();
+  const { service, path } = await setup(inference);
+  const record = await upload(service);
+  await service.finish(record.id, { inferenceFrames: 4000 });
+  inference.releases[0]!.release();
+  await inference.proofStarted.promise;
+  // Shutdown during proofreading cancels the take after its transcript was saved.
+  await service.shutdown();
+  const failing = new FakeInference();
+  failing.transcribe = async () => {
+    throw new Error("Helper exited.");
+  };
+  const restarted = await GenerationService.open(
+    { dataDirectory: path, development: true },
+    failing,
+  );
+  resources.push({ service: restarted, path });
+  const interrupted = await restarted.get(record.id);
+  expect(interrupted.status).toBe("cancelled");
+  expect(interrupted.rawText).toBe("Recording 1.");
+  expect((await restarted.retry(record.id)).rawText).toBe("");
+  const final = await completed(restarted, record.id);
+  expect(final.status).toBe("failed");
+  expect(final.error).toBe("Helper exited.");
+  expect(final.rawText).toBe("Recording 1.");
+});
+
 test("only failed or cancelled recordings with sealed audio can be retried", async () => {
   const { service } = await setup();
   const receiving = await upload(service);

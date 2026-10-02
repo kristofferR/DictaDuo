@@ -228,7 +228,7 @@ struct HistoryPage: View {
                             controller.errorMessage = nil
                             controller.retryGeneration(selected.id)
                         }
-                        .disabled(controller.serverHealth == nil)
+                        .disabled(controller.serverHealth == nil || controller.retryingGenerationIDs.contains(selected.id))
                         .help("Transcribe the saved audio again. Nothing is pasted.")
                     }
                     if selected.inferenceAudio != nil {
