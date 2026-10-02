@@ -163,6 +163,8 @@ final class SottoDuoController: ObservableObject {
     private var failedRecoveryIDs = Set<UUID>()
     /// Locally discarded spools whose server discard is in flight.
     private var discardingSpoolIDs = Set<UUID>()
+    /// Uncertain admissions whose replay and discard is in flight.
+    private var reconcilingAdmissionIDs = Set<UUID>()
     private var wisprFlowReader: WisprFlowSourceReader?
     private var wisprFlowPrepareTask: Task<Void, Never>?
     private var wisprFlowPrepareGate: WisprFlowPreparationGate?
@@ -1212,6 +1214,7 @@ final class SottoDuoController: ObservableObject {
     /// Recovery only archives: it never restarts the microphone or pastes.
     private func recoverPendingRecordings() {
         guard !isShuttingDown else { return }
+        reconcileAdmissions()
         let owned = Set(pendingSpools.keys).union(pendingDictations.compactMap { $0.spool?.snapshot.id })
             .union([activeSpool?.snapshot.id].compactMap { $0 }).union(discardingSpoolIDs)
         for spool in RecordingSpool.recover(in: recordingRoot, excluding: owned) {
@@ -1232,6 +1235,47 @@ final class SottoDuoController: ObservableObject {
         }
         updatePendingRecordingSummary()
         resumePendingTransfers()
+    }
+
+    /// A lost admission response may hide a server session that nothing would
+    /// settle. The request is journaled so a replay, which admission answers
+    /// idempotently, can find and discard it after any outage or relaunch.
+    private struct UncertainAdmission: Codable {
+        var request: CreateGenerationRequest
+        var endpoint: URL
+    }
+
+    private var admissionRoot: URL {
+        configuration.url.deletingLastPathComponent().appendingPathComponent("Admissions", isDirectory: true)
+    }
+
+    private func journalAdmission(_ request: CreateGenerationRequest, endpoint: URL) {
+        let file = admissionRoot.appendingPathComponent("\(request.requestID.uuidString).json")
+        try? FileManager.default.createDirectory(at: admissionRoot, withIntermediateDirectories: true)
+        try? RecordingWire.encoder().encode(UncertainAdmission(request: request, endpoint: endpoint))
+            .write(to: file, options: .atomic)
+    }
+
+    private func reconcileAdmissions() {
+        guard let connection = try? client(),
+              let files = try? FileManager.default.contentsOfDirectory(at: admissionRoot, includingPropertiesForKeys: nil)
+        else { return }
+        for file in files {
+            guard let admission = try? RecordingWire.decoder().decode(UncertainAdmission.self, from: Data(contentsOf: file)) else {
+                try? FileManager.default.removeItem(at: file); continue
+            }
+            let id = admission.request.requestID
+            guard admission.endpoint == connection.endpoint, reconcilingAdmissionIDs.insert(id).inserted else { continue }
+            Task { [weak self] in
+                defer { self?.reconcilingAdmissionIDs.remove(id) }
+                do {
+                    let orphan = try await connection.createRecording(admission.request)
+                    try await connection.discardRecording(orphan.id)
+                } catch ServerClientError.rejected(404, _) {
+                } catch { return }
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
     }
 
     private func resumePendingTransfers() {
@@ -1638,19 +1682,19 @@ final class SottoDuoController: ObservableObject {
             let created: RecordingSnapshot
             do { created = try await connection.createRecording(admission) }
             catch {
-                // A lost response may hide an admitted session that nothing would
-                // settle. Admission is idempotent per request, so replay it to discard.
+                // The server may have admitted a session whose response was lost.
                 if case ServerClientError.rejected(let status, _) = error, (400..<500).contains(status) { throw error }
-                Task {
+                journalAdmission(admission, endpoint: connection.endpoint)
+                Task { [weak self] in
                     for delay in [1, 5, 30] {
                         try? await Task.sleep(for: .seconds(delay))
-                        guard let orphan = try? await connection.createRecording(admission) else { continue }
-                        try? await connection.discardRecording(orphan.id)
-                        return
+                        self?.reconcileAdmissions()
                     }
                 }
                 throw error
             }
+            // The server is reachable again, so settle any earlier uncertain admission.
+            reconcileAdmissions()
             guard sessionID == current, activity == .starting, !Task.isCancelled else {
                 Task { try? await connection.discardRecording(created.id) }; return
             }

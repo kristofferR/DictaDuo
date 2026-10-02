@@ -159,7 +159,8 @@ public actor GenerationService {
         let message = !writable ? "Server storage is unavailable or full." : (activeID != nil ? "Server is handling a recording." :
             (ready ? "Server ready." : (warming ? "Loading server models…" : "Server models are unavailable.")))
         if !state.speechLoaded, !warming, activeID == nil { beginWarmup() }
-        return ServerHealth(isDev: configuration.development, ready: ready && activeID == nil,
+        // This server only implements the v1 routes, not the v2 recording sessions of API version 3.
+        return ServerHealth(apiVersion: 2, isDev: configuration.development, ready: ready && activeID == nil,
             speech: ModelRuntimeInfo(modelID: "whisper-large-v3-turbo", backend: Self.speechBackend, ready: state.speechLoaded),
             proofreading: ModelRuntimeInfo(modelID: "Qwen3-4B-Instruct-2507", backend: Self.proofBackend,
                                            ready: state.proofLoaded, message: preferences.preferences.textCorrectionEnabled ?

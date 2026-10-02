@@ -880,6 +880,27 @@ test("server queue wait does not consume a take's processing deadline", async ()
   expect(f.controller.result?.delivery).toBe("inserted");
 });
 
+test("server progress renews a take's processing deadline", async () => {
+  const f = await fixture();
+  const recording = f.api.recording.bind(f.api);
+  let polls = 0;
+  f.controller.processingTimeoutMS = 200;
+  f.api.recording = async (...args) => {
+    const detail = await recording(...args);
+    // Each checkpoint lands within the deadline, but together they outlast it.
+    if (++polls <= 8)
+      return {
+        snapshot: { ...detail.snapshot, processingState: "processing", revision: 1_000 + polls },
+      };
+    return detail;
+  };
+  await record(f);
+  f.controller.stop();
+  await f.controller.settled();
+  expect(polls).toBe(9);
+  expect(f.deliveries()).toBe(1);
+});
+
 test("cancelAll revokes every queued destination before slow server cancellation", async () => {
   for (const includeDelivery of [true, false]) {
     const held = heldInference();

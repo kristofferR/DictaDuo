@@ -604,7 +604,9 @@ export class Controller {
     }
     // Speech is processed during capture. Once the server starts on this take
     // (queue wait has no client deadline), allow two speech attempts with cold
-    // loading, cloud fallback and proofreading, or a backlog as long as the take.
+    // loading, cloud fallback and proofreading, or a step as long as the take.
+    // Every server checkpoint renews the deadline, so a slow backlog of
+    // windows never times out while the server is still making progress.
     const seconds =
       (stopped.stopRuns ?? []).reduce((sum, run) => sum + run.inferenceFrames, 0) / 16000;
     const budget = Math.max(this.processingTimeoutMS, seconds * 1000);
@@ -612,9 +614,13 @@ export class Controller {
       value.captureState === "discarded" || ["completed", "failed"].includes(value.processingState);
     let detail: RecordingDetail = { snapshot: stopped };
     let deadline: number | undefined;
+    let revision: number | undefined;
     let failingSince: number | undefined;
     while (this.live(take) && !settled(detail.snapshot)) {
-      if (detail.snapshot.processingState !== "queued") deadline ??= Date.now() + budget;
+      if (detail.snapshot.processingState !== "queued" && detail.snapshot.revision !== revision) {
+        revision = detail.snapshot.revision;
+        deadline = Date.now() + budget;
+      }
       if (deadline !== undefined && Date.now() >= deadline)
         throw new Error("Processing timed out.");
       await Bun.sleep(300);
