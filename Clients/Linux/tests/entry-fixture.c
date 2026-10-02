@@ -40,6 +40,7 @@ int main(int argc, char **argv) {
   gtk_box_pack_start(GTK_BOX(box), other, FALSE, FALSE, 0);
   gtk_entry_set_text(GTK_ENTRY(entry), "start ");
   gtk_widget_show_all(window);
+  gtk_window_present(GTK_WINDOW(window));
   gtk_widget_grab_focus(entry);
   gtk_editable_select_region(GTK_EDITABLE(entry), 6, 6);
   gtk_editable_set_position(GTK_EDITABLE(entry), 6);

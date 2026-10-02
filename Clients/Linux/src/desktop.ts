@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { pipeWireInputs } from "../../../Server/src/capture/pipewire-discovery.ts";
 import { type Desktop, type Destination } from "./controller.ts";
 import type { SourceID } from "./sources.ts";
+import { NativeDestinations } from "./native-destination.ts";
 
 export async function command(args: string[], timeout = 1500, input?: string): Promise<string> {
   const child = Bun.spawn(args, {
@@ -44,7 +45,8 @@ export class HyprlandDesktop implements Desktop {
   private socket?: Socket;
   private monitor?: ReturnType<typeof Bun.spawn>;
   private connected = false;
-  private targetChanged = () => {};
+  private destinations = new NativeDestinations();
+  private focusRevision = 0;
   private unsafe = () => {};
   constructor(private helper: string) {}
   async monitorSession(
@@ -81,8 +83,10 @@ export class HyprlandDesktop implements Desktop {
       while ((newline = buffer.indexOf("\n")) !== -1) {
         const line = buffer.slice(0, newline);
         buffer = buffer.slice(newline + 1);
-        if (line.startsWith("activewindowv2>>") || line.startsWith("closewindow>>"))
-          this.targetChanged();
+        if (line.startsWith("activewindowv2>>") || line.startsWith("closewindow>>")) {
+          this.focusRevision++;
+          this.destinations.invalidate();
+        }
         const action = shortcutEvent(line);
         if (action) shortcut(action);
       }
@@ -192,100 +196,32 @@ export class HyprlandDesktop implements Desktop {
   }
   async capture(): Promise<Destination> {
     const startedAt = Date.now();
-    let invalidated = false;
-    this.targetChanged = () => {
-      invalidated = true;
-    };
+    const revision = this.focusRevision;
     const window = await activeWindow().catch(() => undefined);
-    if (!window) return preview();
-    let child: ReturnType<typeof Bun.spawn>;
-    try {
-      child = Bun.spawn([this.helper, String(window.pid)], {
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "ignore",
-      });
-    } catch {
+    if (!window || revision !== this.focusRevision) return preview();
+    const destination = await this.destinations.capture(this.helper, String(window.pid));
+    if (revision !== this.focusRevision) {
+      destination.close();
       return preview();
     }
-    // Literal options retain Bun's stream types here (the generic spawn type does not).
-    if (
-      typeof child.stdin === "number" ||
-      !child.stdin ||
-      !(child.stdout instanceof ReadableStream)
-    ) {
-      child.kill();
-      return preview();
-    }
-    const input = child.stdin;
-    const reader = child.stdout.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let closed = false;
-    const close = () => {
-      closed = true;
-      child.kill("SIGKILL");
-    };
-    const line = async (timeout: number) => {
-      const timer = setTimeout(close, timeout);
-      try {
-        while (!buffer.includes("\n")) {
-          const next = await reader.read();
-          if (next.done) throw new Error("Destination helper stopped.");
-          buffer += decoder.decode(next.value, { stream: true });
-          if (buffer.length > 100) throw new Error("Invalid destination helper response.");
-        }
-        const at = buffer.indexOf("\n"),
-          value = buffer.slice(0, at);
-        buffer = buffer.slice(at + 1);
-        return value;
-      } finally {
-        clearTimeout(timer);
-      }
-    };
-    try {
-      if ((await line(1400)) !== "ready") {
-        close();
-        return preview();
-      }
-    } catch {
-      close();
-      return preview();
-    }
-    let attempted = false;
     return {
-      close,
-      deliver: async (text) => {
-        if (
-          /[\u0000-\u0008\u000b-\u001f\u007f]/.test(text) ||
-          attempted ||
-          closed ||
-          invalidated ||
-          !(await this.unlocked(startedAt))
-        ) {
-          close();
+      close: () => destination.close(),
+      deliver: async (text, held) => {
+        if (!(await this.unlocked(startedAt))) {
+          destination.close();
           return "preview";
         }
         const current = await activeWindow().catch(() => undefined);
-        if (invalidated || current?.address !== window.address || current.pid !== window.pid) {
-          close();
+        if (current?.address !== window.address || current.pid !== window.pid) {
+          destination.close();
           return "preview";
         }
-        attempted = true;
-        try {
-          input.write(JSON.stringify(text) + "\n");
-          await input.flush();
-          const result = await line(1500);
-          return result === "inserted" || result === "preview" ? result : "uncertain";
-        } catch {
-          return "uncertain";
-        } finally {
-          close();
-        }
+        return destination.deliver(text, held);
       },
     };
   }
   close(): void {
+    this.destinations.invalidate();
     this.connected = false;
     this.socket?.destroy();
     this.monitor?.kill();

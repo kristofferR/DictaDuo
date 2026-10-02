@@ -5,7 +5,11 @@ import { RecordingFeedback } from "./feedback.ts";
 import type { OutputMuter } from "./output.ts";
 const recordingLimitMS = 174000;
 export interface Destination {
-  deliver(text: string): Promise<"inserted" | "preview" | "uncertain">;
+  /** Returns "held", without attempting, if `held` is true when the insertion is sent. */
+  deliver(
+    text: string,
+    held?: () => boolean,
+  ): Promise<"inserted" | "preview" | "uncertain" | "held">;
   close(): void;
 }
 export interface Desktop {
@@ -15,6 +19,21 @@ export interface Desktop {
   defaultInput(hostID: string): Promise<SourceID | undefined>;
   notify(message: string): void;
 }
+type Phase =
+  | "idle"
+  | "preparing"
+  | "recording"
+  | "processing"
+  | "delivering"
+  | "completed"
+  | "cancelled"
+  | "failed";
+type Activity = {
+  phase: Phase;
+  source?: string;
+  startedAt?: number;
+  trigger?: "shortcut" | "pairing" | "test";
+};
 type Take = {
   owner: string;
   requestID: string;
@@ -28,11 +47,21 @@ type Take = {
   button?: { ticket: string; source: SourceID };
   completed?: boolean;
   preview: boolean;
+  feedback: RecordingFeedback;
   feedbackAbort: AbortController;
   atLimit: boolean;
   /** Fixed at start, so a settings change mid-take still restores the output. */
   output?: Output;
   muting?: Promise<void>;
+  activity: Activity;
+  state: string;
+  watchdog?: ReturnType<typeof setInterval>;
+  watching: boolean;
+  lastTick: number;
+  startContext?: unknown;
+  /** Resolves when this take's delivery slot is free, in recording order. */
+  delivered: () => void;
+  turn: Promise<void>;
 };
 type Output = Pick<OutputMuter, "mute" | "restore">;
 export interface Result {
@@ -40,35 +69,37 @@ export interface Result {
   text: string;
   delivery: "inserted" | "preview" | "uncertain";
 }
-/** A process owns only its current take. Restart never reloads a generation for delivery. */
+/**
+ * The capturing take owns the microphone until the server seals it. Sealed takes
+ * process and deliver in recording order while the next take records. Restart
+ * never reloads a generation for delivery.
+ */
 export class Controller {
   private take?: Take;
-  private pending?: Promise<void>;
-  private watchdog?: ReturnType<typeof setInterval>;
-  private watching = false;
-  private lastTick = Date.now();
+  private processing: Take[] = [];
+  private tasks = new Set<Promise<void>>();
+  private deliveryTail: Promise<void> = Promise.resolve();
+  /** The shown take's cancellation, until its server cleanup finishes. */
+  private cancelling?: { take: Take; cleanup: Promise<void> };
+  /** The take whose state the overlay shows. */
+  private displayed?: Take;
   feedback = new RecordingFeedback();
   captureAllowed: () => boolean = () => true;
   output?: Output;
   muteOutput = false;
-  onStart?: (ticket?: string) => void;
-  onComplete?: (id: string | undefined, ticket: string | undefined, succeeded: boolean) => void;
-  activity: {
-    phase:
-      | "idle"
-      | "preparing"
-      | "recording"
-      | "processing"
-      | "delivering"
-      | "completed"
-      | "cancelled"
-      | "failed";
-    source?: string;
-    startedAt?: number;
-    trigger?: "shortcut" | "pairing" | "test";
-  } = { phase: "idle" };
+  /** Client deadline once a take leaves the server queue. */
+  processingTimeoutMS = 360_000;
+  /** Returns per-take context that is handed back to onComplete for that take. */
+  onStart?: (ticket?: string) => unknown;
+  onComplete?: (
+    id: string | undefined,
+    ticket: string | undefined,
+    succeeded: boolean,
+    context: unknown,
+  ) => void;
+  activity: Activity = { phase: "idle" };
   get busy() {
-    return this.take !== undefined;
+    return this.take !== undefined || this.processing.length > 0;
   }
   updatePreferences(preferences: SourcePreferences) {
     if (this.busy) throw new Error("Finish dictation before changing microphones.");
@@ -89,113 +120,204 @@ export class Controller {
   start(button?: Take["button"], preview = false): boolean {
     if (this.take || !this.captureAllowed()) return false;
     this.result = undefined;
-    this.feedback = new RecordingFeedback();
+    // Later cancels target this take, not an earlier one still cleaning up.
+    this.cancelling = undefined;
+    const startedAt = Date.now();
     const take: Take = {
       owner: randomBytes(32).toString("hex"),
       requestID: randomUUID().toUpperCase(),
       released: false,
       cancelled: false,
-      startedAt: Date.now(),
+      startedAt,
       sealed: false,
       sealMayHaveSucceeded: false,
       button,
       preview,
+      feedback: new RecordingFeedback(),
       feedbackAbort: new AbortController(),
       atLimit: false,
+      activity: {
+        phase: "preparing",
+        startedAt,
+        trigger: preview ? "test" : button ? "pairing" : "shortcut",
+      },
+      state: "preparing",
+      watching: false,
+      lastTick: startedAt,
+      delivered: () => {},
+      turn: Promise.resolve(),
       output: this.muteOutput ? this.output : undefined,
     };
     this.take = take;
-    this.activity = {
-      phase: "preparing",
-      startedAt: take.startedAt,
-      trigger: preview ? "test" : button ? "pairing" : "shortcut",
-    };
-    this.onStart?.(button?.ticket);
-    this.lastTick = Date.now();
-    this.setState("preparing", "preparing");
+    this.feedback = take.feedback;
+    take.startContext = this.onStart?.(button?.ticket);
+    this.setState(take, "preparing", "preparing");
     take.muting = take.output?.mute().catch(() => {});
-    this.watchdog = setInterval(() => {
+    take.watchdog = setInterval(() => {
       void this.watch(take);
     }, 1000);
-    this.pending = this.run(take)
+    const task: Promise<void> = this.run(take)
       .catch(async () => {
         if (!take.cancelled)
-          this.setState("Capture failed. Any completed result remains in shared history.");
+          this.setState(take, "Capture failed. Any completed result remains in shared history.");
         await this.cancelTake(take);
       })
       .finally(() => {
-        void take.output?.restore();
+        // A sealed take restored at its seal; a newer take may be muting now.
+        if (!take.sealed) void take.output?.restore();
         take.feedbackAbort.abort();
-        this.feedback.finish(take.atLimit);
+        take.feedback.finish(take.atLimit);
         take.destination?.close();
-        if (this.take === take) {
-          clearInterval(this.watchdog);
-          this.take = undefined;
-          this.onComplete?.(
-            take.id,
-            take.button?.ticket,
-            take.completed === true && !take.cancelled,
-          );
+        clearInterval(take.watchdog);
+        // A failed or cancelled take still frees its slot for later deliveries.
+        take.delivered();
+        if (this.take === take) this.take = undefined;
+        this.processing = this.processing.filter((other) => other !== take);
+        const next = this.foreground;
+        if (this.feedback === take.feedback && next) {
+          this.feedback = next.feedback;
+          this.announce(next.state, next.activity.phase, next.activity);
         }
+        this.tasks.delete(task);
+        this.onComplete?.(
+          take.id,
+          take.button?.ticket,
+          take.completed === true && !take.cancelled,
+          take.startContext,
+        );
       });
+    this.tasks.add(task);
     return true;
   }
   stop(): void {
     if (this.take && !this.take.button) this.take.released = true;
   }
   startButton(ticket: string, source: SourceID): boolean {
+    // Pairing-button taps are declined while any take records or processes.
+    if (this.busy) return false;
     return this.start({ ticket, source });
   }
   stopButton(ticket: string): void {
     if (this.take?.button?.ticket === ticket) this.take.released = true;
   }
   async cancelButton(ticket?: string): Promise<void> {
-    if (["delivering", "completed"].includes(this.activity.phase)) return;
-    if (this.take?.button && (!ticket || this.take.button.ticket === ticket)) await this.cancel();
+    const takes = [this.take, ...this.processing].filter(
+      (take): take is Take =>
+        take !== undefined &&
+        !!take.button &&
+        (!ticket || take.button.ticket === ticket) &&
+        !["delivering", "completed"].includes(take.activity.phase),
+    );
+    // Revoke every destination synchronously before waiting for server cleanup.
+    await Promise.all(takes.map((take) => this.cancelOne(take)));
   }
   toggle(): void {
     if (this.take) this.stop();
     else this.start();
   }
+  /** Cancels the take the overlay shows; earlier takes keep processing. */
   async cancel(): Promise<void> {
-    const take = this.take;
-    this.result = undefined;
-    this.setState("cancelled", "cancelled");
-    if (take) await this.cancelTake(take);
+    // The overlay shows the cancelled take until its cleanup finishes, so a repeat
+    // joins that cancellation, unless a new take started or another take is shown.
+    if (this.cancelling && this.displayed === this.cancelling.take) return this.cancelling.cleanup;
+    const take = this.foreground;
+    if (take) await this.cancelOne(take);
+    else {
+      // Earlier takes' results stay recoverable while another take is cancelled.
+      this.result = undefined;
+      this.announce("cancelled", "cancelled");
+    }
+  }
+  /** Cancels every take, or only those not yet delivering. */
+  async cancelAll(includeDelivery = true): Promise<void> {
+    const takes = [this.take, ...this.processing].filter(
+      (take): take is Take =>
+        take !== undefined &&
+        (includeDelivery || !["delivering", "completed"].includes(take.activity.phase)),
+    );
+    // Revoke every destination synchronously before waiting for server cleanup.
+    await Promise.all(takes.map((take) => this.cancelOne(take)));
   }
   async settled(): Promise<void> {
-    await this.pending;
+    while (this.tasks.size) await Promise.allSettled([...this.tasks]);
+  }
+  private get foreground(): Take | undefined {
+    if (this.take && !this.take.cancelled) return this.take;
+    // A completed take awaiting only its receipt no longer holds the overlay.
+    return this.processing.findLast(
+      (take) => !take.cancelled && take.activity.phase !== "completed",
+    );
+  }
+  /** A newer take is capturing and its shortcut or button is still held. */
+  private get held() {
+    return !!this.take && !this.take.released && !this.take.cancelled;
   }
   private live(take: Take) {
-    return this.take === take && !take.cancelled;
+    return !take.cancelled && (this.take === take || this.processing.includes(take));
   }
-  private setState(state: string, phase: Controller["activity"]["phase"] = "failed") {
-    this.activity = { ...this.activity, phase };
+  private announce(state: string, phase: Phase, activity: Activity = this.activity) {
+    this.activity = { ...activity, phase };
     this.state = state;
     this.desktop.notify(state);
   }
+  /** Only the foreground take drives the overlay; earlier takes only notify. */
+  private setState(take: Take, state: string, phase: Phase = "failed") {
+    const shown = take === this.foreground;
+    take.state = state;
+    take.activity = { ...take.activity, phase };
+    if (shown) {
+      this.displayed = take;
+      this.announce(state, phase, take.activity);
+    } else if (
+      phase === "failed" ||
+      state.startsWith("Insertion uncertain") ||
+      state.startsWith("Text ready")
+    )
+      this.desktop.notify(`Earlier dictation: ${state}`);
+  }
+  private async cancelOne(take: Take) {
+    const shown = take === this.foreground;
+    if (!shown) return this.cancelTake(take);
+    this.setState(take, "cancelled", "cancelled");
+    const cleanup = this.cancelTake(take);
+    this.cancelling = { take, cleanup };
+    await cleanup;
+    // A newer take or cancellation owns the overlay now.
+    if (this.cancelling?.cleanup !== cleanup) return;
+    this.cancelling = undefined;
+    const next = this.foreground;
+    if (next) {
+      this.feedback = next.feedback;
+      this.announce(
+        "Cancelled · earlier dictation is still processing",
+        next.activity.phase,
+        next.activity,
+      );
+    }
+  }
   private async cancelTake(take: Take) {
     take.cancelled = true;
+    take.activity = { ...take.activity, phase: "cancelled" };
     take.feedbackAbort.abort();
-    this.feedback.finish(take.atLimit);
-    this.feedback.unavailable();
+    take.feedback.finish(take.atLimit);
+    take.feedback.unavailable();
     take.destination?.close();
     if (take.id && !take.sealed && !take.sealMayHaveSucceeded)
       await this.api.cancel(take.id, take.owner).catch(() => {});
     // An admission with an unknown ID loses its server lease within five seconds.
   }
   private async watch(take: Take) {
-    if (this.watching || !this.live(take)) return;
-    this.watching = true;
+    if (take.watching || !this.live(take)) return;
+    take.watching = true;
     try {
       const now = Date.now();
-      const slept = now - this.lastTick > 2500 || now < this.lastTick;
-      this.lastTick = now;
+      const slept = now - take.lastTick > 2500 || now < take.lastTick;
+      take.lastTick = now;
       const unlocked = await this.desktop.unlocked(take.startedAt);
       if (!this.live(take)) return;
-      if (["delivering", "completed"].includes(this.activity.phase)) return;
+      if (["delivering", "completed"].includes(take.activity.phase)) return;
       if (slept || !unlocked) {
-        await this.cancel();
+        await this.cancelOne(take);
         return;
       }
       if (take.id && !take.sealed && this.live(take)) {
@@ -216,12 +338,13 @@ export class Controller {
       }
     } catch {
       if (take.sealMayHaveSucceeded) return;
-      if (this.live(take) && !["delivering", "completed"].includes(this.activity.phase)) {
+      if (this.live(take) && !["delivering", "completed"].includes(take.activity.phase)) {
+        // Announce before cancelling, while the take still decides the overlay.
+        this.setState(take, "Connection lost; dictation cancelled.");
         await this.cancelTake(take);
-        this.setState("Connection lost; dictation cancelled.");
       }
     } finally {
-      this.watching = false;
+      take.watching = false;
     }
   }
   private async run(take: Take) {
@@ -244,7 +367,7 @@ export class Controller {
     for (const source of options.slice(0, 2)) {
       if (!this.live(take)) return;
       if (take.released) {
-        this.setState("idle", "idle");
+        this.setState(take, "idle", "idle");
         return;
       }
       const remaining = 3000 - (Date.now() - take.startedAt);
@@ -271,8 +394,8 @@ export class Controller {
           record.requestID !== take.requestID
         )
           throw new Error("Invalid capture admission.");
-        this.activity = { ...this.activity, source: source.name };
-        this.feedback.begin(take.startedAt + recordingLimitMS);
+        take.activity = { ...take.activity, source: source.name };
+        take.feedback.begin(take.startedAt + recordingLimitMS);
         if (this.api.events) {
           void this.api
             .events(record.id, take.feedbackAbort.signal, (update) => {
@@ -283,7 +406,7 @@ export class Controller {
                 sourceKey(update.capture.source) !== sourceKey(source.identity)
               )
                 throw new Error("Mismatched feedback source.");
-              this.feedback.update(
+              take.feedback.update(
                 update.capture.state === "recording" ? update.capture.peak : undefined,
                 update.recognition?.partialText,
                 update.status,
@@ -291,10 +414,10 @@ export class Controller {
             })
             .catch(() => {
               if (this.live(take) && !take.feedbackAbort.signal.aborted)
-                this.feedback.unavailable();
+                take.feedback.unavailable();
             });
         }
-        this.setState(`recording · ${source.name}`, "recording");
+        this.setState(take, `recording · ${source.name}`, "recording");
         break;
       } catch (error) {
         if (take.button || !(error instanceof APIError && error.allowsFallback)) throw error;
@@ -310,8 +433,8 @@ export class Controller {
       } else await Bun.sleep(40);
     }
     if (!this.live(take)) return;
-    this.feedback.finish(take.atLimit);
-    this.setState("processing", "processing");
+    take.feedback.finish(take.atLimit);
+    this.setState(take, "processing", "processing");
     take.sealMayHaveSucceeded = true;
     let record = await this.api.stop(take.id, take.owner);
     this.verify(record, take);
@@ -319,10 +442,25 @@ export class Controller {
     take.sealed = true;
     // The microphone has stopped; processing runs with the output restored.
     void take.output?.restore();
-    // Include cold model loading plus the server's speech and proofreading limits.
-    const deadline = Date.now() + 360_000;
+    // The server microphone is free: hand off so the next take can record while
+    // this one processes. Handoff order is recording order, so is delivery order.
+    if (this.take === take) {
+      this.take = undefined;
+      this.processing.push(take);
+      const previous = this.deliveryTail;
+      let delivered!: () => void;
+      const slot = new Promise<void>((resolve) => (delivered = resolve));
+      take.delivered = delivered;
+      take.turn = previous;
+      this.deliveryTail = previous.then(() => slot);
+    }
+    // Queue wait has no client deadline; allow cold loading and the server's
+    // speech and proofreading limits once this take starts processing.
+    let deadline: number | undefined;
     while (this.live(take) && !["completed", "failed", "cancelled"].includes(record.status)) {
-      if (Date.now() >= deadline) throw new Error("Processing timed out.");
+      if (record.status !== "queued") deadline ??= Date.now() + this.processingTimeoutMS;
+      if (deadline !== undefined && Date.now() >= deadline)
+        throw new Error("Processing timed out.");
       await Bun.sleep(300);
       if (!this.live(take)) return;
       record = await this.api.get(take.id);
@@ -330,16 +468,31 @@ export class Controller {
     if (!this.live(take)) return;
     this.verify(record, take);
     if (record.status !== "completed") throw new Error("Transcription did not complete.");
-    if (!(await this.desktop.unlocked(take.startedAt)) || !this.live(take)) {
-      await this.cancel();
-      return;
-    }
-    // Exactly one attempt; an uncertain result is never retried or auto-copied.
-    this.setState("Delivering text", "delivering");
-    const delivery = await take.destination.deliver(record.insertionText);
+    // Deliver after every earlier take, and never while a newer take is held.
+    await take.turn;
+    let delivery: Awaited<ReturnType<Destination["deliver"]>>;
+    do {
+      do {
+        while (this.live(take) && this.held) await Bun.sleep(40);
+        if (!(await this.desktop.unlocked(take.startedAt)) || !this.live(take)) {
+          if (this.live(take)) await this.cancelOne(take);
+          return;
+        }
+        // A new take may have started while the unlock check was pending.
+      } while (this.held);
+      // Exactly one attempt; an uncertain result is never retried or auto-copied.
+      this.setState(take, "Delivering text", "delivering");
+      // The destination's own checks are async, so it rechecks for a held take too
+      // and defers without attempting if one started meanwhile.
+      delivery = await take.destination.deliver(record.insertionText, () => this.held);
+      if (delivery === "held") this.setState(take, "processing", "processing");
+    } while (delivery === "held");
+    // Only the insertion transaction holds up later takes, not its receipt.
+    take.delivered();
     if (!this.live(take)) return;
     this.result = { id: take.id, text: record.insertionText, delivery };
     this.setState(
+      take,
       delivery === "inserted"
         ? "Text inserted"
         : delivery === "uncertain"

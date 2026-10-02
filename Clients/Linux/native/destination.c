@@ -1,4 +1,4 @@
-/* One take, one accessible, one mutation. No key injection or clipboard access. */
+/* Queued takes may share one guarded accessible. One mutation per delivery. */
 #include <atspi/atspi.h>
 #include <json-glib/json-glib.h>
 #include <stdio.h>
@@ -14,6 +14,10 @@ static gint caret;
 static gboolean invalidated;
 static gint64 deadline;
 static guint visited;
+static gboolean queued;
+static gchar *own_text;
+static gint own_caret;
+static gboolean own_insert_seen, own_caret_seen;
 
 static void reply(const char *status) { puts(status); fflush(stdout); }
 
@@ -71,7 +75,7 @@ static AtspiAccessible *find(AtspiAccessible *obj, guint depth) {
   return NULL;
 }
 
-static gchar *snapshot(gint *position) {
+static gchar *snapshot(gint *position, gchar **content) {
   if (!safe(target) || !ordinary_ancestors(target)) return NULL;
   AtspiText *text = atspi_accessible_get_text_iface(target);
   AtspiEditableText *editable = atspi_accessible_get_editable_text_iface(target);
@@ -88,12 +92,30 @@ static gchar *snapshot(gint *position) {
   g_object_unref(text);
   if (!value) return NULL;
   gchar *hash = g_compute_checksum_for_string(G_CHECKSUM_SHA256, value, -1);
-  g_free(value);
+  if (content) *content = value;
+  else g_free(value);
   return hash;
 }
 
 static void changed(AtspiEvent *event, void *unused) {
   (void)unused;
+  /* Exempt only this helper's exact insertion and resulting caret event. All
+   * other edits and focus/selection changes still invalidate every queued take. */
+  if (queued && own_text && event->source == target) {
+    if (!own_insert_seen && g_str_has_prefix(event->type, "object:text-changed:insert") &&
+        event->detail1 == own_caret - g_utf8_strlen(own_text, -1) &&
+        event->detail2 == g_utf8_strlen(own_text, -1) &&
+        G_VALUE_HOLDS_STRING(&event->any_data) &&
+        g_strcmp0(g_value_get_string(&event->any_data), own_text) == 0) {
+      own_insert_seen = TRUE;
+      return;
+    }
+    if (!own_caret_seen && g_strcmp0(event->type, "object:text-caret-moved") == 0 &&
+        event->detail1 == own_caret) {
+      own_caret_seen = TRUE;
+      return;
+    }
+  }
   if (target && (event->source == target ||
       (g_str_has_prefix(event->type, "object:state-changed:focused") && event->detail1)))
     invalidated = TRUE;
@@ -112,23 +134,59 @@ static gboolean input(GIOChannel *channel, GIOCondition condition, gpointer unus
   JsonNode *node = parsed ? json_parser_get_root(parser) : NULL;
   const gchar *value = node && JSON_NODE_HOLDS_VALUE(node) && json_node_get_value_type(node) == G_TYPE_STRING ? json_node_get_string(node) : NULL;
   gint position = -1;
-  gchar *current = invalidated ? NULL : snapshot(&position);
-  gboolean valid = current && g_strcmp0(original, current) == 0 && position == caret && value &&
+  gchar *content = NULL;
+  gchar *current = invalidated ? NULL : snapshot(&position, &content);
+  gboolean unchanged = !invalidated && current && g_strcmp0(original, current) == 0 && position == caret;
+  /* A new take may join only the still-valid field retained by this helper. */
+  if (queued && node && JSON_NODE_HOLDS_VALUE(node) &&
+      json_node_get_value_type(node) == G_TYPE_BOOLEAN && json_node_get_boolean(node)) {
+    g_free(current); g_free(content); g_object_unref(parser); g_free(line);
+    reply(unchanged ? "ready" : "preview");
+    if (unchanged) return G_SOURCE_CONTINUE;
+    atspi_event_quit();
+    return G_SOURCE_REMOVE;
+  }
+  gboolean valid = unchanged && value &&
     strlen(value) <= 131072 && g_utf8_validate(value, -1, NULL) && !strchr(value, '\r');
   g_free(current);
   if (valid) {
     AtspiEditableText *editable = atspi_accessible_get_editable_text_iface(target);
     if (editable) {
       GError *error = NULL;
+      gchar *expected = NULL;
+      if (queued) {
+        const gchar *split = g_utf8_offset_to_pointer(content, caret);
+        gchar *after = g_strdup_printf("%.*s%s%s", (int)(split - content), content, value, split);
+        expected = g_compute_checksum_for_string(G_CHECKSUM_SHA256, after, -1);
+        g_free(after);
+        g_free(own_text);
+        own_text = g_strdup(value);
+        own_caret = caret + g_utf8_strlen(value, -1);
+        own_insert_seen = own_caret_seen = FALSE;
+      }
       gboolean inserted = atspi_editable_text_insert_text(editable, caret, value, (gint)strlen(value), &error);
+      if (queued && (!inserted || error)) invalidated = TRUE;
+      if (queued && inserted && !error) {
+        gint after_caret = -1;
+        gchar *after = snapshot(&after_caret, NULL);
+        if (!invalidated && g_strcmp0(after, expected) == 0 && after_caret == own_caret) {
+          g_free(original);
+          original = g_strdup(expected);
+          caret = after_caret;
+        } else invalidated = TRUE;
+        g_free(after);
+      }
+      g_free(expected);
       /* Even a false reply may follow partial application. Never retry. */
-      reply(inserted && !error ? "inserted" : "uncertain");
+      reply(inserted && !error && !invalidated ? "inserted" : "uncertain");
       g_clear_error(&error);
       g_object_unref(editable);
-    } else reply("preview");
+    } else { invalidated = TRUE; reply("preview"); }
   } else reply("preview");
   g_object_unref(parser);
+  g_free(content);
   g_free(line);
+  if (queued && valid && !invalidated) return G_SOURCE_CONTINUE;
   atspi_event_quit();
   return G_SOURCE_REMOVE;
 preview:
@@ -139,15 +197,17 @@ preview:
 }
 
 int main(int argc, char **argv) {
-  if (argc != 2) return 2;
+  if (argc != 2 && !(argc == 3 && g_strcmp0(argv[2], "queue") == 0)) return 2;
+  queued = argc == 3;
   char *end = NULL;
   gboolean focused_mode = g_strcmp0(argv[1], "focused") == 0;
   guint64 pid = focused_mode ? 0 : g_ascii_strtoull(argv[1], &end, 10);
   if (!focused_mode && (!pid || pid > G_MAXUINT || *end)) return 2;
   pid_t parent = getppid();
   if (prctl(PR_SET_PDEATHSIG, SIGKILL) || getppid() != parent) return 2;
-  /* Allow capture, drain, cold model loading, full processing and delivery. */
-  alarm(600);
+  /* Server queue wait has no deadline, so a queued helper lives until its parent
+   * closes it or dies. */
+  if (!queued) alarm(600);
   if (atspi_init()) { reply("preview"); return 0; }
   atspi_set_timeout(100, 100);
   deadline = g_get_monotonic_time() + 1000000;
@@ -178,7 +238,7 @@ int main(int argc, char **argv) {
   }
   g_clear_object(&desktop);
   if (focused_mode && g_get_monotonic_time() > deadline) ambiguous = TRUE;
-  if (ambiguous || !target || !(original = snapshot(&caret))) {
+  if (ambiguous || !target || !(original = snapshot(&caret, NULL))) {
     g_clear_object(&target);
     reply("preview"); atspi_exit(); return 0;
   }
@@ -189,6 +249,7 @@ int main(int argc, char **argv) {
   atspi_event_main();
   g_io_channel_unref(channel);
   g_free(original);
+  g_free(own_text);
   g_object_unref(target);
   g_object_unref(listener);
   atspi_exit();
