@@ -464,7 +464,8 @@ export class CaptureSessions {
         undefined,
         message,
       )
-      .catch(() => this.store.discard(session.id).catch(() => {}));
+      // Never discard retained audio here: startup recovery seals this prefix.
+      .catch(() => {});
   }
   async shutdown() {
     this.stopping = true;

@@ -437,12 +437,15 @@ test("source loss stops without splicing another mic; stale ownership cannot con
   expect((await f.recordings.get(next.json().id)).capture?.state).toBe("recording");
 });
 
-test("mismatched original and inference intervals are rejected", async () => {
+test("mismatched original and inference intervals are rejected without discarding audio", async () => {
   const f = await fixture();
   f.provider.originalFrames = 24_000;
   const id = (await f.start()).json().id;
   expect((await f.control(id, "capture/stop")).statusCode).toBe(400);
-  await until(async () => discarded(await f.recordings.get(id)));
+  const failed = await f.recordings.get(id);
+  expect(discarded(failed)).toBe(false);
+  expect(failed.capture?.state).toBe("stopped");
+  expect(failed.streams.find((stream) => stream.kind === "inference")?.frameCount).toBe(16_000);
 });
 
 test("shutdown aborts capture and restart never resumes it; ownership persists privately", async () => {

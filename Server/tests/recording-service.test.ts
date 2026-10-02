@@ -665,6 +665,53 @@ test("a later run cannot leapfrog an earlier closed run with no currently queued
   expect(inference.windows).toEqual([45 * 16000, 15 * 16000, 45 * 16000]);
 });
 
+test("successive pauses keep run order when the wall clock moves backward", async () => {
+  const { service } = await setup();
+  const snapshot = await service.resume((await service.create(request())).id);
+  const firstRun = randomUUID().toUpperCase(),
+    nextRun = randomUUID().toUpperCase();
+  const first = { runID: firstRun, inferenceFrames: 0 };
+  const firstTiming = {
+    runID: firstRun,
+    startedAt: "2026-09-21T10:05:00Z",
+    endedAt: "2026-09-21T10:06:00Z",
+  };
+  await service.pause(snapshot.id, snapshot.epoch, [first], [firstTiming]);
+  const paused = await service.pause(
+    snapshot.id,
+    snapshot.epoch,
+    [first, { runID: nextRun, inferenceFrames: 0 }],
+    [
+      firstTiming,
+      { runID: nextRun, startedAt: "2026-09-21T10:00:00Z", endedAt: "2026-09-21T10:01:00Z" },
+    ],
+  );
+  expect(paused.closedRuns?.map((run) => run.runID)).toEqual([firstRun, nextRun]);
+});
+
+test("a final tail shorter than the engine minimum is padded with silence", async () => {
+  const { service, inference } = await setup();
+  const snapshot = await service.resume((await service.create(request())).id);
+  const runID = randomUUID();
+  const bytes = constantPCM(0.1);
+  for (let sequence = 0; sequence < 3; sequence++)
+    await service.appendAudio(
+      snapshot.id,
+      header(snapshot, runID, sequence, sequence * 240000, bytes),
+      bytes,
+    );
+  const tail = Buffer.alloc(1600 * 4);
+  await service.appendAudio(snapshot.id, header(snapshot, runID, 3, 45 * 16000, tail), tail);
+  await service.stop(snapshot.id, snapshot.epoch, [{ runID, inferenceFrames: 45 * 16000 + 1600 }]);
+  const complete = await waitFor(
+    service,
+    snapshot.id,
+    (value) => value.processingState === "completed",
+  );
+  expect(complete.transcribedFrames).toBe(45 * 16000 + 1600);
+  expect(inference.windows).toEqual([45 * 16000, 3200]);
+});
+
 class BoundaryInference extends CountingInference {
   boundaries: number[] = [];
   async findSpeechBoundary(path: string) {

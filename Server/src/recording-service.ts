@@ -24,7 +24,11 @@ import {
   type RecordingRunTiming,
 } from "./recording-contract.ts";
 
-import type { InferenceBackend, SpeechInferenceResult } from "./inference/native-inference.ts";
+import type {
+  InferenceBackend,
+  SpeechInferenceResult,
+  SpeechSpan,
+} from "./inference/native-inference.ts";
 import { ServiceError } from "./errors.ts";
 import { InferenceError } from "./inference/inference-error.ts";
 import {
@@ -62,6 +66,8 @@ import {
 
 const MAX_CHUNK_BYTES = 1_048_576;
 const WINDOW_FRAMES = 16_000 * 45;
+/** The engine rejects windows shorter than 0.2 s. */
+const MINIMUM_WINDOW_FRAMES = 16_000 / 5;
 // Half the wire budget belongs to cumulative lifecycle data, including its
 // eventual stop copy. The rest holds settings, streams and progress metadata.
 const MAX_LIFECYCLE_BYTES = MAXIMUM_RECORDING_CONTROL_MESSAGE_BYTES / 2;
@@ -966,15 +972,12 @@ export class RecordingService {
       const totals = this.normalizeEndpoints(manifest, runs);
       this.mergeTimings(manifest, runTimings, totals, true);
       const closed = copy(manifest.snapshot.closedRuns ?? []);
-      let changed = false;
+      const added: RecordingRunEndpoint[] = [];
       for (const run of totals) {
         const existing = closed.find((value) => value.runID === run.runID);
         if (existing && JSON.stringify(existing) !== JSON.stringify(run))
           throw failure("pause_conflict", "Paused capture endpoints are immutable.");
-        if (!existing) {
-          closed.push(run);
-          changed = true;
-        }
+        if (!existing) added.push(run);
         for (const stream of manifest.snapshot.streams.filter(
           (stream) => stream.runID === run.runID,
         )) {
@@ -987,16 +990,17 @@ export class RecordingService {
             );
         }
       }
-      if (!changed) return copy(this.lookup(id).snapshot);
-      manifest.snapshot.closedRuns = closed.sort((a, b) => {
-        const at = manifest.snapshot.runTimings?.find(
-          (timing) => timing.runID === a.runID,
-        )?.startedAt;
-        const bt = manifest.snapshot.runTimings?.find(
-          (timing) => timing.runID === b.runID,
-        )?.startedAt;
+      if (!added.length) return copy(this.lookup(id).snapshot);
+      // Successive pauses fix run order; wall-clock time only orders runs
+      // first closed together, as the clock may have moved backward since.
+      const startedAt = (run: RecordingRunEndpoint) =>
+        manifest.snapshot.runTimings?.find((timing) => timing.runID === run.runID)?.startedAt;
+      added.sort((a, b) => {
+        const at = startedAt(a),
+          bt = startedAt(b);
         return at && bt ? Date.parse(at) - Date.parse(bt) : 0;
       });
+      manifest.snapshot.closedRuns = [...closed, ...added];
       manifest.snapshot.captureState = "interrupted";
       if (interruption && manifest.snapshot.processingState !== "failed")
         manifest.snapshot.error = interruption;
@@ -1665,12 +1669,19 @@ export class RecordingService {
             };
           }
         }
-        const selectedBytes = bytes.subarray(0, (selected.endFrame - selected.startFrame) * 4);
+        const selectedFrames = selected.endFrame - selected.startFrame;
+        const selectedBytes = bytes.subarray(0, selectedFrames * 4);
+        // A short final tail is padded with silence; its timestamps stay within the real audio.
+        const padding = Buffer.alloc(Math.max(0, MINIMUM_WINDOW_FRAMES - selectedFrames) * 4);
         await atomicPrivateWrite(
           wavPath,
           Buffer.concat([
-            this.wavHeader(selectedBytes.length, { sampleRate: 16000, channels: 1 }),
+            this.wavHeader(selectedBytes.length + padding.length, {
+              sampleRate: 16000,
+              channels: 1,
+            }),
             selectedBytes,
+            padding,
           ]),
         );
         let speech: SpeechInferenceResult;
@@ -1678,6 +1689,20 @@ export class RecordingService {
           speech = await this.transcribeWindow(wavPath, settings, signal);
         } finally {
           await rm(wavPath, { force: true });
+        }
+        if (padding.length) {
+          const seconds = selectedFrames / 16000;
+          const clamp = (spans?: SpeechSpan[]) =>
+            spans?.map((span) => ({
+              ...span,
+              startSeconds: Math.min(span.startSeconds, seconds),
+              endSeconds: Math.min(span.endSeconds, seconds),
+            }));
+          speech = {
+            ...speech,
+            spans: clamp(speech.spans),
+            segmentSpans: clamp(speech.segmentSpans),
+          };
         }
         signal.throwIfAborted();
         const cursor = work.manifest.cursors.find((cursor) => cursor.runID === work.runID)!;
