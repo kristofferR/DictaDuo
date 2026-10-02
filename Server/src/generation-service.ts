@@ -6,7 +6,7 @@ import { constants } from "node:fs";
 import { access, mkdir, open, readdir, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
-import { CaptureSessions, type CaptureProvider } from "./capture-sessions.ts";
+import { CaptureSessions, type CaptureProvider, type CaptureStore } from "./capture-sessions.ts";
 import { ButtonDestinations } from "./button-destinations.ts";
 import type {
   AudioArtifact,
@@ -27,6 +27,7 @@ import type {
   WisprFlowImportRequest,
   WisprFlowKnownIDsRequest,
 } from "./api.ts";
+import { API_VERSION } from "./api.ts";
 import type { components } from "./generated/api.ts";
 import { decodePersonalDictionary } from "./domain/dictionary.ts";
 import { validateBody } from "./validation.ts";
@@ -51,6 +52,7 @@ import { composeDictation } from "./domain/composition.ts";
 import { formatSpokenList } from "./domain/lists.ts";
 import { evaluateCorrectionInWorker } from "./domain/correction-runtime.ts";
 import { maxInputCharacters, modelHints, processingRecord } from "./domain/correction.ts";
+import type { RecordingSnapshot } from "./recording-contract.ts";
 
 const MAX_METADATA_BYTES = 1_048_576;
 const CONTINUATION_INPUT = "continuation-input.json";
@@ -129,8 +131,12 @@ interface Watcher {
 
 /** All durable mutations share one queue. Model work proceeds outside it. */
 export class GenerationService {
-  readonly captures: CaptureSessions;
+  captures: CaptureSessions;
   readonly buttons: ButtonDestinations;
+  private recordings?: CaptureStore & {
+    detail(id: string): Promise<{ result?: GenerationRecord }>;
+    onDiscard?: (id: string) => void;
+  };
   private preferences: PreferencesSnapshot = defaultPreferences();
   private records = new Map<string, GenerationRecord>();
   private uploads = new Map<string, Partial<Record<AudioKind, Upload>>>();
@@ -150,8 +156,12 @@ export class GenerationService {
     private readonly configuration: ServiceConfiguration,
     private readonly inference: InferenceBackend,
   ) {
-    this.captures = new CaptureSessions(this, configuration.captureProvider);
     this.buttons = new ButtonDestinations(this);
+    this.captures = new CaptureSessions(
+      unavailableCaptureStore,
+      this.buttons,
+      configuration.captureProvider,
+    );
     this.imports = new WisprFlowImports({
       dataDirectory: configuration.dataDirectory,
       getPreferences: () => copy(this.preferences),
@@ -338,7 +348,7 @@ export class GenerationService {
               : "Server models are unavailable.";
       if (!state.speechLoaded) this.beginWarmup();
       return {
-        apiVersion: 2,
+        apiVersion: API_VERSION,
         generationRetry: true,
         serverVersion: "0.1.0",
         isDev: this.configuration.development,
@@ -368,6 +378,26 @@ export class GenerationService {
   }
   getPreferences() {
     return this.mutate(() => copy(this.preferences));
+  }
+  resolveRecordingContinuation(id: string, snapshot: RecordingSnapshot) {
+    return this.mutate(() => {
+      const previous = this.records.get(id.toUpperCase());
+      if (
+        !previous ||
+        previous.status !== "completed" ||
+        previous.device.id !== snapshot.device.id ||
+        previous.mode !== snapshot.mode
+      )
+        return;
+      const age = Date.parse(snapshot.createdAt) - Date.parse(previous.updatedAt);
+      if (!Number.isFinite(age) || age < 0 || age >= 900_000) return;
+      if (
+        previous.mode !== "test" &&
+        !["inserted", "listUpdated"].includes(previous.delivery?.status ?? "")
+      )
+        return;
+      return copy(previous.continuation);
+    });
   }
   updatePreferences(update: components["schemas"]["PreferencesSnapshot"]) {
     return this.mutate(async () => {
@@ -1022,8 +1052,31 @@ export class GenerationService {
   }
 
   cancel(id: string, message = "Recording cancelled.") {
-    this.captures.abort(id);
     return this.mutate(() => this.cancelRecord(id, message));
+  }
+  /**
+   * Remote capture records durable recording sessions; the server-hosted
+   * microphone stops whenever its session is discarded.
+   */
+  attachRecordings(recordings: NonNullable<GenerationService["recordings"]>) {
+    this.recordings = recordings;
+    this.captures = new CaptureSessions(
+      recordings,
+      this.buttons,
+      this.configuration.captureProvider,
+    );
+    recordings.onDiscard = (id) => this.captures.abort(id);
+  }
+  /** A completed result from either legacy generations or recording sessions. */
+  async resolveResult(id: string): Promise<GenerationRecord> {
+    try {
+      return await this.get(id);
+    } catch (error) {
+      if (!(error instanceof ServiceError && error.status === 404) || !this.recordings) throw error;
+      const result = (await this.recordings.detail(id)).result;
+      if (!result) throw new ServiceError(404, "not_found", "Recording not found.");
+      return result;
+    }
   }
   /** Aborting only this recording's signal leaves earlier and later queued work running. */
   private async cancelRecord(id: string, message = "Recording cancelled.") {
@@ -1512,3 +1565,19 @@ export class GenerationService {
     return process.platform === "darwin" ? "MLX" : "llama.cpp";
   }
 }
+
+const unavailableCapture = () =>
+  Promise.reject(
+    new ServiceError(503, "capture_unavailable", "Remote capture requires recording sessions."),
+  );
+/** Until recording sessions are attached, remote capture admission is unavailable. */
+const unavailableCaptureStore: CaptureStore = {
+  findRequest: async () => undefined,
+  createCapture: unavailableCapture,
+  authorizeCapture: unavailableCapture,
+  appendCaptureAudio: unavailableCapture,
+  updateCapture: unavailableCapture,
+  stopCapture: unavailableCapture,
+  get: unavailableCapture,
+  discard: unavailableCapture,
+};

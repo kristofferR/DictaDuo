@@ -19,7 +19,7 @@ extension Components {
         @frozen public enum CaptureView: String, Codable, Hashable, Sendable, CaseIterable {
             case captureV1 = "capture-v1"
         }
-        /// Required for remote-generation cancellation and delivery; omitted by legacy local-upload clients.
+        /// Required for remote-capture cancellation and delivery; omitted by local-upload clients.
         ///
         /// - Remark: Generated from `#/components/parameters/CaptureMutationOwner`.
         public typealias CaptureMutationOwner = Swift.String

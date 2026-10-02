@@ -3,11 +3,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CaptureProvider } from "../../src/capture-sessions.ts";
-import { GenerationService } from "../../src/generation-service.ts";
 import { createHTTPServer } from "../../src/http-server.ts";
-import { FakeInference } from "../support.ts";
+import { FakeInference, openCaptureServices } from "../support.ts";
 
 const directory = await mkdtemp(join(tmpdir(), "sottoduo-capture-client-"));
+/** Every admitted take, including discarded ones that history omits. */
+const started: string[] = [];
 const provider: CaptureProvider = {
   sources: () =>
     [
@@ -30,6 +31,7 @@ const provider: CaptureProvider = {
       observedAt: new Date().toISOString(),
     })),
   async start(options) {
+    started.push(options.generation.id);
     const id = options.generation.capture?.source.id;
     if (id === "reject") throw new Error("Fixture source failed before readiness");
     if (id === "slow") await Bun.sleep(4_000);
@@ -68,61 +70,58 @@ const provider: CaptureProvider = {
     };
   },
 };
-const service = await GenerationService.open(
-  {
-    dataDirectory: directory,
-    development: true,
-    captureProvider: provider,
-    soniox: { apiKey: "fixture", endpoint: "wss://example.invalid", model: "stt-rt-v5" },
-    startSpeechStream: (_configuration, _language, _terms, _id, update) => ({
-      send() {
-        update("Remote preview.");
-      },
-      async finish() {
-        return {
-          text: "Remote transcript.",
-          audioSeconds: 1,
-          language: "en",
-          processingSeconds: 0.01,
-        };
-      },
-      cancel() {},
-    }),
-  },
-  new FakeInference(),
-);
+const services = await openCaptureServices(directory, provider, new FakeInference(), {
+  soniox: { apiKey: "fixture", endpoint: "wss://example.invalid", model: "stt-rt-v5" },
+  startLiveSpeechStream: (_configuration, _language, _terms, _id, handlers) => ({
+    send() {
+      handlers.partial("Remote preview.");
+    },
+    finalize() {
+      queueMicrotask(() => handlers.finalized({ text: "Remote transcript.", language: "en" }));
+    },
+    keepalive() {},
+    close() {},
+  }),
+});
+const { service, recordings } = services;
 const preferences = await service.getPreferences();
 preferences.preferences.textCorrectionEnabled = false;
 await service.updatePreferences(preferences);
 let discoveryUnavailable = false;
 const droppedHeartbeats = new Set<string>();
-const app = createHTTPServer(service, "sottoduo-native-capture-test-token-2026", (app) => {
-  app.addHook("onRequest", async (request, reply) => {
-    if (request.url === "/v1/audio-sources" && discoveryUnavailable)
-      return reply
-        .code(503)
-        .send({ code: "invalid_sources", message: "Fixture discovery unavailable" });
-    const match = /^\/v1\/generations\/([^/]+)\/(events|capture\/heartbeat)$/.exec(request.url);
-    if (!match) return;
-    const record = await service.get(match[1]!);
-    const source = record.capture?.source.id;
-    if (match[2] === "capture/heartbeat") {
-      if (
-        source === "heartbeat-loss" ||
-        (source === "heartbeat-once" && !droppedHeartbeats.has(record.id))
-      ) {
-        droppedHeartbeats.add(record.id);
-        reply.hijack();
-        reply.raw.destroy();
+const app = createHTTPServer(
+  service,
+  "sottoduo-native-capture-test-token-2026",
+  (app) => {
+    app.addHook("onRequest", async (request, reply) => {
+      if (request.url === "/v1/audio-sources" && discoveryUnavailable)
+        return reply
+          .code(503)
+          .send({ code: "invalid_sources", message: "Fixture discovery unavailable" });
+      const match = /^\/v2\/recordings\/([^/]+)\/(events|capture\/heartbeat)$/.exec(request.url);
+      if (!match) return;
+      const record = await recordings.get(match[1]!);
+      const source = record.capture?.source.id;
+      if (match[2] === "capture/heartbeat") {
+        if (
+          source === "heartbeat-loss" ||
+          (source === "heartbeat-once" && !droppedHeartbeats.has(record.id))
+        ) {
+          droppedHeartbeats.add(record.id);
+          reply.hijack();
+          reply.raw.destroy();
+        }
+        return;
       }
-      return;
-    }
-    if (record.capture?.source.id !== "event-loss") return;
-    reply.hijack();
-    reply.raw.writeHead(200, { "Content-Type": "application/x-ndjson" });
-    reply.raw.end(JSON.stringify(record) + "\n");
-  });
-});
+      if (record.capture?.source.id !== "event-loss") return;
+      reply.hijack();
+      reply.raw.writeHead(200, { "Content-Type": "application/x-ndjson" });
+      reply.raw.end(JSON.stringify(record) + "\n");
+    });
+  },
+  recordings,
+);
+app.get("/fixture/captures", async () => started);
 app.post<{ Body: { unavailable: boolean } }>("/fixture/discovery", async (request, reply) => {
   discoveryUnavailable = request.body.unavailable === true;
   return reply.code(204).send();
@@ -131,7 +130,7 @@ console.log(await app.listen({ host: process.env.SOTTODUO_TEST_HOST ?? "127.0.0.
 for (const signal of ["SIGTERM", "SIGINT"] as const)
   process.once(signal, () => {
     void (async () => {
-      await service.shutdown();
+      await services.close();
       await app.close();
       await rm(directory, { recursive: true, force: true });
       process.exit(0);

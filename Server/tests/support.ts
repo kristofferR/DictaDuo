@@ -1,4 +1,7 @@
 import type { InferenceBackend } from "../src/inference/native-inference.ts";
+import { GenerationService } from "../src/generation-service.ts";
+import { RecordingService, type RecordingConfiguration } from "../src/recording-service.ts";
+import type { CaptureProvider } from "../src/capture-sessions.ts";
 
 export class FakeInference implements InferenceBackend {
   async readiness() {
@@ -25,4 +28,36 @@ export class FakeInference implements InferenceBackend {
   }
   async cancel() {}
   async shutdown() {}
+}
+
+/**
+ * Legacy generations plus recording sessions, wired the way the server is: a
+ * remote capture provider records durable sessions.
+ */
+export async function openCaptureServices(
+  dataDirectory: string,
+  captureProvider: CaptureProvider | undefined,
+  inference: InferenceBackend = new FakeInference(),
+  live: Pick<RecordingConfiguration, "soniox" | "startLiveSpeechStream"> = {},
+) {
+  const service = await GenerationService.open(
+    { dataDirectory, development: true, captureProvider },
+    inference,
+  );
+  const recordings = await RecordingService.open(
+    { dataDirectory, development: true, ...live },
+    inference,
+    {
+      getPreferences: () => service.getPreferences(),
+      resolveContinuation: (id, snapshot) => service.resolveRecordingContinuation(id, snapshot),
+    },
+  );
+  service.attachRecordings(recordings);
+  return {
+    service,
+    recordings,
+    async close() {
+      await Promise.allSettled([recordings.shutdown(), service.shutdown()]);
+    },
+  };
 }

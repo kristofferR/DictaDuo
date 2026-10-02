@@ -8,7 +8,6 @@ enum ServerClientError: LocalizedError {
     case captureUnavailable(String)
     case invalidResponse
     case disconnected
-    case uploadBacklog
     case importArtifactTooLarge(WisprFlowArtifactName, Int)
     case dictionaryArchiveTooLarge(Int)
 
@@ -19,7 +18,6 @@ enum ServerClientError: LocalizedError {
         case .captureUnavailable(let message): message
         case .invalidResponse: "The server returned an invalid response."
         case .disconnected: "The server connection was interrupted. Any completed result is available in shared history."
-        case .uploadBacklog: "The connection cannot keep up with the microphone. This recording was stopped."
         case .importArtifactTooLarge(let name, let bytes):
             "\(name.rawValue) is \(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)), above the 8 MiB source-artifact limit."
         case .dictionaryArchiveTooLarge(let bytes):
@@ -161,31 +159,6 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate, @unchecked Se
     }
 }
 
-/// The callback never blocks the capture queue. Its bounded queue fails the take
-/// if a connection falls behind, instead of building a hidden offline backlog.
-final class AudioChunkPipe: @unchecked Sendable {
-    let stream: AsyncThrowingStream<CapturedAudioChunk, Error>
-    private let continuation: AsyncThrowingStream<CapturedAudioChunk, Error>.Continuation
-    private let onFailure: (@Sendable (Error) -> Void)?
-
-    init(onFailure: (@Sendable (Error) -> Void)? = nil) {
-        self.onFailure = onFailure
-        let pair = AsyncThrowingStream<CapturedAudioChunk, Error>.makeStream(bufferingPolicy: .bufferingOldest(512))
-        stream = pair.stream
-        continuation = pair.continuation
-    }
-
-    func append(_ chunk: CapturedAudioChunk) {
-        if case .dropped = continuation.yield(chunk) {
-            continuation.finish(throwing: ServerClientError.uploadBacklog)
-            onFailure?(ServerClientError.uploadBacklog)
-        }
-    }
-
-    func finish() { continuation.finish() }
-    func cancel() { continuation.finish(throwing: CancellationError()) }
-}
-
 extension ServerClient {
     func audioSources() async throws -> [AudioSource] {
         do {
@@ -199,21 +172,27 @@ extension ServerClient {
             return [] // A server without capture support still accepts local uploads.
         }
     }
-    func startCapture(_ value: StartCaptureRequest, timeout: TimeInterval) async throws -> GenerationRecord {
+    /// Admits a recording session fed by a server-hosted microphone.
+    func startCapture(_ value: StartCaptureRequest, timeout: TimeInterval) async throws -> RecordingSnapshot {
         // Like create: a release during startup must still learn the admitted ID
-        // so it can cancel the capture instead of holding the microphone.
+        // so it can discard the take instead of holding the microphone.
         try await Task {
-            let record: GenerationRecord = try await json(
-                path: "v1/captures", method: "POST", body: Self.encode(value), timeout: timeout)
-            return record
+            let snapshot: RecordingSnapshot = try await recordingJSON(
+                path: "v2/captures", method: "POST", body: Self.encode(value), timeout: timeout)
+            return snapshot
         }.value
     }
     func heartbeat(_ id: UUID) async throws {
-        try await send(path: "v1/generations/\(id)/capture/heartbeat", method: "POST", timeout: 1)
+        try await send(path: "v2/recordings/\(id)/capture/heartbeat", method: "POST", timeout: 1)
     }
-    func stopCapture(_ id: UUID, continuationID: UUID?) async throws -> GenerationRecord {
-        try await json(path: "v1/generations/\(id)/capture/stop", method: "POST",
-                       body: Self.encode(StopCaptureRequest(continuationID: continuationID)), timeout: 6)
+    func stopCapture(_ id: UUID, continuationID: UUID?) async throws -> RecordingSnapshot {
+        try await recordingJSON(path: "v2/recordings/\(id)/capture/stop", method: "POST",
+                                body: Self.encode(StopCaptureRequest(continuationID: continuationID)), timeout: 6)
+    }
+    /// Fixes the take's continuation, or none, so processing need not wait for the server's hold.
+    func setCaptureContext(_ id: UUID, continuationID: UUID?, timeout: TimeInterval = 12) async throws {
+        try await send(path: "v2/recordings/\(id)/context", method: "POST",
+                       body: Self.encode(StopCaptureRequest(continuationID: continuationID)), timeout: timeout)
     }
     func health() async throws -> ServerHealth { try await json(path: "v1/health") }
     func preferences() async throws -> PreferencesSnapshot { try await json(path: "v1/preferences") }
@@ -294,44 +273,12 @@ extension ServerClient {
     func generation(_ id: UUID, timeout: TimeInterval = 12) async throws -> GenerationRecord {
         try await json(path: "v1/generations/\(id)", timeout: timeout)
     }
-    func create(_ value: CreateGenerationRequest, timeout: TimeInterval = 12) async throws -> GenerationRecord {
-        // A released hold can cancel startup while the server is accepting this
-        // request. Keep its response alive so the caller can cancel the returned
-        // generation instead of abandoning a receiving session without its ID.
-        try await Task {
-            let record: GenerationRecord = try await json(
-                path: "v1/generations", method: "POST", body: Self.encode(value), timeout: timeout)
-            return record
-        }.value
-    }
-    func finish(_ id: UUID, value: FinishGenerationRequest) async throws -> GenerationRecord {
-        let body = try Self.encode(value)
-        var failures = 0
-        while true {
-            do { return try await json(path: "v1/generations/\(id)/finish", method: "POST", body: body) }
-            catch {
-                try Task.checkCancellation()
-                // Sealing is idempotent for these exact frame counts: a replay
-                // recovers a lost acknowledgement or a delayed first request.
-                guard Self.isTransient(error), failures < 3 else { throw error }
-                failures += 1
-                try await Task.sleep(for: .milliseconds(250 * failures))
-            }
-        }
-    }
-    func cancel(_ id: UUID) async throws {
-        try await send(path: "v1/generations/\(id)/cancel", method: "POST")
-    }
     func retry(_ id: UUID) async throws -> GenerationRecord {
         try await json(path: "v1/generations/\(id)/retry", method: "POST")
     }
     func delete(_ id: UUID) async throws {
         try await send(path: "v1/generations/\(id)", method: "DELETE")
     }
-    func delivery(_ id: UUID, receipt: DeliveryReceipt) async throws {
-        try await send(path: "v1/generations/\(id)/delivery", method: "POST", body: Self.encode(receipt))
-    }
-
     func audio(_ id: UUID, kind: AudioKind) async throws -> URL {
         let filename = "\(kind.rawValue).wav"
         let (temporary, response) = try await session.download(for: request(path: "v1/generations/\(id)/artifacts/\(filename)"))
@@ -357,27 +304,48 @@ extension ServerClient {
         return destination
     }
 
-    /// `recover` reconnects after transient stream loss. Remote capture opts out:
-    /// its event loss fails the take rather than authorizing a delayed insertion.
+    /// `recover` reconnects after transient stream loss.
     func events(_ id: UUID, recover: Bool = true,
                 onUpdate: @escaping @Sendable (GenerationRecord) async -> Void) async throws -> GenerationRecord {
+        try await follow(path: "v1/generations/\(id)/events", recover: recover,
+                         decode: { try? SottoDuoAPI.decodeWire(GenerationRecord.self, from: $0) },
+                         matches: { $0.id == id }, isFinal: { $0.status.isTerminal },
+                         fetch: { try await generation(id) }, onUpdate: onUpdate)
+    }
+
+    /// `recover` reconnects after transient stream loss. A recording remote
+    /// capture opts out: its event loss fails the take rather than authorizing
+    /// a delayed insertion.
+    func recordingEvents(_ id: UUID, recover: Bool = true,
+                         onUpdate: @escaping @Sendable (RecordingSnapshot) async -> Void) async throws -> RecordingSnapshot {
+        try await follow(path: "v2/recordings/\(id)/events", recover: recover,
+                         decode: { try? RecordingWire.decoder().decode(RecordingSnapshot.self, from: $0) },
+                         matches: { $0.id == id }, isFinal: \.isSettled,
+                         fetch: { try await recording(id) }, onUpdate: onUpdate)
+    }
+
+    private func follow<Value: Sendable>(path: String, recover: Bool, decode: @escaping @Sendable (Data) -> Value?,
+                                         matches: @escaping @Sendable (Value) -> Bool,
+                                         isFinal: @escaping @Sendable (Value) -> Bool,
+                                         fetch: @escaping @Sendable () async throws -> Value,
+                                         onUpdate: @escaping @Sendable (Value) async -> Void) async throws -> Value {
         var recoveryFailures = 0
         while true {
             try Task.checkCancellation()
-            do { return try await readEvents(id, onUpdate: onUpdate) }
+            do { return try await readEvents(path: path, decode: decode, matches: matches, isFinal: isFinal, onUpdate: onUpdate) }
             catch {
                 try Task.checkCancellation()
                 guard recover, Self.isTransient(error) else { throw error }
             }
             // A queue can outlive URLSession's request/resource timeout. Read
-            // the durable record before reconnecting; a completed result must
+            // the durable state before reconnecting; a completed result must
             // still be delivered even if its final stream frame was lost.
             do {
-                let record = try await generation(id)
-                guard record.id == id else { throw ServerClientError.invalidResponse }
+                let value = try await fetch()
+                guard matches(value) else { throw ServerClientError.invalidResponse }
                 try Task.checkCancellation()
-                await onUpdate(record)
-                if record.status.isTerminal { return record }
+                await onUpdate(value)
+                if isFinal(value) { return value }
                 recoveryFailures = 0
             } catch {
                 try Task.checkCancellation()
@@ -404,8 +372,10 @@ extension ServerClient {
         return false
     }
 
-    private func readEvents(_ id: UUID, onUpdate: @escaping @Sendable (GenerationRecord) async -> Void) async throws -> GenerationRecord {
-        var request = try request(path: "v1/generations/\(id)/events")
+    private func readEvents<Value>(path: String, decode: (Data) -> Value?, matches: (Value) -> Bool,
+                                   isFinal: (Value) -> Bool,
+                                   onUpdate: @Sendable (Value) async -> Void) async throws -> Value {
+        var request = try request(path: path)
         request.setValue("application/x-ndjson", forHTTPHeaderField: "Accept")
         let (bytes, response) = try await session.bytes(for: request)
         try Self.validate(response)
@@ -415,11 +385,9 @@ extension ServerClient {
             try Task.checkCancellation()
             if byte == 10 {
                 if !line.isEmpty {
-                    guard let record = try? SottoDuoAPI.decodeWire(GenerationRecord.self, from: line), record.id == id else {
-                        throw ServerClientError.invalidResponse
-                    }
-                    await onUpdate(record)
-                    if record.status.isTerminal { return record }
+                    guard let value = decode(line), matches(value) else { throw ServerClientError.invalidResponse }
+                    await onUpdate(value)
+                    if isFinal(value) { return value }
                     line.removeAll(keepingCapacity: true)
                 }
             } else {
@@ -429,67 +397,131 @@ extension ServerClient {
         }
         throw ServerClientError.disconnected
     }
+}
 
-    func upload(_ stream: AsyncThrowingStream<CapturedAudioChunk, Error>, to id: UUID,
-                preserveOriginal: Bool) async throws -> FinishGenerationRequest {
-        var inference = UploadBuffer(kind: .inference)
-        var original = UploadBuffer(kind: .original)
-        for try await chunk in stream {
-            try Task.checkCancellation()
-            switch chunk.kind {
-            case .normalized: try inference.append(chunk)
-            case .original:
-                guard preserveOriginal else { throw ServerClientError.invalidResponse }
-                try original.append(chunk)
-            }
-            // Batch about half a second of samples, overlapping transfer with the
-            // microphone while keeping HTTP overhead and memory bounded.
-            if inference.data.count >= 32_000 {
-                try await flush(&inference, to: id)
-                try await flush(&original, to: id)
-            }
-            if original.data.count >= 768_000 { try await flush(&original, to: id) }
-        }
-        try await flush(&inference, to: id)
-        try await flush(&original, to: id)
-        return FinishGenerationRequest(inferenceFrames: inference.frames,
-                                       originalFrames: preserveOriginal ? original.frames : nil)
-    }
+extension RecordingSnapshot {
+    /// No further capture or processing changes will arrive.
+    var isSettled: Bool { captureState == .discarded || processingState == .completed || processingState == .failed }
+}
 
-    func flush(_ buffer: inout UploadBuffer, to id: UUID) async throws {
-        guard !buffer.data.isEmpty, let format = buffer.format else { return }
-        let query = [URLQueryItem(name: "sequence", value: String(buffer.sequence)),
-                     URLQueryItem(name: "sampleRate", value: String(format.sampleRate)),
-                     URLQueryItem(name: "channels", value: String(format.channels))]
-        let request = try request(path: "v1/generations/\(id)/audio/\(buffer.kind.rawValue)", method: "POST",
-                                  body: buffer.data, contentType: "application/octet-stream", query: query)
+/// The long-recording contract is versioned independently of legacy generated
+/// wire models. Requests still use this take's immutable endpoint/credential.
+extension ServerClient {
+    private func recordingJSON<Response: Decodable>(path: String, method: String = "GET", body: Data? = nil,
+                                                    query: [URLQueryItem] = [], timeout: TimeInterval = 12,
+                                                    maxBytes: Int = 16 * 1_024 * 1_024) async throws -> Response {
+        var request = try request(path: path, method: method, body: body, query: query)
+        request.timeoutInterval = timeout
         let (data, response) = try await session.data(for: request)
         try Self.validate(response, data: data)
-        let receipt = try SottoDuoAPI.decodeWire(AudioChunkReceipt.self, from: data)
-        guard receipt.nextSequence == buffer.sequence + 1, receipt.frameCount == buffer.frames else {
-            throw ServerClientError.invalidResponse
+        guard data.count <= maxBytes else { throw ServerClientError.invalidResponse }
+        do { return try RecordingWire.decoder().decode(Response.self, from: data) }
+        catch { throw ServerClientError.invalidResponse }
+    }
+
+    func recordingCapabilities() async throws -> RecordingCapabilities {
+        try await recordingJSON(path: "v2/recordings/capabilities")
+    }
+
+    func createRecording(_ value: CreateGenerationRequest) async throws -> RecordingSnapshot {
+        try await recordingJSON(path: "v2/recordings", method: "POST", body: RecordingWire.encoder().encode(value))
+    }
+
+    func recordingDetail(_ id: UUID) async throws -> RecordingDetail {
+        // The server stores a completed result of up to 64 MiB beside the snapshot.
+        try await recordingJSON(path: "v2/recordings/\(id)", maxBytes: 80 * 1_024 * 1_024)
+    }
+
+    func recording(_ id: UUID) async throws -> RecordingSnapshot { try await recordingDetail(id).snapshot }
+
+    func recordingHistory(before cursor: String? = nil, source: String? = nil) async throws -> RecordingPage {
+        let query = cursor.map { [URLQueryItem(name: "before", value: $0)] } ?? []
+        return try await recordingJSON(path: "v2/recordings", query: query)
+    }
+
+    func discardRecording(_ id: UUID, timeout: TimeInterval = 12) async throws {
+        try await send(path: "v2/recordings/\(id)/discard", method: "POST", timeout: timeout)
+    }
+
+    /// An explicit cancel must win over the server sealing an expired lease, so a
+    /// discard that fails transiently keeps retrying through a brief outage.
+    func discardRecordingRetrying(_ id: UUID,
+                                  delays: [Duration] = [.seconds(1), .seconds(2), .seconds(4), .seconds(8), .seconds(15)]) async {
+        for delay in [Duration.zero] + delays {
+            try? await Task.sleep(for: delay)
+            do { try await discardRecording(id); return }
+            catch { guard Self.isTransient(error) else { return } }
         }
-        buffer.sequence = receipt.nextSequence
-        buffer.data.removeAll(keepingCapacity: true)
+    }
+
+    func retryRecording(_ id: UUID) async throws -> RecordingSnapshot {
+        try await recordingJSON(path: "v2/recordings/\(id)/retry", method: "POST")
+    }
+
+    func recordingDelivery(_ id: UUID, receipt: DeliveryReceipt) async throws {
+        try await send(path: "v2/recordings/\(id)/delivery", method: "POST", body: RecordingWire.encoder().encode(receipt))
+    }
+
+    func materializedRecording(_ id: UUID) async throws -> GenerationRecord {
+        let detail = try await recordingDetail(id)
+        if let result = detail.result { return result }
+        return Self.generationSummary(detail.snapshot)
+    }
+
+    static func generationSummary(_ snapshot: RecordingSnapshot) -> GenerationRecord {
+        let status: GenerationStatus
+        if snapshot.captureState == .discarded { status = .cancelled }
+        else if snapshot.processingState == .completed { status = .completed }
+        else if snapshot.processingState == .failed { status = .failed }
+        else if snapshot.captureState == .recording { status = .receiving }
+        else if snapshot.processingState == .processing { status = .transcribing }
+        else { status = .queued }
+        var result = GenerationRecord(id: snapshot.id, requestID: snapshot.requestID, device: snapshot.device,
+                                      mode: snapshot.mode, status: status, createdAt: snapshot.createdAt,
+                                      settings: snapshot.settings)
+        result.previewText = snapshot.previewText
+        if snapshot.uploadedFrames > 0, snapshot.uploadedFrames <= Int64.max / 4 {
+            result.inferenceAudio = AudioArtifact(filename: "inference.wav", sampleRate: 16_000, channels: 1,
+                                                 frameCount: snapshot.uploadedFrames, byteCount: snapshot.uploadedFrames * 4)
+        }
+        result.error = snapshot.error
+        result.progress = snapshot.uploadedFrames > 0
+            ? min(1, Double(snapshot.transcribedFrames) / Double(snapshot.uploadedFrames)) : nil
+        return result
+    }
+
+    func recordingWebSocketRequest(_ id: UUID) throws -> URLRequest {
+        var result = try request(path: "v2/recordings/\(id)/stream")
+        guard let url = result.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = components.scheme else { throw ServerClientError.invalidEndpoint }
+        switch scheme.lowercased() {
+        case "https": components.scheme = "wss"
+        case "http": components.scheme = "ws"
+        default: throw ServerClientError.invalidEndpoint
+        }
+        guard let target = components.url else { throw ServerClientError.invalidEndpoint }
+        result.url = target
+        result.timeoutInterval = 15
+        result.setValue("sottoduo.recording.v1", forHTTPHeaderField: "Sec-WebSocket-Protocol")
+        return result
     }
 }
 
-struct UploadBuffer {
-    let kind: AudioKind
-    var data = Data()
-    var format: AudioStreamFormat?
-    var frames: Int64 = 0
-    var sequence = 0
-
-    mutating func append(_ chunk: CapturedAudioChunk) throws {
-        guard chunk.sampleRate.isFinite, chunk.sampleRate > 0,
-              chunk.sampleRate <= 192_000, chunk.channels > 0, chunk.channels <= 8,
-              chunk.data.count % (chunk.channels * 4) == 0 else { throw ServerClientError.invalidResponse }
-        let incoming = AudioStreamFormat(sampleRate: Int(chunk.sampleRate), channels: chunk.channels)
-        guard format == nil || format == incoming else { throw ServerClientError.invalidResponse }
-        guard data.count + chunk.data.count <= SottoDuoAPI.maximumChunkBytes else { throw ServerClientError.uploadBacklog }
-        format = incoming
-        data.append(chunk.data)
-        frames += Int64(chunk.data.count / (chunk.channels * 4))
+extension ServerClient {
+    func recordingAudio(_ id: UUID, kind: AudioKind, runID: UUID? = nil) async throws -> URL {
+        let suffix = runID.map { "/\($0)" } ?? ""
+        var request = try request(path: "v2/recordings/\(id)/audio/\(kind.rawValue)\(suffix)")
+        // The server rebuilds the whole WAV before sending headers.
+        request.timeoutInterval = 300
+        let (temporary, response) = try await session.download(for: request)
+        try Self.validate(response)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SottoDuo-remote-preview", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let runSuffix = runID.map { "-\($0)" } ?? ""
+        let destination = directory.appendingPathComponent("\(id)-\(kind.rawValue)\(runSuffix).wav")
+        try? FileManager.default.removeItem(at: destination)
+        try FileManager.default.moveItem(at: temporary, to: destination)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
+        return destination
     }
 }

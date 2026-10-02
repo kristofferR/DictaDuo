@@ -7,19 +7,20 @@ import XCTest
 
 @MainActor
 final class RemoteCaptureTests: XCTestCase {
-    func testLongRemoteTakeSealsBeforeServerDeadline() async throws {
+    func testRemoteTakeOutlastsTheFormerThreeMinuteLimit() async throws {
         guard ProcessInfo.processInfo.environment["SOTTODUO_CAPTURE_LONG_TEST"] == "1" else {
-            throw XCTSkip("Set SOTTODUO_CAPTURE_LONG_TEST=1 to exercise the real three-minute deadline.")
+            throw XCTSkip("Set SOTTODUO_CAPTURE_LONG_TEST=1 to record past the former three-minute limit.")
         }
         try await withController(sources: ["ready"]) { controller, client in
             controller.toggleTestRecording()
             try await until { controller.isRecording }
-            try await until(timeout: 182) { controller.activity == .success || controller.activity == .failed }
+            try await Task.sleep(for: .seconds(190))
+            XCTAssertTrue(controller.isRecording, controller.errorMessage ?? "")
+            controller.toggleTestRecording()
+            try await until { controller.activity == .success || controller.activity == .failed }
             XCTAssertEqual(controller.activity, .success, controller.errorMessage ?? "")
-            XCTAssertEqual(controller.lastDeliveryStatus, .tested)
-            XCTAssertEqual(controller.recordingFeedback.limitNotice, .stopped)
-            let record = try await client.history().items.first { $0.device.id == controller.preferences.deviceID }
-            XCTAssertEqual(record?.capture?.state, .sealed)
+            let takes = try await takes(client, controller)
+            XCTAssertEqual(takes.first?.capture?.state, .sealed)
         }
     }
 
@@ -40,27 +41,26 @@ final class RemoteCaptureTests: XCTestCase {
             XCTAssertEqual(controller.lastDeliveryStatus, .tested)
             XCTAssertEqual(controller.lastTranscript, "Remote transcript.")
             XCTAssertEqual(NSPasteboard.general.changeCount, clipboardCount, "Mic tests must never paste or copy")
-            let record = try await client.history().items.first { $0.device.id == controller.preferences.deviceID }
-            XCTAssertEqual(record?.capture?.state, .sealed)
-            XCTAssertEqual(record?.delivery?.status, "tested")
-            XCTAssertEqual(record?.mode, .test)
+            let first = try await takes(client, controller).first
+            let take = try XCTUnwrap(first)
+            XCTAssertEqual(take.capture?.state, .sealed)
+            XCTAssertEqual(take.mode, .test)
+            let detail = try await client.recordingDetail(take.id)
+            XCTAssertEqual(detail.result?.delivery?.status, "tested")
         }
     }
 
-    func testPreReadyRejectionFallsBackOnceWithFreshAdmissionAndNoPreferenceChanges() async throws {
+    func testPreReadyRejectionDiscardsItsAdmissionWithoutSwitchingRemotes() async throws {
+        // Fallback after a pre-ready rejection is local only; there is no local input here.
         try await withController(sources: ["reject", "ready"]) { controller, client in
             let order = controller.microphones.preferences
             controller.toggleTestRecording()
-            try await until { controller.isRecording }
-            XCTAssertTrue(controller.recordingInputName?.contains("ready") == true)
-            try await Task.sleep(for: .milliseconds(300))
-            controller.toggleTestRecording()
-            try await until { controller.activity == .success }
+            try await until { controller.activity == .failed }
+            XCTAssertTrue(controller.errorMessage?.contains("could not start recording") == true, controller.errorMessage ?? "")
             XCTAssertEqual(controller.microphones.preferences, order)
-            let records = try await client.history().items.filter { $0.device.id == controller.preferences.deviceID }
-            XCTAssertEqual(records.count, 2)
-            XCTAssertEqual(Set(records.map(\.requestID)).count, 2)
-            XCTAssertEqual(records.filter { $0.status == .cancelled }.count, 1)
+            let takes = try await takes(client, controller)
+            XCTAssertEqual(takes.map(\.capture?.source.id), ["reject"])
+            XCTAssertEqual(takes.first?.captureState, .discarded)
         }
     }
 
@@ -115,16 +115,30 @@ final class RemoteCaptureTests: XCTestCase {
         }
     }
 
-    func testKnownSourceLossAndEventDisconnectCancelWithoutResultOrAutomaticSwitch() async throws {
-        for source in ["lost", "event-loss", "heartbeat-loss"] {
+    func testSourceLossKeepsCapturedAudioInHistoryWithoutDeliveryOrAutomaticSwitch() async throws {
+        try await withController(sources: ["lost", "ready"]) { controller, client in
+            controller.toggleTestRecording()
+            try await until { controller.activity == .failed }
+            XCTAssertTrue(controller.errorMessage?.contains("saved in history") == true, controller.errorMessage ?? "")
+            XCTAssertTrue(controller.lastTranscript.isEmpty)
+            XCTAssertEqual(controller.lastDeliveryStatus, .none)
+            try await until {
+                let takes = try await takes(client, controller)
+                return takes.count == 1 && takes[0].capture?.state == .stopped && takes[0].processingState == .completed
+            }
+        }
+    }
+
+    func testEventOrLeaseLossDiscardsWithoutResultOrAutomaticSwitch() async throws {
+        for source in ["event-loss", "heartbeat-loss"] {
             try await withController(sources: [source, "ready"]) { controller, client in
                 controller.toggleTestRecording()
                 try await until { controller.activity == .failed }
                 XCTAssertTrue(controller.lastTranscript.isEmpty)
                 XCTAssertEqual(controller.lastDeliveryStatus, .none)
                 try await until {
-                    let records = try await client.history().items.filter { $0.device.id == controller.preferences.deviceID }
-                    return records.count == 1 && records[0].status == .cancelled
+                    let takes = try await takes(client, controller)
+                    return takes.count == 1 && takes[0].captureState == .discarded
                 }
             }
         }
@@ -139,10 +153,10 @@ final class RemoteCaptureTests: XCTestCase {
                 if source == "slow" { controller.toggleTestRecording() }
                 else { controller.cancelDictation() }
                 XCTAssertEqual(controller.activity, .idle)
-                // An interrupted create response has no generation ID; the server lease releases it.
+                // A release during startup still learns the admitted ID and discards it.
                 try await until(timeout: 7) {
-                    let records = try await client.history().items.filter { $0.device.id == controller.preferences.deviceID }
-                    return records.count == 1 && records[0].status == .cancelled
+                    let takes = try await takes(client, controller)
+                    return takes.count == 1 && takes[0].captureState == .discarded
                 }
                 XCTAssertTrue(controller.lastTranscript.isEmpty)
                 XCTAssertEqual(controller.lastDeliveryStatus, .none)
@@ -174,6 +188,17 @@ final class RemoteCaptureTests: XCTestCase {
         do { try await operation(controller, client) }
         catch { controller.cancelDictation(); await configuration.flush(); throw error }
         await configuration.flush()
+    }
+
+    /// This controller's admitted takes, including discarded ones that history omits.
+    private func takes(_ client: ServerClient, _ controller: SottoDuoController) async throws -> [RecordingSnapshot] {
+        let (data, _) = try await client.session.data(for: client.request(path: "fixture/captures"))
+        var result: [RecordingSnapshot] = []
+        for id in try JSONDecoder().decode([UUID].self, from: data) {
+            let take = try await client.recording(id)
+            if take.device.id == controller.preferences.deviceID { result.append(take) }
+        }
+        return result
     }
 
     private func until(timeout: TimeInterval = 8, _ condition: () async throws -> Bool) async throws {

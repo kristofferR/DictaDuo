@@ -66,7 +66,7 @@ export class ClientRuntime {
     this.changing = true;
     const current = this.current;
     await Promise.allSettled([current?.buttons.close(), current?.controller.cancelAll()]);
-    await this.output.finish();
+    await Promise.all([current?.controller.discardsSettled(), this.output.finish()]);
   }
   unsafe() {
     this.shortcuts?.check.end();
@@ -178,6 +178,7 @@ export class ClientRuntime {
       "connection",
       "sources",
       "history",
+      "historyEntry",
       "preferences",
       "receiver",
       "shortcuts",

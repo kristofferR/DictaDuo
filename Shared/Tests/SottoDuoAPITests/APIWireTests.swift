@@ -6,7 +6,7 @@ import XCTest
 final class APIWireTests: XCTestCase {
     func testGenerationRetryRequiresAnExplicitServerCapability() throws {
         let json = Data("""
-            {"apiVersion":2,"serverVersion":"0.1.0","isDev":true,"ready":true,
+            {"apiVersion":3,"serverVersion":"0.1.0","isDev":true,"ready":true,
              "speech":{"modelID":"whisper","backend":"local","ready":true},
              "proofreading":{"modelID":"qwen","backend":"local","ready":false}}
             """.utf8)

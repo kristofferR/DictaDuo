@@ -33,15 +33,23 @@ public protocol APIProtocol: Sendable {
     /// - Remark: HTTP `GET /v1/audio-sources`.
     /// - Remark: Generated from `#/paths//v1/audio-sources/get(listAudioSources)`.
     func listAudioSources(_ input: Operations.ListAudioSources.Input) async throws -> Operations.ListAudioSources.Output
-    /// - Remark: HTTP `POST /v1/captures`.
-    /// - Remark: Generated from `#/paths//v1/captures/post(startCapture)`.
+    /// - Remark: HTTP `POST /v2/captures`.
+    /// - Remark: Generated from `#/paths//v2/captures/post(startCapture)`.
     func startCapture(_ input: Operations.StartCapture.Input) async throws -> Operations.StartCapture.Output
-    /// - Remark: HTTP `POST /v1/generations/{id}/capture/heartbeat`.
-    /// - Remark: Generated from `#/paths//v1/generations/{id}/capture/heartbeat/post(heartbeatCapture)`.
+    /// - Remark: HTTP `POST /v2/recordings/{id}/capture/heartbeat`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/capture/heartbeat/post(heartbeatCapture)`.
     func heartbeatCapture(_ input: Operations.HeartbeatCapture.Input) async throws -> Operations.HeartbeatCapture.Output
-    /// - Remark: HTTP `POST /v1/generations/{id}/capture/stop`.
-    /// - Remark: Generated from `#/paths//v1/generations/{id}/capture/stop/post(stopCapture)`.
+    /// - Remark: HTTP `POST /v2/recordings/{id}/capture/stop`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/capture/stop/post(stopCapture)`.
     func stopCapture(_ input: Operations.StopCapture.Input) async throws -> Operations.StopCapture.Output
+    /// Fix a remote capture's continuation (or none) before its text processing starts.
+    ///
+    /// - Remark: HTTP `POST /v2/recordings/{id}/context`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/context/post(setCaptureContext)`.
+    func setCaptureContext(_ input: Operations.SetCaptureContext.Input) async throws -> Operations.SetCaptureContext.Output
+    /// - Remark: HTTP `GET /v2/recordings/{id}/events`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/events/get(recordingEvents)`.
+    func recordingEvents(_ input: Operations.RecordingEvents.Input) async throws -> Operations.RecordingEvents.Output
     /// - Remark: HTTP `GET /v1/health`.
     /// - Remark: Generated from `#/paths//v1/health/get(getHealth)`.
     func getHealth(_ input: Operations.GetHealth.Input) async throws -> Operations.GetHealth.Output
@@ -104,6 +112,43 @@ public protocol APIProtocol: Sendable {
     /// - Remark: HTTP `DELETE /v1/imports/wispr-flow/{id}`.
     /// - Remark: Generated from `#/paths//v1/imports/wispr-flow/{id}/delete(cancelWisprFlowImport)`.
     func cancelWisprFlowImport(_ input: Operations.CancelWisprFlowImport.Input) async throws -> Operations.CancelWisprFlowImport.Output
+    /// - Remark: HTTP `GET /v2/recordings/capabilities`.
+    /// - Remark: Generated from `#/paths//v2/recordings/capabilities/get(getRecordingCapabilities)`.
+    func getRecordingCapabilities(_ input: Operations.GetRecordingCapabilities.Input) async throws -> Operations.GetRecordingCapabilities.Output
+    /// - Remark: HTTP `GET /v2/recordings`.
+    /// - Remark: Generated from `#/paths//v2/recordings/get(listRecordings)`.
+    func listRecordings(_ input: Operations.ListRecordings.Input) async throws -> Operations.ListRecordings.Output
+    /// - Remark: HTTP `POST /v2/recordings`.
+    /// - Remark: Generated from `#/paths//v2/recordings/post(createRecording)`.
+    func createRecording(_ input: Operations.CreateRecording.Input) async throws -> Operations.CreateRecording.Output
+    /// - Remark: HTTP `GET /v2/recordings/{id}`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/get(getRecording)`.
+    func getRecording(_ input: Operations.GetRecording.Input) async throws -> Operations.GetRecording.Output
+    /// - Remark: HTTP `GET /v2/recordings/{id}/transcript`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/transcript/get(getRecordingTranscript)`.
+    func getRecordingTranscript(_ input: Operations.GetRecordingTranscript.Input) async throws -> Operations.GetRecordingTranscript.Output
+    /// - Remark: HTTP `GET /v2/recordings/{id}/audio/{kind}`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/audio/{kind}/get(getRecordingAudio)`.
+    func getRecordingAudio(_ input: Operations.GetRecordingAudio.Input) async throws -> Operations.GetRecordingAudio.Output
+    /// - Remark: HTTP `POST /v2/recordings/{id}/discard`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/discard/post(discardRecording)`.
+    func discardRecording(_ input: Operations.DiscardRecording.Input) async throws -> Operations.DiscardRecording.Output
+    /// Resume a failed recording's processing from its committed text with local recognition. Nothing is delivered.
+    ///
+    /// - Remark: HTTP `POST /v2/recordings/{id}/retry`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/retry/post(retryRecording)`.
+    func retryRecording(_ input: Operations.RetryRecording.Input) async throws -> Operations.RetryRecording.Output
+    /// - Remark: HTTP `POST /v2/recordings/{id}/delivery`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/delivery/post(recordRecordingDelivery)`.
+    func recordRecordingDelivery(_ input: Operations.RecordRecordingDelivery.Input) async throws -> Operations.RecordRecordingDelivery.Output
+    /// Upgrade to WebSocket subprotocol sottoduo.recording.v1. Binary audio is UInt32BE JSON header length, UTF8 RecordingAudioHeader, then little-endian float32 PCM. Text controls resume, context, pause, stop and ping; server sends snapshots, acknowledgments, progress and errors. See docs/recording-protocol.md for durable ACK, fencing and resume semantics.
+    ///
+    /// - Remark: HTTP `GET /v2/recordings/{id}/stream`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/stream/get(streamRecording)`.
+    func streamRecording(_ input: Operations.StreamRecording.Input) async throws -> Operations.StreamRecording.Output
+    /// - Remark: HTTP `GET /v2/recordings/{id}/audio/{kind}/{runID}`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/audio/{kind}/{runID}/get(getRecordingRunAudio)`.
+    func getRecordingRunAudio(_ input: Operations.GetRecordingRunAudio.Input) async throws -> Operations.GetRecordingRunAudio.Output
 }
 
 /// Convenience overloads for operation inputs.
@@ -179,8 +224,8 @@ extension APIProtocol {
     public func listAudioSources(headers: Operations.ListAudioSources.Input.Headers = .init()) async throws -> Operations.ListAudioSources.Output {
         try await listAudioSources(Operations.ListAudioSources.Input(headers: headers))
     }
-    /// - Remark: HTTP `POST /v1/captures`.
-    /// - Remark: Generated from `#/paths//v1/captures/post(startCapture)`.
+    /// - Remark: HTTP `POST /v2/captures`.
+    /// - Remark: Generated from `#/paths//v2/captures/post(startCapture)`.
     public func startCapture(
         headers: Operations.StartCapture.Input.Headers,
         body: Operations.StartCapture.Input.Body
@@ -190,8 +235,8 @@ extension APIProtocol {
             body: body
         ))
     }
-    /// - Remark: HTTP `POST /v1/generations/{id}/capture/heartbeat`.
-    /// - Remark: Generated from `#/paths//v1/generations/{id}/capture/heartbeat/post(heartbeatCapture)`.
+    /// - Remark: HTTP `POST /v2/recordings/{id}/capture/heartbeat`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/capture/heartbeat/post(heartbeatCapture)`.
     public func heartbeatCapture(
         path: Operations.HeartbeatCapture.Input.Path,
         headers: Operations.HeartbeatCapture.Input.Headers
@@ -201,8 +246,8 @@ extension APIProtocol {
             headers: headers
         ))
     }
-    /// - Remark: HTTP `POST /v1/generations/{id}/capture/stop`.
-    /// - Remark: Generated from `#/paths//v1/generations/{id}/capture/stop/post(stopCapture)`.
+    /// - Remark: HTTP `POST /v2/recordings/{id}/capture/stop`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/capture/stop/post(stopCapture)`.
     public func stopCapture(
         path: Operations.StopCapture.Input.Path,
         headers: Operations.StopCapture.Input.Headers,
@@ -212,6 +257,32 @@ extension APIProtocol {
             path: path,
             headers: headers,
             body: body
+        ))
+    }
+    /// Fix a remote capture's continuation (or none) before its text processing starts.
+    ///
+    /// - Remark: HTTP `POST /v2/recordings/{id}/context`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/context/post(setCaptureContext)`.
+    public func setCaptureContext(
+        path: Operations.SetCaptureContext.Input.Path,
+        headers: Operations.SetCaptureContext.Input.Headers,
+        body: Operations.SetCaptureContext.Input.Body
+    ) async throws -> Operations.SetCaptureContext.Output {
+        try await setCaptureContext(Operations.SetCaptureContext.Input(
+            path: path,
+            headers: headers,
+            body: body
+        ))
+    }
+    /// - Remark: HTTP `GET /v2/recordings/{id}/events`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/events/get(recordingEvents)`.
+    public func recordingEvents(
+        path: Operations.RecordingEvents.Input.Path,
+        headers: Operations.RecordingEvents.Input.Headers = .init()
+    ) async throws -> Operations.RecordingEvents.Output {
+        try await recordingEvents(Operations.RecordingEvents.Input(
+            path: path,
+            headers: headers
         ))
     }
     /// - Remark: HTTP `GET /v1/health`.
@@ -430,6 +501,127 @@ extension APIProtocol {
         headers: Operations.CancelWisprFlowImport.Input.Headers = .init()
     ) async throws -> Operations.CancelWisprFlowImport.Output {
         try await cancelWisprFlowImport(Operations.CancelWisprFlowImport.Input(
+            path: path,
+            headers: headers
+        ))
+    }
+    /// - Remark: HTTP `GET /v2/recordings/capabilities`.
+    /// - Remark: Generated from `#/paths//v2/recordings/capabilities/get(getRecordingCapabilities)`.
+    public func getRecordingCapabilities(headers: Operations.GetRecordingCapabilities.Input.Headers = .init()) async throws -> Operations.GetRecordingCapabilities.Output {
+        try await getRecordingCapabilities(Operations.GetRecordingCapabilities.Input(headers: headers))
+    }
+    /// - Remark: HTTP `GET /v2/recordings`.
+    /// - Remark: Generated from `#/paths//v2/recordings/get(listRecordings)`.
+    public func listRecordings(
+        query: Operations.ListRecordings.Input.Query = .init(),
+        headers: Operations.ListRecordings.Input.Headers = .init()
+    ) async throws -> Operations.ListRecordings.Output {
+        try await listRecordings(Operations.ListRecordings.Input(
+            query: query,
+            headers: headers
+        ))
+    }
+    /// - Remark: HTTP `POST /v2/recordings`.
+    /// - Remark: Generated from `#/paths//v2/recordings/post(createRecording)`.
+    public func createRecording(
+        headers: Operations.CreateRecording.Input.Headers = .init(),
+        body: Operations.CreateRecording.Input.Body
+    ) async throws -> Operations.CreateRecording.Output {
+        try await createRecording(Operations.CreateRecording.Input(
+            headers: headers,
+            body: body
+        ))
+    }
+    /// - Remark: HTTP `GET /v2/recordings/{id}`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/get(getRecording)`.
+    public func getRecording(
+        path: Operations.GetRecording.Input.Path,
+        headers: Operations.GetRecording.Input.Headers = .init()
+    ) async throws -> Operations.GetRecording.Output {
+        try await getRecording(Operations.GetRecording.Input(
+            path: path,
+            headers: headers
+        ))
+    }
+    /// - Remark: HTTP `GET /v2/recordings/{id}/transcript`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/transcript/get(getRecordingTranscript)`.
+    public func getRecordingTranscript(
+        path: Operations.GetRecordingTranscript.Input.Path,
+        headers: Operations.GetRecordingTranscript.Input.Headers = .init()
+    ) async throws -> Operations.GetRecordingTranscript.Output {
+        try await getRecordingTranscript(Operations.GetRecordingTranscript.Input(
+            path: path,
+            headers: headers
+        ))
+    }
+    /// - Remark: HTTP `GET /v2/recordings/{id}/audio/{kind}`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/audio/{kind}/get(getRecordingAudio)`.
+    public func getRecordingAudio(
+        path: Operations.GetRecordingAudio.Input.Path,
+        headers: Operations.GetRecordingAudio.Input.Headers = .init()
+    ) async throws -> Operations.GetRecordingAudio.Output {
+        try await getRecordingAudio(Operations.GetRecordingAudio.Input(
+            path: path,
+            headers: headers
+        ))
+    }
+    /// - Remark: HTTP `POST /v2/recordings/{id}/discard`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/discard/post(discardRecording)`.
+    public func discardRecording(
+        path: Operations.DiscardRecording.Input.Path,
+        headers: Operations.DiscardRecording.Input.Headers = .init()
+    ) async throws -> Operations.DiscardRecording.Output {
+        try await discardRecording(Operations.DiscardRecording.Input(
+            path: path,
+            headers: headers
+        ))
+    }
+    /// Resume a failed recording's processing from its committed text with local recognition. Nothing is delivered.
+    ///
+    /// - Remark: HTTP `POST /v2/recordings/{id}/retry`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/retry/post(retryRecording)`.
+    public func retryRecording(
+        path: Operations.RetryRecording.Input.Path,
+        headers: Operations.RetryRecording.Input.Headers = .init()
+    ) async throws -> Operations.RetryRecording.Output {
+        try await retryRecording(Operations.RetryRecording.Input(
+            path: path,
+            headers: headers
+        ))
+    }
+    /// - Remark: HTTP `POST /v2/recordings/{id}/delivery`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/delivery/post(recordRecordingDelivery)`.
+    public func recordRecordingDelivery(
+        path: Operations.RecordRecordingDelivery.Input.Path,
+        headers: Operations.RecordRecordingDelivery.Input.Headers = .init(),
+        body: Operations.RecordRecordingDelivery.Input.Body
+    ) async throws -> Operations.RecordRecordingDelivery.Output {
+        try await recordRecordingDelivery(Operations.RecordRecordingDelivery.Input(
+            path: path,
+            headers: headers,
+            body: body
+        ))
+    }
+    /// Upgrade to WebSocket subprotocol sottoduo.recording.v1. Binary audio is UInt32BE JSON header length, UTF8 RecordingAudioHeader, then little-endian float32 PCM. Text controls resume, context, pause, stop and ping; server sends snapshots, acknowledgments, progress and errors. See docs/recording-protocol.md for durable ACK, fencing and resume semantics.
+    ///
+    /// - Remark: HTTP `GET /v2/recordings/{id}/stream`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/stream/get(streamRecording)`.
+    public func streamRecording(
+        path: Operations.StreamRecording.Input.Path,
+        headers: Operations.StreamRecording.Input.Headers = .init()
+    ) async throws -> Operations.StreamRecording.Output {
+        try await streamRecording(Operations.StreamRecording.Input(
+            path: path,
+            headers: headers
+        ))
+    }
+    /// - Remark: HTTP `GET /v2/recordings/{id}/audio/{kind}/{runID}`.
+    /// - Remark: Generated from `#/paths//v2/recordings/{id}/audio/{kind}/{runID}/get(getRecordingRunAudio)`.
+    public func getRecordingRunAudio(
+        path: Operations.GetRecordingRunAudio.Input.Path,
+        headers: Operations.GetRecordingRunAudio.Input.Headers = .init()
+    ) async throws -> Operations.GetRecordingRunAudio.Output {
+        try await getRecordingRunAudio(Operations.GetRecordingRunAudio.Input(
             path: path,
             headers: headers
         ))

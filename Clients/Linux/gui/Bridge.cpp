@@ -256,7 +256,7 @@ void Bridge::sendRequest(const QString &action, const QVariantMap &arguments,
     timeout = 2000;
   else if (action == "saveShortcut")
     timeout = 35000;
-  else if (action == "history")
+  else if (action == "history" || action == "historyEntry")
     timeout = 70000;
   else if (action == "deleteHistory")
     timeout = 75000;

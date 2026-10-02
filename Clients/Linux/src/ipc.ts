@@ -91,7 +91,7 @@ export async function serve(
             if (request !== null && typeof request === "object" && "action" in request) {
               if (request.action === "historyAudio" || request.action === "historyArtifact")
                 socket.setTimeout(365_000, () => socket.destroy());
-              else if (request.action === "history")
+              else if (request.action === "history" || request.action === "historyEntry")
                 socket.setTimeout(65_000, () => socket.destroy());
               else if (request.action === "deleteHistory")
                 socket.setTimeout(70_000, () => socket.destroy());

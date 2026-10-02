@@ -1,6 +1,8 @@
 # HTTP API
 
-API version 2, default port **8391**. [`Server/api/openapi.yaml`](../Server/api/openapi.yaml) defines the transport contract and generates TypeScript and Swift types. [`Shared/Sources/SottoDuoAPI/API.swift`](../Shared/Sources/SottoDuoAPI/API.swift) preserves the Swift client-facing facade and defaults. JSON uses whole-second ISO-8601 UTC dates. macOS and Linux expose the same API. See [server setup](../Server/README.md#remote-access) for authentication and endpoint configuration.
+API version 3, default port **8391**. [`Server/api/openapi.yaml`](../Server/api/openapi.yaml) defines the HTTP contract and generates TypeScript and Swift types. [`Sources/SottoDuoAPI/API.swift`](../Shared/Sources/SottoDuoAPI/API.swift) preserves the legacy client facade; `RecordingAPI.swift` defines the v2 recording messages. V1 dates use whole-second ISO-8601 UTC; v2 accepts fractional seconds and preserves capture timestamps. macOS and Linux expose the same packaged API. See [server setup](../Server/README.md#remote-access) for authentication and endpoint configuration.
+
+The current native client negotiates `/v2/recordings/capabilities` and uses durable recording admission, resumable WebSocket audio, during-capture processing, and one final delivery. The complete [recording protocol](recording-protocol.md) defines pause/stop, checksums, durable ACKs, connection fencing, recovery, paginated history, and per-run audio exports. Legacy v1 routes and semantics below remain available for old clients/imports. The reference Swift server implements v1 only and does not advertise long-recording capability.
 
 ## Routes
 
@@ -8,9 +10,11 @@ API version 2, default port **8391**. [`Server/api/openapi.yaml`](../Server/api/
 | --- | --- |
 | `GET /v1/health` | `ServerHealth`; server reachability differs from ready inference. Lightweight health contains no user data. |
 | `GET /v1/audio-sources` | `AudioSourceList`; up to 32 cached source observations, without starting capture. |
-| `POST /v1/captures` | `StartCaptureRequest` → 201 `GenerationRecord` after remote capture readiness; requires a capture owner secret. |
-| `POST /v1/generations/:id/capture/heartbeat` | Owner-authenticated lease renewal → 204; send every second, expires after six seconds. |
-| `POST /v1/generations/:id/capture/stop` | `StopCaptureRequest` → 202 `GenerationRecord` after provider audio drains and seals; requires the owner secret. |
+| `POST /v2/captures` | `StartCaptureRequest` → 201 `RecordingSnapshot` after remote capture readiness; requires a capture owner secret. |
+| `POST /v2/recordings/:id/capture/heartbeat` | Owner-authenticated lease renewal → 204; send every second, expires after six seconds. |
+| `POST /v2/recordings/:id/context` | `StopCaptureRequest` → `RecordingSnapshot`; fixes a remote take's continuation before processing starts. Requires the owner secret. |
+| `POST /v2/recordings/:id/capture/stop` | `StopCaptureRequest` → 202 `RecordingSnapshot` after provider audio drains and seals; requires the owner secret. |
+| `GET /v2/recordings/:id/events` | `application/x-ndjson` `RecordingSnapshot` lines, repeated every two seconds, until the session completes, fails or is discarded. |
 | `GET /v1/preferences` | `PreferencesSnapshot` |
 | `PUT /v1/preferences` | `PreferencesSnapshot` with expected revision; validates and returns incremented snapshot, 409 if stale. |
 | `POST /v1/generations` | `CreateGenerationRequest` → `GenerationRecord` with server UUID and frozen settings. Idempotent requestID scoped to device. Admission occurs before microphone capture. |
@@ -35,7 +39,7 @@ Errors are `APIErrorResponse`; relevant codes 400 invalid input, 401 auth, 404 m
 
 ## Generation semantics
 
-Server-attached microphones use the additive [remote capture session contract](remote-capture.md): source discovery, owned start/heartbeat/stop controls, capture readiness and bounded cleanup. Existing local uploads remain unchanged. Send `X-SottoDuo-Capture: capture-v1` to receive the optional `capture` source/state object in existing generation and event responses. Remote recording control and delivery additionally require their session-specific `X-SottoDuo-Capture-Owner` secret; public audio upload/finish routes reject remote generations. Explicit deletion of terminal shared history retains existing authorization.
+Server-attached microphones record durable recording sessions through the [remote capture session contract](remote-capture.md): source discovery, owned start/heartbeat/context/stop controls, capture readiness and bounded cleanup. Remote recording control, delivery and discard of an unsettled or still-recording session additionally require their session-specific `X-SottoDuo-Capture-Owner` secret; the upload WebSocket rejects remote sessions. Legacy generations created before this change keep their `capture` object, returned when a client sends `X-SottoDuo-Capture: capture-v1`.
 
 - Server owns settings/dictionary, inference, formatting, proofreading, rewrite guards, composition, artifacts and history. Client owns only ephemeral capture/AX anchors and device preferences.
 - Inference audio is mono 16k float32. Original is input microphone format normalized to interleaved float32, retained/uploaded only if the accepted settings snapshot says keepOriginalAudio. Both audio intervals must match. Min take 0.25 s, max 180 s. Soniox recognition runs during upload; only sealed complete uploads can complete a generation or run Whisper fallback.

@@ -8,7 +8,7 @@ function fixture() {
   let now = Date.now();
   let connected = true;
   const source = { hostID: "desktop", id: "dji" };
-  const service: Pick<GenerationService, "captures" | "get"> = {
+  const service: Pick<GenerationService, "captures" | "resolveResult"> = {
     captures: {
       sources: () => ({
         sources: [
@@ -25,7 +25,7 @@ function fixture() {
         ],
       }),
     } as GenerationService["captures"],
-    get: async () => {
+    resolveResult: async () => {
       throw new Error("No completed generation");
     },
   };

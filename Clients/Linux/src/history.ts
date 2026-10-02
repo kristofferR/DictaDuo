@@ -6,6 +6,14 @@ import { API, APIError } from "./api.ts";
 import type { components } from "../../../Server/src/generated/api.ts";
 import { ClientNotice } from "./errors.ts";
 
+type Generation = components["schemas"]["GenerationRecord"];
+type Recording = components["schemas"]["RecordingSnapshot"];
+type Page = { items: Generation[]; nextCursor?: string };
+/**
+ * The last shown entry of legacy generations and of recording sessions. A
+ * missing position starts that list from its newest entry; null ends it.
+ */
+type Cursor = { legacy?: string | null; recordings?: string | null };
 const maximumAudioBytes = 128 * 1024 * 1024;
 const retention = 15 * 60 * 1000;
 const terminal = new Set(["completed", "failed", "cancelled"]);
@@ -43,6 +51,96 @@ function notice(error: unknown, operation: string): never {
     `${operation} failed. Check the connection and refresh history before trying again.`,
   );
 }
+function parseCursor(before: string): Cursor {
+  try {
+    const value: unknown = JSON.parse(before);
+    const position = (item: unknown) =>
+      item === undefined || item === null ? item : identifier(item);
+    if (value && typeof value === "object" && !Array.isArray(value))
+      return {
+        legacy: position("legacy" in value ? value.legacy : undefined),
+        recordings: position("recordings" in value ? value.recordings : undefined),
+      };
+  } catch {}
+  throw new ClientNotice("Invalid history cursor. Refresh history.");
+}
+/** Runs recorded in different formats; the server exports their originals only one at a time. */
+type OriginalRun = { runID: string; byteCount: number };
+type Entry = Generation & { originalRuns?: OriginalRun[] };
+function originalRuns(snapshot: Recording): OriginalRun[] | undefined {
+  const streams = snapshot.streams.filter((stream) => stream.kind === "original");
+  const format = streams[0]?.format;
+  const uniform = streams.every(
+    (stream) =>
+      stream.format.sampleRate === format?.sampleRate && stream.format.channels === format.channels,
+  );
+  const runs = streams
+    .filter((stream) => stream.frameCount > 0)
+    .map((stream) => ({
+      runID: stream.runID,
+      byteCount: stream.frameCount * stream.format.channels * 4 + 44,
+    }));
+  return uniform || !runs.length ? undefined : runs;
+}
+const newestFirst = (a: Generation, b: Generation) =>
+  Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id.localeCompare(a.id);
+/** A history entry for a session without a materialized result. */
+function summary(snapshot: Recording): Entry {
+  const audio = (kind: "inference" | "original") => {
+    const streams = snapshot.streams.filter((stream) => stream.kind === kind);
+    const frameCount = streams.reduce((sum, stream) => sum + stream.frameCount, 0);
+    const format = streams[0]?.format;
+    // The server exports mixed-format runs only separately, never as one file.
+    const uniform = streams.every(
+      (stream) =>
+        stream.format.sampleRate === format?.sampleRate &&
+        stream.format.channels === format.channels,
+    );
+    return format && uniform && frameCount > 0
+      ? {
+          filename: `${kind}.wav`,
+          ...format,
+          frameCount,
+          byteCount: frameCount * format.channels * 4 + 44,
+          encoding: "pcm_f32le",
+        }
+      : undefined;
+  };
+  const inferenceAudio = audio("inference"),
+    originalAudio = audio("original"),
+    runs = originalRuns(snapshot);
+  return {
+    schemaVersion: 1,
+    id: snapshot.id,
+    requestID: snapshot.requestID,
+    device: snapshot.device,
+    mode: snapshot.mode,
+    status:
+      snapshot.captureState === "discarded"
+        ? "cancelled"
+        : snapshot.processingState === "completed"
+          ? "completed"
+          : snapshot.processingState === "failed"
+            ? "failed"
+            : snapshot.captureState === "recording"
+              ? "receiving"
+              : snapshot.processingState === "processing"
+                ? "transcribing"
+                : "queued",
+    createdAt: snapshot.createdAt,
+    updatedAt: snapshot.createdAt,
+    settings: snapshot.settings,
+    rawText: "",
+    finalText: "",
+    insertionText: "",
+    previewText: snapshot.previewText,
+    ...(snapshot.error ? { error: snapshot.error } : {}),
+    ...(snapshot.capture ? { capture: snapshot.capture } : {}),
+    ...(inferenceAudio ? { inferenceAudio } : {}),
+    ...(originalAudio ? { originalAudio } : {}),
+    ...(runs ? { originalRuns: runs } : {}),
+  };
+}
 async function privateDirectory(path: string) {
   await mkdir(path, { mode: 0o700 }).catch((error) => {
     if (error.code !== "EEXIST") throw error;
@@ -57,6 +155,8 @@ async function privateDirectory(path: string) {
 export class HistoryTools {
   private busy = false;
   private readonly scope: string;
+  /** Listed entries that are recording sessions rather than legacy generations. */
+  private readonly recordings = new Set<string>();
   constructor(private readonly api: API) {
     this.scope = createHash("sha256").update(api.endpoint).digest("hex").slice(0, 24);
   }
@@ -67,10 +167,72 @@ export class HistoryTools {
       throw new ClientNotice("Choose SottoDuo, Wispr Flow or all sources.");
     if (queryID !== undefined && (typeof queryID !== "string" || queryID.length > 128))
       throw new ClientNotice("Invalid history request.");
+    const cursor = before === undefined ? undefined : parseCursor(before);
     try {
-      return { ...(await this.api.history(before, source)), server: this.api.endpoint, queryID };
+      return { ...(await this.page(cursor, source)), server: this.api.endpoint, queryID };
     } catch (error) {
       return notice(error, "Loading history");
+    }
+  }
+  /**
+   * Merges legacy generations and recording sessions into one dated page. An
+   * entry is shown only once nothing unfetched from the other list can be newer.
+   */
+  private async page(cursor: Cursor = {}, source: string | undefined) {
+    const empty = { items: [], nextCursor: undefined };
+    const [legacy, recordings] = await Promise.all([
+      cursor.legacy === null ? empty : this.api.history(cursor.legacy, source),
+      cursor.recordings === null || source === "wispr-flow"
+        ? empty
+        : this.api.recordingHistory(cursor.recordings).catch((error) => {
+            // A server without recording sessions has only legacy history.
+            if (error instanceof APIError && error.status === 404) return empty;
+            throw error;
+          }),
+    ]);
+    // A completed session's result can be large; `entry` loads it once selected.
+    const sessions: Page = {
+      items: recordings.items.map((snapshot) => ({
+        ...summary(snapshot),
+        ...(snapshot.processingState === "completed" ? { summaryOnly: true } : {}),
+      })),
+      nextCursor: recordings.nextCursor,
+    };
+    for (const session of sessions.items) this.recordings.add(session.id);
+    // Each list's oldest fetched entry bounds what may be shown before its next page.
+    const bounds = [legacy, sessions].flatMap((page: Page) =>
+      page.nextCursor && page.items.length ? [page.items.at(-1)!] : [],
+    );
+    const items = [...legacy.items, ...sessions.items]
+      .sort(newestFirst)
+      .filter((item) => bounds.every((bound) => newestFirst(item, bound) <= 0));
+    const next = (page: Page, previous: string | null | undefined) => {
+      const shown = page.items.filter((item) => items.includes(item));
+      if (shown.length === page.items.length && !page.nextCursor) return null;
+      return shown.at(-1)?.id ?? previous;
+    };
+    const position: Cursor = {
+      legacy: next(legacy, cursor.legacy),
+      recordings: source === "wispr-flow" ? null : next(sessions, cursor.recordings),
+    };
+    return {
+      items,
+      ...(position.legacy !== null || position.recordings !== null
+        ? { nextCursor: JSON.stringify(position) }
+        : {}),
+    };
+  }
+  /** The full record of a listed recording session, whose list item is only a summary. */
+  async entry(request: Record<string, unknown>) {
+    if (request.server !== this.api.endpoint)
+      throw new ClientNotice("The connected server changed. Refresh history before continuing.");
+    const id = identifier(request.id);
+    if (!this.recordings.has(id))
+      throw new ClientNotice("Refresh history before opening this entry.");
+    try {
+      return { record: await this.session(id), server: this.api.endpoint };
+    } catch (error) {
+      return notice(error, "Loading the entry");
     }
   }
   async action(
@@ -83,16 +245,24 @@ export class HistoryTools {
     if (this.busy) throw new ClientNotice("Wait for the current history action to finish.");
     this.busy = true;
     try {
-      const record = await this.api.get(id, 60_000);
+      const recording = this.recordings.has(id);
+      const record: Entry = recording ? await this.session(id) : await this.api.get(id, 60_000);
       if (action === "deleteHistory") {
         if (!terminal.has(record.status))
           throw new ClientNotice("Finish or cancel this recording before deleting it.");
-        await this.api.deleteHistory(id);
+        if (recording) await this.api.discardRecording(id);
+        else await this.api.deleteHistory(id);
         // Delete only cached copies for this server and entry. The server deletion is authoritative.
         await this.prune(`${this.scope}-${id}-`).catch(() => {});
         return { id, server: this.api.endpoint };
       }
       const kind = request.kind;
+      const run =
+        request.runID === undefined
+          ? undefined
+          : record.originalRuns?.find((item) => item.runID === identifier(request.runID));
+      if (request.runID !== undefined && (kind !== "original" || !run))
+        throw new ClientNotice("This entry has no saved recording of that kind.");
       const filename =
         action === "historyArtifact"
           ? artifactName(request.filename) &&
@@ -101,7 +271,7 @@ export class HistoryTools {
             : undefined
           : kind === "inference" && record.inferenceAudio
             ? "inference.wav"
-            : kind === "original" && record.originalAudio
+            : kind === "original" && (record.originalAudio || run)
               ? "original.wav"
               : kind === "imported" && record.importedSource?.artifactNames.includes("source.wav")
                 ? "source.wav"
@@ -120,11 +290,18 @@ export class HistoryTools {
       );
       const file = await open(path, "wx+", 0o600);
       try {
-        const response = await this.api.historyAudio(id, filename);
+        const response = await this.api.historyAudio(id, filename, recording, run?.runID);
         if (!response.body) throw new Error("Empty audio response");
         const reader = response.body.getReader();
         try {
-          const maximumBytes = filename.endsWith(".json") ? 8 * 1024 * 1024 : maximumAudioBytes;
+          // A session export has no duration limit; bound it by the advertised WAV size instead.
+          const exported = recording
+            ? (run ?? (filename === "original.wav" ? record.originalAudio : record.inferenceAudio))
+                ?.byteCount
+            : undefined;
+          const maximumBytes = filename.endsWith(".json")
+            ? 8 * 1024 * 1024
+            : (exported ?? maximumAudioBytes);
           if (Number(response.headers.get("content-length")) > maximumBytes)
             throw new ClientNotice("This file is too large to open here.");
           let size = 0;
@@ -180,6 +357,12 @@ export class HistoryTools {
     } finally {
       this.busy = false;
     }
+  }
+  private async session(id: string) {
+    const detail = await this.api.recording(id, 60_000);
+    const runs = originalRuns(detail.snapshot);
+    const record: Entry = detail.result ?? summary(detail.snapshot);
+    return runs ? { ...record, originalRuns: runs } : record;
   }
   private async directory() {
     const runtime = process.env.XDG_RUNTIME_DIR;

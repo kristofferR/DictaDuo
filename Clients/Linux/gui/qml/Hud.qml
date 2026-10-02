@@ -9,7 +9,7 @@ Window {
     transientParent: null
     required property var ui
     width: 420
-    height: ui.limitNotice ? 94 : 78
+    height: 78
     // Wayland placement belongs to layer-shell; these are the X11 fallback.
     x: Qt.platform.pluginName.startsWith("wayland") ? 0 : (screen ? screen.virtualX + (screen.width - width) / 2 : 0)
     y: Qt.platform.pluginName.startsWith("wayland") ? 0 : (screen ? screen.virtualY + screen.height - height - 80 : 0)
@@ -87,13 +87,6 @@ Window {
                     Layout.fillWidth: true
                     elide: Text.ElideRight
                     maximumLineCount: 1
-                }
-                SLabel {
-                    ui: hud.ui
-                    text: hud.ui.limitNotice
-                    visible: text.length > 0
-                    font.pixelSize: 11
-                    Layout.fillWidth: true
                 }
             }
         }

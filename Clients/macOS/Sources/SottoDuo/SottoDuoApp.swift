@@ -35,6 +35,7 @@ final class SottoDuoAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     private var activitySubscription: AnyCancellable?
     private var configuration: ConfigurationStore?
     private var startupTask: Task<Void, Never>?
+    private var terminationTask: Task<Void, Never>?
     private var reopenRequested = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -83,16 +84,17 @@ final class SottoDuoAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard terminationTask == nil else { return .terminateLater }
         configuration?.stopWatching()
-        controller?.shutdown()
-        let outputRestore = controller?.pendingOutputRestore
-        guard startupTask != nil || (configuration?.pendingWriteCount ?? 0) > 0 || outputRestore != nil else { return .terminateNow }
+        guard controller != nil || startupTask != nil || (configuration?.pendingWriteCount ?? 0) > 0 else { return .terminateNow }
         startupTask?.cancel()
-        Task {
+        terminationTask = Task {
             await startupTask?.value
+            await controller?.prepareToQuit()
             configuration?.stopWatching()
             await configuration?.flush()
-            await outputRestore?.value
+            // Quitting waits for bounded output-restore retries, so it never leaves output muted.
+            await controller?.pendingOutputRestore?.value
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
@@ -264,7 +266,7 @@ private final class DictationPanel: NSPanel {
         contentView = container
         container.addSubview(hostedHUD)
         hostedHUD.frame = DictationPanelLayout.contentFrame(in: frame.size)
-        noticeSubscription = controller.recordingFeedback.$limitNotice
+        noticeSubscription = controller.recordingFeedback.$transferNotice
             .map { $0 != nil }
             .removeDuplicates()
             .sink { [weak self] visible in self?.setNoticeVisible(visible) }

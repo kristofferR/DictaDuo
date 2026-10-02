@@ -2,10 +2,9 @@ import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { GenerationService } from "../../../Server/src/generation-service.ts";
 import { createHTTPServer } from "../../../Server/src/http-server.ts";
 import type { CaptureProvider } from "../../../Server/src/capture-sessions.ts";
-import { FakeInference } from "../../../Server/tests/support.ts";
+import { FakeInference, openCaptureServices } from "../../../Server/tests/support.ts";
 import { API, APIError } from "../src/api.ts";
 import { Controller, type Desktop } from "../src/controller.ts";
 import type { Source } from "../src/sources.ts";
@@ -35,11 +34,13 @@ async function fixture(inference = new FakeInference()) {
     }));
   const starts: string[] = [];
   let level: (peak: number) => void = () => {};
+  let lose = () => {};
   const provider: CaptureProvider = {
     sources,
     async start(options) {
       starts.push(options.generation.capture!.source.id);
       level = options.level;
+      lose = options.lost;
       await options.write("inference", 0, { sampleRate: 16000, channels: 1 }, Buffer.alloc(64000));
       if (options.generation.settings.preferences.keepOriginalAudio)
         await options.write(
@@ -59,25 +60,12 @@ async function fixture(inference = new FakeInference()) {
     },
   };
   const directory = await mkdtemp(join(tmpdir(), "sottoduo-linux-test-"));
-  const service = await GenerationService.open(
-    { dataDirectory: directory, development: true, captureProvider: provider },
-    inference,
-  );
-  let recognitionHeader: string | undefined;
-  let feedbackHeader: string | undefined;
-  const app = createHTTPServer(service, "fixture-token", (server) => {
-    server.addHook("onRequest", async (request) => {
-      if (request.url.endsWith("/events")) {
-        const value = request.headers["x-sottoduo-recognition"];
-        recognitionHeader = typeof value === "string" ? value : undefined;
-        const feedback = request.headers["x-sottoduo-feedback"];
-        feedbackHeader = typeof feedback === "string" ? feedback : undefined;
-      }
-    });
-  });
+  const services = await openCaptureServices(directory, provider, inference);
+  const service = services.service;
+  const app = createHTTPServer(service, "fixture-token", undefined, services.recordings);
   const address = await app.listen({ host: "127.0.0.1", port: 0 });
   cleanup.push(async () => {
-    await service.shutdown();
+    await services.close();
     await app.close();
     await rm(directory, { recursive: true, force: true });
   });
@@ -120,8 +108,24 @@ async function fixture(inference = new FakeInference()) {
     notices,
     desktop,
     deliveries: () => deliveries,
-    recognitionHeader: () => recognitionHeader,
-    feedbackHeader: () => feedbackHeader,
+    /** The fields these tests check, read from the recording session. */
+    record: async (id: string) => {
+      const { snapshot, result } = await api.recording(id);
+      return {
+        status:
+          snapshot.captureState === "discarded"
+            ? "cancelled"
+            : snapshot.processingState === "completed"
+              ? "completed"
+              : snapshot.processingState === "failed"
+                ? "failed"
+                : "receiving",
+        delivery: result?.delivery,
+        device: snapshot.device,
+        capture: snapshot.capture,
+        mode: snapshot.mode,
+      };
+    },
     lock: () => {
       unlocked = false;
     },
@@ -132,6 +136,7 @@ async function fixture(inference = new FakeInference()) {
       deliveryGate = gate;
     },
     level: (peak: number) => level(peak),
+    lose: () => lose(),
   };
 }
 test("shortcut diagnostics block shortcut, GUI test and pairing captures until a held key is released", async () => {
@@ -160,10 +165,12 @@ test("live server feedback supplies real peaks but cannot deliver text; stopped 
   const f = await fixture();
   f.controller.start();
   await until(() => f.controller.activity.phase === "recording");
-  f.level(0.65);
-  await until(() => f.controller.feedback.snapshot().levels.includes(0.65));
-  expect(f.recognitionHeader()).toBe("streaming-v1");
-  expect(f.feedbackHeader()).toBe("compact-v1");
+  // Peaks are a live stream, not stored state: keep sending them until the
+  // client's event subscription, which connects after admission, sees one.
+  await until(() => {
+    f.level(0.65);
+    return f.controller.feedback.snapshot().levels.includes(0.65);
+  });
   expect(f.deliveries()).toBe(0);
   f.controller.stop();
   await f.controller.settled();
@@ -194,9 +201,8 @@ test("provisional text never inserts and a cancelled stream cannot update the ne
   const f = await fixture();
   let late: (() => void) | undefined;
   f.api.events = async (id, signal, update) => {
-    const record = await f.api.get(id);
-    const publish = () =>
-      update({ ...record, recognition: { provider: "soniox", partialText: "Not final" } });
+    const { snapshot } = await f.api.recording(id);
+    const publish = () => update({ ...snapshot, previewText: "Not final" });
     late ??= publish;
     publish();
     if (!signal.aborted)
@@ -228,7 +234,7 @@ test("owned HTTP capture reuses history and delivers once, including duplicate r
   expect(f.starts).toEqual(["dji"]);
   expect(f.deliveries()).toBe(1);
   expect(f.controller.result?.text).toBe("Hello world. ");
-  const record = await f.api.get(f.controller.result!.id);
+  const record = await f.record(f.controller.result!.id);
   expect(record.device.id).toBe("desktop-client");
   expect(record.capture?.source.id).toBe("dji");
   expect(record.delivery?.status).toBe("inserted");
@@ -358,6 +364,72 @@ test("lock and heartbeat failure cancel capture without delivery", async () => {
     expect(f.controller.result).toBeUndefined();
   }
 });
+test("a capture the server stops mid-take is kept in history, not discarded", async () => {
+  const f = await fixture();
+  const start = f.api.start.bind(f.api);
+  let id = "";
+  f.api.start = async (...args) => {
+    const record = await start(...args);
+    id = record.id;
+    return record;
+  };
+  f.controller.start();
+  await until(() => f.controller.state.startsWith("recording"));
+  f.lose();
+  await f.controller.settled();
+  expect(f.controller.state).toContain("saved in history");
+  expect(f.deliveries()).toBe(0);
+  await until(async () => (await f.record(id)).status === "completed");
+});
+test("an interrupted capture restores muted output", async () => {
+  const f = await fixture();
+  let restored = 0;
+  f.controller.output = { mute: async () => {}, restore: async () => void restored++ };
+  f.controller.muteOutput = true;
+  f.controller.start();
+  await until(() => f.controller.state.startsWith("recording"));
+  f.lose();
+  await f.controller.settled();
+  expect(f.controller.state).toContain("saved in history");
+  expect(restored).toBe(1);
+});
+test("a cancel during a brief outage keeps retrying the discard", async () => {
+  const f = await fixture();
+  const cancel = f.api.cancel.bind(f.api);
+  let attempts = 0,
+    id = "";
+  f.api.cancel = async (...args) => {
+    id = args[0];
+    if (++attempts < 3) throw new Error("Offline");
+    return cancel(...args);
+  };
+  f.controller.discardRetryDelaysMS = [10, 10, 10];
+  f.controller.start();
+  await until(() => f.controller.state.startsWith("recording"));
+  await f.controller.cancel();
+  // Quitting waits for the retries instead of abandoning them.
+  await f.controller.discardsSettled();
+  expect(attempts).toBe(3);
+  expect((await f.record(id)).status).toBe("cancelled");
+});
+test("recognition failing mid-take seals the capture instead of recording on", async () => {
+  const f = await fixture();
+  let stopped = "";
+  const stop = f.api.stop.bind(f.api);
+  f.api.stop = async (id, owner) => {
+    stopped = id;
+    return stop(id, owner);
+  };
+  f.api.events = async (id, _signal, update) => {
+    const { snapshot } = await f.api.recording(id);
+    update({ ...snapshot, processingState: "failed", error: "Recognition failed." });
+  };
+  f.controller.start();
+  await f.controller.settled();
+  expect(f.controller.state).toBe("Recognition failed.");
+  expect(f.deliveries()).toBe(0);
+  expect((await f.record(stopped)).capture?.state).toBe("sealed");
+});
 test("a lock after one-shot delivery begins preserves its insertion result", async () => {
   const f = await fixture();
   const owner = "a".repeat(64);
@@ -462,35 +534,52 @@ test("owner heartbeats continue through a slow drain and stop after sealing", as
 test("a polling failure after sealing preserves the completed take in history", async () => {
   const f = await fixture();
   const stop = f.api.stop.bind(f.api),
-    get = f.api.get.bind(f.api),
+    read = f.api.recording.bind(f.api),
     cancel = f.api.cancel.bind(f.api);
   let sealedID: string | undefined,
     cancellations = 0;
   f.api.stop = async (...args) => {
     const record = await stop(...args);
     sealedID = record.id;
-    return { ...record, status: "transcribing" };
+    return { ...record, processingState: "processing" };
   };
-  f.api.get = async () => {
+  f.api.recording = async () => {
     throw new Error("Polling connection lost");
   };
   f.api.cancel = async (...args) => {
     cancellations++;
     return cancel(...args);
   };
+  f.controller.processingTimeoutMS = 200;
   f.controller.start();
   await until(() => f.controller.state.startsWith("recording"));
   f.controller.stop();
   await f.controller.settled();
   expect(cancellations).toBe(0);
   expect(sealedID).toBeDefined();
-  await until(async () => (await get(sealedID!)).status === "completed");
+  await until(async () => (await read(sealedID!)).snapshot.processingState === "completed");
+});
+
+test("a brief polling outage after sealing still delivers the take", async () => {
+  const f = await fixture();
+  const read = f.api.recording.bind(f.api);
+  let failures = 0;
+  f.api.recording = async (...args) => {
+    if (failures++ < 2) throw new Error("Polling connection lost");
+    return read(...args);
+  };
+  f.controller.start();
+  await until(() => f.controller.state.startsWith("recording"));
+  f.controller.stop();
+  await f.controller.settled();
+  expect(failures).toBeGreaterThan(2);
+  expect(f.deliveries()).toBe(1);
 });
 
 test("an ambiguous stop response cannot cancel a sealed take", async () => {
   const f = await fixture();
   const stop = f.api.stop.bind(f.api);
-  const get = f.api.get.bind(f.api);
+  const get = f.record;
   const cancel = f.api.cancel.bind(f.api);
   let sealedID: string | undefined;
   let cancellations = 0;
@@ -535,7 +624,7 @@ test("button take pins DJI, ignores keyboard release, and reports a supported pr
   expect(f.starts).toEqual(["dji"]);
   expect(f.deliveries()).toBe(1);
   expect(f.notices.some((n) => n.includes("receipt could not"))).toBe(false);
-  expect((await f.api.get(f.controller.result!.id)).delivery?.status).toBe("none");
+  expect((await f.record(f.controller.result!.id)).delivery?.status).toBe("none");
 });
 
 test("button admission failure never tries the fallback microphone", async () => {
@@ -607,7 +696,7 @@ test("GUI microphone tests retain a preview without attempting desktop insertion
   await f.controller.settled();
   expect(f.controller.activity.phase).toBe("completed");
   expect(f.controller.result?.delivery).toBe("preview");
-  expect((await f.api.get(f.controller.result!.id)).mode).toBe("test");
+  expect((await f.record(f.controller.result!.id)).mode).toBe("test");
   expect(f.deliveries()).toBe(0);
   expect(selected).toBe(false);
 });
@@ -725,7 +814,7 @@ test("a completed take waits for a newer held take before delivering", async () 
   await record(f);
   f.controller.stop();
   await record(f);
-  await until(async () => (await f.api.get(ids.started[0]!)).status === "completed");
+  await until(async () => (await f.record(ids.started[0]!)).status === "completed");
   await Bun.sleep(400);
   expect(f.deliveries()).toBe(0);
   expect(f.controller.state.startsWith("recording")).toBe(true);
@@ -786,7 +875,9 @@ test("later insertions do not wait for an earlier delivery receipt", async () =>
     f.controller.stop();
     await record(f);
     f.controller.stop();
-    await until(async () => (await f.api.get(ids.started[1]!)).capture?.state === "sealed");
+    await until(
+      async () => (await f.api.recording(ids.started[1]!)).snapshot.capture?.state === "sealed",
+    );
     held.release();
     await until(() => waiting && f.deliveries() === 2);
     expect(f.controller.result?.id).toBe(ids.started[1]);
@@ -801,22 +892,44 @@ test("later insertions do not wait for an earlier delivery receipt", async () =>
 test("server queue wait does not consume a take's processing deadline", async () => {
   const f = await fixture();
   const stop = f.api.stop.bind(f.api),
-    get = f.api.get.bind(f.api);
-  f.api.stop = async (...args) => ({ ...(await stop(...args)), status: "queued" });
+    recording = f.api.recording.bind(f.api);
+  f.api.stop = async (...args) => ({ ...(await stop(...args)), processingState: "queued" });
   let polls = 0;
+  // Shorter than both the queue wait below and the one-second take.
   f.controller.processingTimeoutMS = 200;
-  f.api.get = async (...args) => {
-    const result = await get(...args);
+  f.api.recording = async (...args) => {
+    const detail = await recording(...args);
     // Stay queued for longer than the processing deadline.
-    if (++polls <= 3) return { ...result, status: "queued" };
-    return result;
+    if (++polls <= 5) return { snapshot: { ...detail.snapshot, processingState: "queued" } };
+    return detail;
   };
   await record(f);
   f.controller.stop();
   await f.controller.settled();
-  expect(polls).toBe(4);
+  expect(polls).toBe(6);
   expect(f.deliveries()).toBe(1);
   expect(f.controller.result?.delivery).toBe("inserted");
+});
+
+test("server progress renews a take's processing deadline", async () => {
+  const f = await fixture();
+  const recording = f.api.recording.bind(f.api);
+  let polls = 0;
+  f.controller.processingTimeoutMS = 200;
+  f.api.recording = async (...args) => {
+    const detail = await recording(...args);
+    // Each checkpoint lands within the deadline, but together they outlast it.
+    if (++polls <= 8)
+      return {
+        snapshot: { ...detail.snapshot, processingState: "processing", revision: 1_000 + polls },
+      };
+    return detail;
+  };
+  await record(f);
+  f.controller.stop();
+  await f.controller.settled();
+  expect(polls).toBe(9);
+  expect(f.deliveries()).toBe(1);
 });
 
 test("cancelAll revokes every queued destination before slow server cancellation", async () => {
@@ -853,7 +966,10 @@ test("cancelAll revokes every queued destination before slow server cancellation
       cancelling = f.controller.cancelAll(includeDelivery);
       expect(closed).toBe(2);
       held.release();
-      await until(async () => (await f.api.get(ids.started[0]!)).status === "completed");
+      await until(
+        async () =>
+          (await f.api.recording(ids.started[0]!)).snapshot.processingState === "completed",
+      );
       await Bun.sleep(350);
       expect(f.deliveries()).toBe(0);
     } finally {
@@ -913,7 +1029,7 @@ test("cancelling the newest take keeps an earlier processing take", async () => 
   held.release();
   await f.controller.settled();
   expect(ids.delivered).toEqual([ids.started[0]!]);
-  expect((await f.api.get(ids.started[1]!)).status).toBe("cancelled");
+  expect((await f.record(ids.started[1]!)).status).toBe("cancelled");
 });
 
 test("a cancel targets an earlier take that took over the overlay during slow cleanup", async () => {
@@ -969,7 +1085,7 @@ test("a cancelled recording is kept in history and inserted only after undo", as
   await f.controller.settled();
   expect(f.deliveries()).toBe(1);
   expect(receipts).toEqual(["inserted"]);
-  expect((await f.api.get(ids.started[0]!)).status).toBe("completed");
+  expect((await f.record(ids.started[0]!)).status).toBe("completed");
 
   await record(f);
   await Bun.sleep(300);
@@ -980,7 +1096,7 @@ test("a cancelled recording is kept in history and inserted only after undo", as
   expect(f.deliveries()).toBe(1);
   expect(receipts).toEqual(["inserted", "cancelled"]);
   expect(f.controller.activity.kept).toBe(true);
-  expect((await f.api.get(ids.started[1]!)).delivery?.status).toBe("cancelled");
+  expect((await f.record(ids.started[1]!)).delivery?.status).toBe("cancelled");
 });
 
 test("toggle inserts a cancelled take that is still sealing", async () => {
@@ -1028,7 +1144,7 @@ test("a stopped take cancelled while sealing is kept in history", async () => {
     release();
     await f.controller.settled();
     expect(f.deliveries()).toBe(0);
-    expect((await f.api.get(ids.started[0]!)).delivery?.status).toBe("cancelled");
+    expect((await f.api.recording(ids.started[0]!)).result?.delivery?.status).toBe("cancelled");
   } finally {
     release();
   }
@@ -1042,7 +1158,7 @@ test("a short cancelled recording is discarded without an undo window", async ()
   expect(f.controller.activity.undoUntil).toBeUndefined();
   await f.controller.settled();
   expect(f.deliveries()).toBe(0);
-  expect((await f.api.get(ids.started[0]!)).status).toBe("cancelled");
+  expect((await f.record(ids.started[0]!)).status).toBe("cancelled");
 });
 
 test("a repeated cancel during slow cleanup keeps the earlier processing take", async () => {
@@ -1094,7 +1210,7 @@ test("cancelling the newest take keeps an earlier take's result", async () => {
   // The cancelled take is kept in history with a cancelled receipt, never inserted.
   expect(f.deliveries()).toBe(1);
   expect(ids.delivered).toEqual([ids.started[0]!, ids.started[1]!]);
-  expect((await f.api.get(ids.started[1]!)).delivery?.status).toBe("cancelled");
+  expect((await f.api.recording(ids.started[1]!)).result?.delivery?.status).toBe("cancelled");
 });
 
 test("a cancel after a newer take starts targets that take, not an earlier cleanup", async () => {
@@ -1113,7 +1229,9 @@ test("a cancel after a newer take starts targets that take, not an earlier clean
     const first = f.controller.cancel();
     await record(f);
     f.controller.stop();
-    await until(async () => (await f.api.get(ids.started[1]!)).capture?.state === "sealed");
+    await until(
+      async () => (await f.api.recording(ids.started[1]!)).snapshot.capture?.state === "sealed",
+    );
     await f.controller.cancel();
     held.release();
     release();
@@ -1168,7 +1286,9 @@ test("an earlier preview notifies about recovery while the newer take owns the o
   f.controller.stop();
   await record(f);
   f.controller.stop();
-  await until(async () => (await f.api.get(ids.started[1]!)).capture?.state === "sealed");
+  await until(
+    async () => (await f.api.recording(ids.started[1]!)).snapshot.capture?.state === "sealed",
+  );
   held.release();
   await f.controller.settled();
   expect(f.notices).toContain(

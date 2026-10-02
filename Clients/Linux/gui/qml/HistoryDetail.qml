@@ -13,6 +13,8 @@ ColumnLayout {
     readonly property var audio: record ? record.inferenceAudio || record.originalAudio : null
     readonly property var processing: record ? record.textProcessing : null
     readonly property bool terminal: !!record && ["completed", "failed", "cancelled"].includes(record.status)
+    // A listed session holds only the transcript's tail until its full record loads.
+    readonly property bool partial: !!record && !!record.summaryOnly
     property string copiedID: ""
     onRecordChanged: copiedID = ""
 
@@ -58,7 +60,7 @@ ColumnLayout {
             accessibleLabel: root.record && root.copiedID === root.record.id ? "Copied transcript" : "Copy transcript"
             ToolTip.visible: hovered
             ToolTip.text: accessibleLabel
-            enabled: root.transcript.length > 0
+            enabled: !root.partial && root.transcript.length > 0
             onClicked: {
                 bridge.copy(root.transcript);
                 root.copiedID = root.record.id;
@@ -103,6 +105,16 @@ ColumnLayout {
                 Layout.fillWidth: true
                 visible: !!text
                 text: root.record ? root.record.error || "" : ""
+            }
+
+            SLabel {
+                ui: root.ui
+                objectName: "historyPartial"
+                Layout.fillWidth: true
+                visible: root.partial
+                color: root.ui.c.muted
+                font.pixelSize: 12
+                text: root.history.entryID === (root.record ? root.record.id : "") ? "Loading the full transcript…" : "Showing only the end of this transcript. Select it again to load all of it."
             }
 
             TextArea {
@@ -237,6 +249,19 @@ ColumnLayout {
             visible: !!root.record && !!root.record.originalAudio
             enabled: root.history.available && !root.history.acting && !bridge.preview
             onClicked: root.history.openAudio("original")
+        }
+
+        // Runs recorded in different formats are saved, and opened, separately.
+        Repeater {
+            model: root.record ? root.record.originalRuns || [] : []
+            delegate: SButton {
+                required property var modelData
+                required property int index
+                ui: root.ui
+                text: "Open original run " + (index + 1)
+                enabled: root.history.available && !root.history.acting && !bridge.preview
+                onClicked: root.history.openAudio("original", modelData.runID)
+            }
         }
 
         SButton {

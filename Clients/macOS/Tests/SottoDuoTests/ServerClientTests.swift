@@ -5,28 +5,6 @@ import XCTest
 @testable import SottoDuo
 
 final class ServerClientTests: XCTestCase {
-    func testCancelledCreationStillReturnsServerIDForCleanup() async throws {
-        let fixture = HTTPFixture()
-        defer { fixture.session.invalidateAndCancel() }
-        let request = CreateGenerationRequest(device: .init(id: "test", name: "Test Mac"))
-        let record = GenerationRecord(requestID: request.requestID, device: request.device, settings: .init())
-        let accepted = expectation(description: "Server accepted creation")
-        let releaseResponse = DispatchSemaphore(value: 0)
-        fixture.respond = { _ in
-            accepted.fulfill()
-            guard releaseResponse.wait(timeout: .now() + 5) == .success else { throw URLError(.timedOut) }
-            return (201, try SottoDuoAPI.encodeWire(record))
-        }
-        let client = try ServerClient(endpoint: fixture.endpoint, token: "", session: fixture.session)
-        let creation = Task { try await client.create(request) }
-        await fulfillment(of: [accepted], timeout: 5)
-        creation.cancel()
-        releaseResponse.signal()
-        let returned = try await creation.value
-        XCTAssertEqual(returned.id, record.id)
-        XCTAssertEqual(fixture.requests.count, 1)
-    }
-
     func testInterruptedEventsRecoverCompletedResultWithoutRepeatingDelivery() async throws {
         let fixture = HTTPFixture()
         defer { fixture.session.invalidateAndCancel() }
@@ -52,62 +30,22 @@ final class ServerClientTests: XCTestCase {
         XCTAssertEqual(fixture.requests.count, 2)
     }
 
-    func testFinishRetriesLostAcknowledgementWithIdenticalFrameCounts() async throws {
+    func testDiscardRetriesTransientFailuresButNotRejections() async throws {
         let fixture = HTTPFixture()
         defer { fixture.session.invalidateAndCancel() }
-        let record = GenerationRecord(requestID: UUID(), device: .init(id: "test", name: "Test Mac"),
-                                      status: .queued, settings: .init())
-        let bodies = RequestBodyCollector()
-        fixture.respond = { request in
-            bodies.append(try requestBody(request))
-            if bodies.values.count == 1 { throw URLError(.networkConnectionLost) }
-            return (200, try SottoDuoAPI.encodeWire(record))
+        fixture.respond = { [weak fixture] _ in
+            (fixture?.requests.count ?? 0) < 3 ? (503, Data()) : (200, Data("{}".utf8))
         }
         let client = try ServerClient(endpoint: fixture.endpoint, token: "", session: fixture.session)
-        let result = try await client.finish(record.id, value: .init(inferenceFrames: 8_000))
-        XCTAssertEqual(result.id, record.id)
-        XCTAssertEqual(bodies.values.count, 2)
-        XCTAssertEqual(bodies.values.first, bodies.values.last)
-    }
+        await client.discardRecordingRetrying(UUID(), delays: [.milliseconds(5), .milliseconds(5), .milliseconds(5)])
+        XCTAssertEqual(fixture.requests.count, 3)
 
-    func testFinishDoesNotRetryConflictingSeal() async throws {
-        let fixture = HTTPFixture()
-        defer { fixture.session.invalidateAndCancel() }
-        fixture.respond = { _ in
-            (409, try SottoDuoAPI.encodeWire(APIErrorResponse(code: "conflicting_finish", message: "Different frame counts")))
-        }
-        let client = try ServerClient(endpoint: fixture.endpoint, token: "", session: fixture.session)
-        do {
-            _ = try await client.finish(UUID(), value: .init(inferenceFrames: 8_000))
-            XCTFail("Conflicting seals must fail")
-        } catch ServerClientError.rejected(let status, _) {
-            XCTAssertEqual(status, 409)
-        }
-        XCTAssertEqual(fixture.requests.count, 1)
-    }
-
-    func testFinishStopsReplayingSealAfterBoundedTransientFailures() async throws {
-        let fixture = HTTPFixture()
-        defer { fixture.session.invalidateAndCancel() }
-        fixture.respond = { _ in throw URLError(.networkConnectionLost) }
-        let client = try ServerClient(endpoint: fixture.endpoint, token: "", session: fixture.session)
-        do {
-            _ = try await client.finish(UUID(), value: .init(inferenceFrames: 8_000))
-            XCTFail("Transient failures must stop retrying within the recovery budget")
-        } catch let error as URLError { XCTAssertEqual(error.code, .networkConnectionLost) }
-        XCTAssertEqual(fixture.requests.map(\.httpMethod), ["POST", "POST", "POST", "POST"])
-    }
-
-    func testCancelledFinishDoesNotRetry() async throws {
-        let fixture = HTTPFixture()
-        defer { fixture.session.invalidateAndCancel() }
-        fixture.respond = { _ in throw URLError(.cancelled) }
-        let client = try ServerClient(endpoint: fixture.endpoint, token: "", session: fixture.session)
-        do {
-            _ = try await client.finish(UUID(), value: .init(inferenceFrames: 8_000))
-            XCTFail("Cancelled requests must stop immediately")
-        } catch let error as URLError { XCTAssertEqual(error.code, .cancelled) }
-        XCTAssertEqual(fixture.requests.count, 1)
+        let rejected = HTTPFixture()
+        defer { rejected.session.invalidateAndCancel() }
+        rejected.respond = { _ in (404, Data()) }
+        let other = try ServerClient(endpoint: rejected.endpoint, token: "", session: rejected.session)
+        await other.discardRecordingRetrying(UUID(), delays: [.milliseconds(5)])
+        XCTAssertEqual(rejected.requests.count, 1)
     }
 
     func testQueuedEventsReconnectUntilTerminalResult() async throws {
@@ -151,16 +89,15 @@ final class ServerClientTests: XCTestCase {
         let client = try ServerClient(endpoint: "https://example.com", token: "server-access")
         let first = try client.owningCapture()
         let second = try client.owningCapture()
-        let request = try first.request(path: "v1/captures", method: "POST")
+        let request = try first.request(path: "v2/captures", method: "POST")
         let secret = try XCTUnwrap(request.value(forHTTPHeaderField: "X-SottoDuo-Capture-Owner"))
         XCTAssertEqual(secret.count, 64)
         XCTAssertTrue(secret.allSatisfy { "0123456789abcdef".contains($0) })
-        XCTAssertNotEqual(secret, try second.request(path: "v1/captures").value(forHTTPHeaderField: "X-SottoDuo-Capture-Owner"))
+        XCTAssertNotEqual(secret, try second.request(path: "v2/captures").value(forHTTPHeaderField: "X-SottoDuo-Capture-Owner"))
         XCTAssertNil(try client.request(path: "v1/audio-sources").value(forHTTPHeaderField: "X-SottoDuo-Capture-Owner"))
-        for path in ["capture/heartbeat", "capture/stop", "cancel", "delivery", "events"] {
-            let control = try first.request(path: "v1/generations/\(UUID())/\(path)")
+        for path in ["capture/heartbeat", "capture/stop", "context", "discard", "delivery", "events"] {
+            let control = try first.request(path: "v2/recordings/\(UUID())/\(path)")
             XCTAssertEqual(control.value(forHTTPHeaderField: "X-SottoDuo-Capture-Owner"), secret)
-            XCTAssertEqual(control.value(forHTTPHeaderField: "X-SottoDuo-Capture"), "capture-v1")
             XCTAssertFalse(control.url!.absoluteString.contains(secret))
         }
     }
@@ -189,23 +126,25 @@ final class ServerClientTests: XCTestCase {
         defer { fixture.session.invalidateAndCancel() }
         let connection = try ServerClient(endpoint: fixture.endpoint, token: "", session: fixture.session).owningCapture()
         let source = AudioSourceIdentity(hostID: "desk", id: "dji")
-        var record = GenerationRecord(requestID: UUID(), device: .init(id: "mac", name: "Mac"), settings: .init())
-        record.capture = .init(source: source, state: .recording)
-        let capture = try RemoteCaptureSession(record: record, connection: connection,
-                                              requestedAt: ProcessInfo.processInfo.systemUptime)
-        record.capture?.state = .sealed
-        record.status = .queued
-        let response = try SottoDuoAPI.encoder().encode(record)
-        fixture.respond = { _ in (200, response) }
+        var snapshot = RecordingSnapshot(id: UUID(), requestID: UUID(), device: .init(id: "mac", name: "Mac"), settings: .init())
+        snapshot.capture = .init(source: source, state: .recording)
+        let capture = try RemoteCaptureSession(snapshot: snapshot, connection: connection)
+        snapshot.capture?.state = .sealed
+        snapshot.captureState = .stopped
+        let sealed = try RecordingWire.encoder().encode(snapshot)
+        fixture.respond = { request in
+            guard request.url?.path.hasSuffix("/capture/stop") == true else { throw URLError(.badServerResponse) }
+            return (200, sealed)
+        }
         var notified = false
         do {
             _ = try await capture.stop(continuationID: nil) {
                 XCTAssertTrue(capture.isSealed)
                 notified = true
             }
-            XCTFail("No event monitor was started to provide the transcription result")
-        } catch ServerClientError.disconnected {
-            // Acknowledging the seal must not wait for a terminal event.
+            XCTFail("The processing stream failed, so no result can arrive")
+        } catch is URLError {
+            // Acknowledging the seal must not wait for processing to finish.
             XCTAssertTrue(notified)
         }
         capture.cancelMonitoring()
@@ -217,12 +156,9 @@ final class ServerClientTests: XCTestCase {
         defer { fixture.session.invalidateAndCancel() }
         let connection = try ServerClient(endpoint: fixture.endpoint, token: "", session: fixture.session).owningCapture()
         let source = AudioSourceIdentity(hostID: "desk", id: "dji")
-        var record = GenerationRecord(requestID: UUID(), device: .init(id: "mac", name: "Mac"), settings: .init())
-        record.capture = .init(source: source, state: .recording)
-        let capture = try RemoteCaptureSession(
-            record: record,
-            connection: connection,
-            requestedAt: ProcessInfo.processInfo.systemUptime)
+        var snapshot = RecordingSnapshot(id: UUID(), requestID: UUID(), device: .init(id: "mac", name: "Mac"), settings: .init())
+        snapshot.capture = .init(source: source, state: .recording)
+        let capture = try RemoteCaptureSession(snapshot: snapshot, connection: connection)
         fixture.respond = { request in
             XCTAssertTrue(request.url?.path.hasSuffix("/capture/stop") == true)
             throw URLError(.networkConnectionLost)
@@ -248,15 +184,13 @@ final class ServerClientTests: XCTestCase {
         XCTAssertFalse(request.url?.absoluteString.contains("private-token") == true)
     }
 
-    func testStreamingRequestPreservesTLSForMixedCaseSchemes() throws {
+    func testRecordingSocketPreservesTLSForMixedCaseSchemes() throws {
         for endpoint in ["https://example.com", "HTTPS://example.com", "hTtPs://example.com"] {
-            let request = try ServerClient(endpoint: endpoint, token: "private-token").streamingRequest(to: UUID())
+            let request = try ServerClient(endpoint: endpoint, token: "private-token").recordingWebSocketRequest(UUID())
             XCTAssertEqual(request.url?.scheme, "wss")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer private-token")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "X-SottoDuo-Recognition"), "streaming-v1")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "X-SottoDuo-Generation-Retry"), "retry-v1")
         }
-        let local = try ServerClient(endpoint: "HTTP://127.0.0.1:8391", token: "").streamingRequest(to: UUID())
+        let local = try ServerClient(endpoint: "HTTP://127.0.0.1:8391", token: "").recordingWebSocketRequest(UUID())
         XCTAssertEqual(local.url?.scheme, "ws")
     }
 
@@ -292,50 +226,6 @@ final class ServerClientTests: XCTestCase {
         XCTAssertTrue(bodies.allSatisfy { $0.count <= 262_144 })
     }
 
-    func testLiveUploadPreservesIndependentSequencesAndExactFrameTotals() async throws {
-        let fixture = HTTPFixture()
-        defer { fixture.session.invalidateAndCancel() }
-        fixture.respond = { request in
-            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
-            let sequence = Int(query.first { $0.name == "sequence" }!.value!)!
-            let original = request.url!.path.hasSuffix("/original")
-            return (200, try SottoDuoAPI.encoder().encode(AudioChunkReceipt(nextSequence: sequence + 1,
-                frameCount: Int64((sequence + 1) * (original ? 24_000 : 8_000)))))
-        }
-        let client = try ServerClient(endpoint: fixture.endpoint, token: "test", session: fixture.session)
-        let pipe = AudioChunkPipe()
-        for _ in 0..<2 {
-            pipe.append(.init(kind: .original, data: Data(repeating: 0, count: 96_000), sampleRate: 48_000, channels: 1))
-            pipe.append(.init(kind: .normalized, data: Data(repeating: 0, count: 32_000), sampleRate: 16_000, channels: 1))
-        }
-        pipe.finish()
-        let result = try await client.upload(pipe.stream, to: UUID(), preserveOriginal: true)
-        XCTAssertEqual(result.inferenceFrames, 16_000)
-        XCTAssertEqual(result.originalFrames, 48_000)
-        XCTAssertEqual(fixture.requests.count, 4)
-        XCTAssertTrue(fixture.requests.allSatisfy { $0.httpMethod == "POST" })
-        XCTAssertTrue(fixture.requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer test" })
-    }
-
-    func testRejectedChunkStopsUploadBeforeAnotherChunkCanBeSent() async throws {
-        let fixture = HTTPFixture()
-        defer { fixture.session.invalidateAndCancel() }
-        fixture.respond = { _ in (409, try SottoDuoAPI.encoder().encode(APIErrorResponse(code: "sequence", message: "Upload sequence mismatch"))) }
-        let client = try ServerClient(endpoint: fixture.endpoint, token: "", session: fixture.session)
-        let pipe = AudioChunkPipe()
-        for _ in 0..<2 {
-            pipe.append(.init(kind: .normalized, data: Data(repeating: 0, count: 32_000), sampleRate: 16_000, channels: 1))
-        }
-        pipe.finish()
-        do {
-            _ = try await client.upload(pipe.stream, to: UUID(), preserveOriginal: false)
-            XCTFail("Rejected upload must fail instead of sealing or continuing")
-        } catch {
-            XCTAssertEqual(error.localizedDescription, "Upload sequence mismatch")
-        }
-        XCTAssertEqual(fixture.requests.count, 1)
-    }
-
     func testRecorderStreamsOriginalChannelsAndEveryNormalizedFrameBeforeFinishing() async throws {
         let format = try XCTUnwrap(AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000,
                                                 channels: 2, interleaved: false))
@@ -360,18 +250,6 @@ final class ServerClientTests: XCTestCase {
         }
         XCTAssertEqual(pair.0, 0.25)
         XCTAssertEqual(pair.1, -0.5)
-    }
-
-    func testBackpressureFailsInsteadOfKeepingAnOfflineRecordingQueue() async throws {
-        let pipe = AudioChunkPipe()
-        for _ in 0..<514 {
-            pipe.append(.init(kind: .normalized, data: Data([0, 0, 0, 0]), sampleRate: 16_000, channels: 1))
-        }
-        do {
-            for try await _ in pipe.stream {}
-            XCTFail("An overloaded stream must fail")
-        } catch ServerClientError.uploadBacklog {
-        } catch { XCTFail("Unexpected failure: \(error)") }
     }
 }
 
@@ -404,6 +282,7 @@ final class HTTPFixture: @unchecked Sendable {
     private let lock = NSLock()
     private var captured: [URLRequest] = []
     var respond: ((URLRequest) throws -> (Int, Data))?
+    var respondAsync: ((URLRequest, @escaping (Result<(Int, Data), Error>) -> Void) -> Void)?
     var endpoint: String { "https://\(id).test" }
     var requests: [URLRequest] { lock.withLock { captured } }
 
@@ -414,9 +293,10 @@ final class HTTPFixture: @unchecked Sendable {
         FixtureURLProtocol.register(self)
     }
     deinit { FixtureURLProtocol.unregister(id) }
-    func response(_ request: URLRequest) throws -> (Int, Data) {
+    func response(_ request: URLRequest, completion: @escaping (Result<(Int, Data), Error>) -> Void) {
         lock.withLock { captured.append(request) }
-        return try respond?(request) ?? (500, Data())
+        if let respondAsync { respondAsync(request, completion) }
+        else { completion(Result { try respond?(request) ?? (500, Data()) }) }
     }
 }
 
@@ -433,13 +313,16 @@ private final class FixtureURLProtocol: URLProtocol, @unchecked Sendable {
         guard let fixture = Self.lock.withLock({ Self.fixtures[id]?.value }) else {
             client?.urlProtocol(self, didFailWithError: URLError(.cannotFindHost)); return
         }
-        do {
-            let (status, data) = try fixture.response(request)
-            let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: data)
-            client?.urlProtocolDidFinishLoading(self)
-        } catch { client?.urlProtocol(self, didFailWithError: error) }
+        fixture.response(request) { [self] result in
+            switch result {
+            case .success(let (status, data)):
+                let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: data)
+                client?.urlProtocolDidFinishLoading(self)
+            case .failure(let error): client?.urlProtocol(self, didFailWithError: error)
+            }
+        }
     }
     override func stopLoading() {}
 }

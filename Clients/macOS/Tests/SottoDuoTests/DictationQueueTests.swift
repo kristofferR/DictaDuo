@@ -468,7 +468,8 @@ private final class QueueControllerFixture {
         let configuration = ConfigurationStore(file: ConfigurationFile(url: root.appendingPathComponent("config.json")))
         controller = SottoDuoController(configuration: configuration, startServices: false,
                                    recorder: recorder, audioDevices: devices,
-                                   serverClient: { try ServerClient(endpoint: server.endpoint, token: "", session: server.session) })
+                                   serverClient: { try ServerClient(endpoint: server.endpoint, token: "", session: server.session) },
+                                   recordingSocket: { request in try server.socket(for: request) })
         controller.microphones.update(devices: [device], systemDefaultUID: device.uid)
         controller.permissions = PermissionSnapshot(microphone: true, accessibility: false, inputMonitoring: false)
         transcriptSubscription = controller.$lastTranscript.filter { !$0.isEmpty }.sink { [weak self] text in
@@ -483,7 +484,8 @@ private final class QueueControllerFixture {
 
     func recordAndRelease() async throws {
         controller.toggleTestRecording()
-        try await waitUntil { self.controller.isRecording }
+        do { try await waitUntil { self.controller.isRecording } }
+        catch { XCTFail("Not recording: \(controller.statusMessage) · \(controller.errorMessage ?? "")"); throw error }
         try await Task.sleep(for: .milliseconds(275))
         controller.toggleTestRecording()
     }
@@ -510,7 +512,7 @@ private final class QueueAudioHardware: AudioCaptureHardware, @unchecked Sendabl
         self.request = request
         let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1))
         let writer = try RecordingWriter(inputFormat: format, preserveOriginalAudio: preserveOriginalAudio,
-                                         onLevel: { _ in }, onError: { _ in }, onChunk: request.onChunk)
+                                         onLevel: { _ in }, onError: { _ in }, onChunk: request.onChunk, spool: request.spool)
         self.writer = writer
         let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 8_000))
         buffer.frameLength = 8_000
@@ -528,20 +530,26 @@ private final class QueueAudioHardware: AudioCaptureHardware, @unchecked Sendabl
     func cancel() { writer?.cancel(); writer = nil }
 }
 
-/// Keeps finish responses pending while accepting unrelated recordings. Using
-/// URLSession and the real uploader exercises take ownership across suspension.
+/// A v2 recording server in memory. HTTP admission/history/receipts use the
+/// real URLSession client; each session's WebSocket is an interactive fake that
+/// acknowledges audio and completes only when a test says so.
 private final class QueueHTTPFixture: @unchecked Sendable {
+    struct FinishValue { let continuationID: UUID? }
     let id = UUID().uuidString.lowercased()
     let session: URLSession
     var endpoint: String { "https://\(id).queue-test" }
     private let lock = NSLock()
-    private var records: [GenerationRecord] = []
-    private var finishRequests: [UUID: QueueURLProtocol] = [:]
-    private var finishValues: [UUID: FinishGenerationRequest] = [:]
+    private var snapshots: [UUID: RecordingSnapshot] = [:]
+    private var order: [UUID] = []
+    private var results: [UUID: GenerationRecord] = [:]
+    private var contexts: [UUID: UUID] = [:]
+    private var stopped = Set<UUID>()
+    private var sockets: [UUID: [QueueRecordingSocket]] = [:]
     private var delivered: [UUID] = []
     private var receiptStatuses: [UUID: String] = [:]
-    private var cancellations: [UUID] = []
-    private var uploadedFrames: [String: Int64] = [:]
+    private var discards: [UUID] = []
+    var created: [UUID] { lock.withLock { order } }
+    var finishing: Set<UUID> { lock.withLock { stopped } }
     private var heldDeliveries: [UUID: QueueURLProtocol] = [:]
     private var holdingDeliveries = false
     private var refreshFailurePath: String?
@@ -555,11 +563,12 @@ private final class QueueHTTPFixture: @unchecked Sendable {
         set { lock.withLock { refreshFailurePath = newValue } }
     }
     var refreshFailures: Int { lock.withLock { failedRefreshes } }
-    var created: [UUID] { lock.withLock { records.map(\.id) } }
-    var finishing: Set<UUID> { lock.withLock { Set(finishRequests.keys) } }
     var deliveries: [UUID] { lock.withLock { delivered } }
+    var cancelled: [UUID] { lock.withLock { discards } }
     func receipt(_ id: UUID) -> String? { lock.withLock { receiptStatuses[id] } }
-    var cancelled: [UUID] { lock.withLock { cancellations } }
+    func finishValue(_ id: UUID) -> FinishValue? {
+        lock.withLock { stopped.contains(id) ? FinishValue(continuationID: contexts[id]) : nil }
+    }
 
     init() {
         let configuration = URLSessionConfiguration.ephemeral
@@ -570,36 +579,96 @@ private final class QueueHTTPFixture: @unchecked Sendable {
 
     deinit { QueueURLProtocol.unregister(id) }
 
-    func finishValue(_ id: UUID) -> FinishGenerationRequest? { lock.withLock { finishValues[id] } }
-
     func releaseDelivery(_ id: UUID) {
         let response = lock.withLock { heldDeliveries.removeValue(forKey: id) }
         response?.respondEmpty()
     }
 
-    func fail(_ id: UUID, message: String) {
-        let response = lock.withLock { () -> (QueueURLProtocol, GenerationRecord)? in
-            guard let pending = finishRequests[id], let index = records.firstIndex(where: { $0.id == id }) else { return nil }
-            records[index].status = .failed
-            records[index].error = message
-            return (pending, records[index])
-        }
-        if let (pending, record) = response { pending.respond(record) }
+    func socket(for request: URLRequest) throws -> any RecordingSocket {
+        let parts = try XCTUnwrap(request.url).pathComponents
+        let recording = try XCTUnwrap(UUID(uuidString: parts[3]))
+        let socket = QueueRecordingSocket(fixture: self, recording: recording)
+        lock.withLock { sockets[recording, default: []].append(socket) }
+        return socket
     }
 
     func complete(_ id: UUID, text: String, listNextNumber: Int? = nil) {
-        let response = lock.withLock { () -> (QueueURLProtocol, GenerationRecord)? in
-            guard let pending = finishRequests[id], let index = records.firstIndex(where: { $0.id == id }) else { return nil }
-            records[index].status = .completed
-            records[index].finalText = text
-            records[index].insertionText = text
+        finishProcessing(id) { snapshot in
+            snapshot.processingState = .completed
+            var result = ServerClient.generationSummary(snapshot)
+            result.status = .completed
+            result.finalText = text
+            result.insertionText = text
             if let listNextNumber {
-                records[index].continuation = .init(list: .init(style: .numbered, nextNumber: listNextNumber),
-                                                  preview: text, boundary: .line)
+                result.continuation = .init(list: .init(style: .numbered, nextNumber: listNextNumber),
+                                            preview: text, boundary: .line)
             }
-            return (pending, records[index])
+            return result
         }
-        if let (pending, record) = response { pending.respond(record) }
+    }
+
+    func fail(_ id: UUID, message: String) {
+        finishProcessing(id) { snapshot in
+            snapshot.processingState = .failed
+            snapshot.error = message
+            return nil
+        }
+    }
+
+    private func finishProcessing(_ id: UUID, _ update: (inout RecordingSnapshot) -> GenerationRecord?) {
+        let (message, targets) = lock.withLock { () -> (RecordingServerMessage?, [QueueRecordingSocket]) in
+            guard var snapshot = snapshots[id] else { return (nil, []) }
+            snapshot.revision += 1
+            results[id] = update(&snapshot)
+            snapshots[id] = snapshot
+            return (.progress(snapshot), sockets[id] ?? [])
+        }
+        if let message { targets.forEach { $0.push(message) } }
+    }
+
+    /// Applies one client control or audio message and returns the server reply.
+    fileprivate func handle(_ recording: UUID, control: RecordingClientMessage?, audio: RecordingAudioMessage?) -> RecordingServerMessage? {
+        lock.withLock {
+            guard var snapshot = snapshots[recording] else {
+                return .error(.init(code: "not_found", message: "Recording not found.", retryable: false))
+            }
+            snapshot.revision += 1
+            defer { snapshots[recording] = snapshot }
+            if let audio {
+                let header = audio.header
+                let index = snapshot.streams.firstIndex { $0.runID == header.runID && $0.kind == header.kind }
+                var stream = index.map { snapshot.streams[$0] }
+                    ?? RecordingStreamCheckpoint(runID: header.runID, kind: header.kind, format: header.format)
+                stream.nextSequence = header.sequence + 1
+                stream.frameCount = header.firstFrame + header.frameCount
+                if let index { snapshot.streams[index] = stream } else { snapshot.streams.append(stream) }
+                if header.kind == .inference { snapshot.uploadedFrames = snapshot.streams.filter { $0.kind == .inference }.reduce(0) { $0 + $1.frameCount } }
+                return .ack(.init(runID: header.runID, kind: header.kind, nextSequence: stream.nextSequence,
+                                  frameCount: stream.frameCount, revision: snapshot.revision))
+            }
+            switch control {
+            case .resume:
+                snapshot.epoch += 1
+                return .snapshot(snapshot)
+            case .context(let request):
+                contexts[recording] = request.continuationID
+                snapshot.continuationID = request.continuationID
+                return .snapshot(snapshot)
+            case .pause(let request):
+                snapshot.closedRuns = (snapshot.closedRuns ?? []) + request.runs.filter { !(snapshot.closedRuns ?? []).contains($0) }
+                snapshot.runTimings = request.runTimings
+                snapshot.captureState = .interrupted
+                return .snapshot(snapshot)
+            case .stop(let request):
+                stopped.insert(recording)
+                snapshot.stopRuns = request.runs
+                snapshot.captureState = .stopped
+                if snapshot.processingState == .queued { snapshot.processingState = .processing }
+                return .progress(snapshot)
+            case .ping, .none:
+                return .snapshot(snapshot)
+            }
+        }
     }
 
     func handle(_ transport: QueueURLProtocol) throws {
@@ -616,39 +685,34 @@ private final class QueueHTTPFixture: @unchecked Sendable {
             transport.respond(ServerHealth(ready: true, speech: model, proofreading: model))
         } else if parts.last == "preferences" {
             transport.respond(PreferencesSnapshot())
-        } else if parts.last == "generations", request.httpMethod == "POST" {
-            let record = GenerationRecord(requestID: UUID(), device: .init(id: "test", name: "Test"), mode: .test, settings: .init())
-            lock.withLock { records.append(record) }
-            transport.respond(record)
-        } else if parts.last == "generations" {
-            transport.respond(GenerationPage(items: lock.withLock { records }))
-        } else if parts.count >= 4, let id = UUID(uuidString: parts[3]) {
-            switch parts.last {
-            case "finish":
-                let value = try SottoDuoAPI.decodeWire(FinishGenerationRequest.self, from: body(request))
-                lock.withLock { finishValues[id] = value; finishRequests[id] = transport }
-            case "cancel":
-                lock.withLock { cancellations.append(id) }
+        } else if parts == ["/", "v1", "generations"] {
+            transport.respond(GenerationPage(items: []))
+        } else if parts == ["/", "v2", "recordings", "capabilities"] {
+            transport.respondWire(RecordingCapabilities())
+        } else if parts == ["/", "v2", "recordings"], request.httpMethod == "POST" {
+            let create = try RecordingWire.decoder().decode(CreateGenerationRequest.self, from: body(request))
+            let snapshot = RecordingSnapshot(id: UUID(), requestID: create.requestID, device: create.device,
+                                             mode: create.mode, settings: .init())
+            lock.withLock { snapshots[snapshot.id] = snapshot; order.append(snapshot.id) }
+            transport.respondWire(snapshot)
+        } else if parts == ["/", "v2", "recordings"] {
+            transport.respondWire(RecordingPage(items: lock.withLock { order.compactMap { snapshots[$0] } }))
+        } else if parts.count >= 4, parts[1] == "v2", let id = UUID(uuidString: parts[3]) {
+            switch parts.count == 4 ? "detail" : parts.last {
+            case "detail":
+                let detail = lock.withLock { snapshots[id].map { RecordingDetail(snapshot: $0, result: results[id]) } }
+                if let detail { transport.respondWire(detail) } else { transport.respondEmpty(status: 404) }
+            case "discard":
+                lock.withLock { discards.append(id) }
                 transport.respondEmpty()
             case "delivery":
-                let receipt = try SottoDuoAPI.decodeWire(DeliveryReceipt.self, from: body(request))
+                let receipt = try RecordingWire.decoder().decode(DeliveryReceipt.self, from: body(request))
                 let held = lock.withLock {
                     delivered.append(id); receiptStatuses[id] = receipt.status
                     if holdingDeliveries { heldDeliveries[id] = transport }
                     return holdingDeliveries
                 }
                 if !held { transport.respondEmpty() }
-            case "inference", "original":
-                let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!
-                let sequence = Int(query.first { $0.name == "sequence" }!.value!)!
-                let channels = Int(query.first { $0.name == "channels" }!.value!)!
-                let bytes = try body(request).count
-                let frames = lock.withLock {
-                    let key = "\(id)-\(parts.last!)"
-                    uploadedFrames[key, default: 0] += Int64(bytes / (4 * channels))
-                    return uploadedFrames[key]!
-                }
-                transport.respond(AudioChunkReceipt(nextSequence: sequence + 1, frameCount: frames))
             default: transport.respondEmpty(status: 404)
             }
         } else { transport.respondEmpty(status: 404) }
@@ -669,6 +733,41 @@ private final class QueueHTTPFixture: @unchecked Sendable {
         }
         return data
     }
+}
+
+/// One fake WebSocket connection; replies are queued in arrival order.
+private final class QueueRecordingSocket: RecordingSocket, @unchecked Sendable {
+    private let fixture: QueueHTTPFixture
+    private let recording: UUID
+    private let lock = NSLock()
+    private var inbox: [RecordingServerMessage] = []
+    private var closed = false
+
+    init(fixture: QueueHTTPFixture, recording: UUID) { self.fixture = fixture; self.recording = recording }
+
+    func push(_ message: RecordingServerMessage) { lock.withLock { if !closed { inbox.append(message) } } }
+
+    func send(binary: Data) async throws {
+        if let reply = fixture.handle(recording, control: nil, audio: try RecordingWire.decodeAudio(binary)) { push(reply) }
+    }
+
+    func send(control: Data) async throws {
+        let message = try RecordingWire.decoder().decode(RecordingClientMessage.self, from: control)
+        if let reply = fixture.handle(recording, control: message, audio: nil) { push(reply) }
+    }
+
+    func receive() async throws -> Data {
+        while true {
+            let next = try lock.withLock { () -> RecordingServerMessage? in
+                if closed { throw URLError(.networkConnectionLost) }
+                return inbox.isEmpty ? nil : inbox.removeFirst()
+            }
+            if let next { return try RecordingWire.encoder().encode(next) }
+            try await Task.sleep(for: .milliseconds(2))
+        }
+    }
+
+    func close() { lock.withLock { closed = true } }
 }
 
 private final class QueueURLProtocol: URLProtocol, @unchecked Sendable {
@@ -695,6 +794,10 @@ private final class QueueURLProtocol: URLProtocol, @unchecked Sendable {
         do { respondData(try SottoDuoAPI.encodeWire(value), status: 200) }
         catch { client?.urlProtocol(self, didFailWithError: error) }
     }
+    func respondWire<T: Encodable>(_ value: T) {
+        do { respondData(try RecordingWire.encoder().encode(value), status: 200) }
+        catch { client?.urlProtocol(self, didFailWithError: error) }
+    }
     func respondEmpty(status: Int = 200) { respondData(Data(), status: status) }
     private func respondData(_ data: Data, status: Int) {
         let shouldRespond = responseLock.withLock {
@@ -710,3 +813,4 @@ private final class QueueURLProtocol: URLProtocol, @unchecked Sendable {
         client?.urlProtocolDidFinishLoading(self)
     }
 }
+

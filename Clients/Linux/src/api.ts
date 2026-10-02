@@ -2,6 +2,8 @@ import { validateBody } from "../../../Server/src/validation.ts";
 import type { components } from "../../../Server/src/generated/api.ts";
 import type { SourceID } from "./sources.ts";
 export type Generation = components["schemas"]["GenerationRecord"];
+export type Recording = components["schemas"]["RecordingSnapshot"];
+export type RecordingDetail = components["schemas"]["RecordingDetail"];
 export type Device = components["schemas"]["DeviceIdentity"];
 export type CaptureMode = components["schemas"]["StartCaptureRequest"]["mode"];
 function object(value: unknown): value is Record<string, unknown> {
@@ -42,6 +44,7 @@ export class API {
         Authorization: `Bearer ${this.token}`,
         ...(destinationOwner ? { "X-SottoDuo-Destination-Owner": destinationOwner } : {}),
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+        // Legacy routes negotiate these fields; recording routes ignore the headers.
         "X-SottoDuo-Capture": "capture-v1",
         "X-SottoDuo-Recognition": "streaming-v1",
         ...(owner ? { "X-SottoDuo-Capture-Owner": owner } : {}),
@@ -84,21 +87,39 @@ export class API {
       ),
     );
   }
+  async recordingHistory(before?: string) {
+    return validateBody(
+      "RecordingPage",
+      await this.request(
+        `/v2/recordings?limit=30${before ? `&before=${encodeURIComponent(before)}` : ""}`,
+        "GET",
+        undefined,
+        undefined,
+        60_000,
+      ),
+    );
+  }
+  /** Removes a settled recording session from shared history. */
+  async discardRecording(id: string) {
+    await this.request(`/v2/recordings/${encodeURIComponent(id)}/discard`, "POST", {});
+  }
   async deleteHistory(id: string) {
     await this.request(`/v1/generations/${encodeURIComponent(id)}`, "DELETE");
   }
   async historyAudio(
     id: string,
     filename: "inference.wav" | "original.wav" | components["schemas"]["WisprFlowArtifactName"],
+    recording = false,
+    runID?: string,
   ) {
-    const response = await fetch(
-      `${this.endpoint}/v1/generations/${encodeURIComponent(id)}/artifacts/${filename}`,
-      {
-        redirect: "error",
-        signal: AbortSignal.timeout(300_000),
-        headers: { Authorization: `Bearer ${this.token}` },
-      },
-    );
+    const path = recording
+      ? `/v2/recordings/${encodeURIComponent(id)}/audio/${filename.replace(".wav", "")}${runID ? `/${encodeURIComponent(runID)}` : ""}`
+      : `/v1/generations/${encodeURIComponent(id)}/artifacts/${filename}`;
+    const response = await fetch(`${this.endpoint}${path}`, {
+      redirect: "error",
+      signal: AbortSignal.timeout(300_000),
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
     if (!response.ok) {
       await response.body?.cancel();
       throw new APIError(response.status, "audio_unavailable");
@@ -126,6 +147,7 @@ export class API {
   async sources() {
     return validateBody("AudioSourceList", await this.request("/v1/audio-sources")).sources;
   }
+  /** Admits a durable recording session fed by a server-hosted microphone. */
   async start(
     requestID: string,
     device: Device,
@@ -136,9 +158,9 @@ export class API {
     buttonTicket?: string,
   ) {
     return validateBody(
-      "GenerationRecord",
+      "RecordingSnapshot",
       await this.request(
-        "/v1/captures",
+        "/v2/captures",
         "POST",
         { requestID, device, mode, source, buttonTicket },
         owner,
@@ -147,16 +169,25 @@ export class API {
     );
   }
   async heartbeat(id: string, owner: string) {
-    await this.request(`/v1/generations/${id}/capture/heartbeat`, "POST", undefined, owner, 1500);
+    await this.request(`/v2/recordings/${id}/capture/heartbeat`, "POST", undefined, owner, 1500);
   }
   async stop(id: string, owner: string) {
     return validateBody(
-      "GenerationRecord",
-      await this.request(`/v1/generations/${id}/capture/stop`, "POST", {}, owner, 5500),
+      "RecordingSnapshot",
+      await this.request(`/v2/recordings/${id}/capture/stop`, "POST", {}, owner, 5500),
+    );
+  }
+  /** Fixes the take's continuation, or none, so processing need not wait for it. */
+  async context(id: string, owner: string, continuationID?: string) {
+    await this.request(
+      `/v2/recordings/${id}/context`,
+      "POST",
+      continuationID ? { continuationID } : {},
+      owner,
     );
   }
   async cancel(id: string, owner: string) {
-    await this.request(`/v1/generations/${id}/cancel`, "POST", {}, owner);
+    await this.request(`/v2/recordings/${id}/discard`, "POST", {}, owner);
   }
   async get(id: string, timeout = 3000) {
     return validateBody(
@@ -164,17 +195,17 @@ export class API {
       await this.request(`/v1/generations/${id}`, "GET", undefined, undefined, timeout),
     );
   }
-  async events(id: string, signal: AbortSignal, update: (record: Generation) => void) {
-    const response = await fetch(`${this.endpoint}/v1/generations/${id}/events`, {
+  async recording(id: string, timeout = 3000): Promise<RecordingDetail> {
+    return validateBody(
+      "RecordingDetail",
+      await this.request(`/v2/recordings/${id}`, "GET", undefined, undefined, timeout),
+    );
+  }
+  async events(id: string, signal: AbortSignal, update: (snapshot: Recording) => void) {
+    const response = await fetch(`${this.endpoint}/v2/recordings/${id}/events`, {
       redirect: "error",
       signal,
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        Accept: "application/x-ndjson",
-        "X-SottoDuo-Capture": "capture-v1",
-        "X-SottoDuo-Recognition": "streaming-v1",
-        "X-SottoDuo-Feedback": "compact-v1",
-      },
+      headers: { Authorization: `Bearer ${this.token}`, Accept: "application/x-ndjson" },
     });
     if (!response.ok || !response.body) {
       await response.body?.cancel();
@@ -183,7 +214,6 @@ export class API {
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8", { fatal: true });
     let pending = "";
-    let previous: Generation | undefined;
     try {
       while (true) {
         const { value, done } = await reader.read();
@@ -196,26 +226,15 @@ export class API {
           pending = pending.slice(newline + 1);
           if (!line.trim()) continue;
           signal.throwIfAborted();
-          const value: unknown = JSON.parse(line);
-          const delta = object(value) && "feedbackDelta" in value ? value : undefined;
-          if (delta && (delta.feedbackDelta !== 1 || !previous || delta.id !== id))
-            throw new Error("Invalid feedback update.");
-          const record = validateBody(
-            "GenerationRecord",
-            delta
-              ? {
-                  ...previous,
-                  status: delta.status,
-                  capture: delta.capture ?? undefined,
-                  recognition: delta.recognition ?? undefined,
-                  progress: delta.progress ?? undefined,
-                }
-              : value,
-          );
-          if (record.id !== id) throw new Error("Mismatched feedback record.");
-          previous = record;
-          update(record);
-          if (["completed", "failed", "cancelled"].includes(record.status)) return;
+          const snapshot = validateBody("RecordingSnapshot", JSON.parse(line));
+          if (snapshot.id !== id) throw new Error("Mismatched feedback record.");
+          update(snapshot);
+          if (
+            snapshot.captureState === "discarded" ||
+            snapshot.processingState === "completed" ||
+            snapshot.processingState === "failed"
+          )
+            return;
         }
         if (pending.length > 2 * 1024 * 1024) throw new Error("Oversized feedback record.");
       }
@@ -226,7 +245,7 @@ export class API {
   }
   async delivery(id: string, owner: string, status: string) {
     await this.request(
-      `/v1/generations/${id}/delivery`,
+      `/v2/recordings/${id}/delivery`,
       "POST",
       { status, reportedAt: new Date().toISOString() },
       owner,

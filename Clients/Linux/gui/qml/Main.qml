@@ -56,7 +56,6 @@ ApplicationWindow {
         const value = Math.max(0, Math.floor(seconds || 0));
         return Math.floor(value / 60) + ":" + String(value % 60).padStart(2, "0");
     }
-    readonly property string limitNotice: feedback.limitReached ? "Stopped at the recording limit" : activity.phase === "recording" && feedback.remainingSeconds !== undefined && feedback.remainingSeconds !== null && feedback.remainingSeconds <= 30 ? "Recording stops in " + duration(feedback.remainingSeconds) : ""
     property bool busy: snapshot.busy || false
     onBusyChanged: {
         if (!busy && bridge.connected && !snapshot.setupRequired)
@@ -240,7 +239,7 @@ ApplicationWindow {
             if (!bridge.connected)
                 return;
             // Receiver controls display their errors beside the affected settings.
-            if (["history", "historyAudio", "historyArtifact", "deleteHistory", "preferences", "savePreferences", "processingDefaults", "saveMicrophones", "testConnection", "saveConnection", "receiver", "saveButton", "arm", "disarm", "shortcuts", "saveShortcut", "checkShortcut", "endShortcutCheck"].includes(action))
+            if (["history", "historyEntry", "historyAudio", "historyArtifact", "deleteHistory", "preferences", "savePreferences", "processingDefaults", "saveMicrophones", "testConnection", "saveConnection", "receiver", "saveButton", "arm", "disarm", "shortcuts", "saveShortcut", "checkShortcut", "endShortcutCheck"].includes(action))
                 return;
             if (action === "connection") {
                 app.serverConnection = "Server unavailable";

@@ -9,7 +9,7 @@ enum DictationActivity: Equatable {
 
 enum DictationDeliveryStatus: String, Equatable {
     /// `kept` is a cancelled take saved to history without pasting.
-    case none, inserted, copied, tested, listUpdated, unconfirmed, failed, kept
+    case none, inserted, copied, tested, listUpdated, unconfirmed, failed, kept, saved
 }
 
 /// Decides whether a finished take is pasted. A cancelled take waits here
@@ -47,7 +47,8 @@ final class TakeDeliveryGate {
 }
 
 enum DictationTrigger: Equatable {
-    case keyboard, dji(UInt64), remoteButton(UUID), test
+    /// `toggle` starts and stops from the app's own button, independent of the hold key.
+    case keyboard, dji(UInt64), remoteButton(UUID), test, toggle
 
     var buttonTicket: UUID? {
         if case .remoteButton(let ticket) = self { return ticket }
