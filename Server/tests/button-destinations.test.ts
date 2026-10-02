@@ -165,8 +165,7 @@ test("a pinned computer stays selected, dictating elsewhere does not move it, an
     const file = join(directory, "button-target.json");
     const f = fixture(file);
     expect(f.broker.state().buttonTarget).toEqual({ mode: "lastDictated" });
-    f.broker.setTarget({ mode: "device", device: { id: "linux", name: "Linux" } });
-    await Bun.sleep(20);
+    await f.broker.setTarget({ mode: "device", device: { id: "linux", name: "Linux" } });
     expect(f.broker.state().selected?.id).toBe(f.b);
     // A shortcut take on the Mac would select it in lastDictated mode.
     await f.broker.select(f.a, {}, f.owner);
@@ -182,15 +181,38 @@ test("a pinned computer stays selected, dictating elsewhere does not move it, an
     });
     expect(restarted.broker.state().selected?.id).toBe(restarted.b);
 
-    restarted.broker.setTarget({ mode: "off" });
+    await restarted.broker.setTarget({ mode: "off" });
     expect(restarted.broker.state().selected).toBeUndefined();
     await restarted.broker.select(restarted.a, {}, restarted.owner);
     restarted.advance(501);
     restarted.broker.press("epoch", 1);
     expect(restarted.broker.state(restarted.a).command).toBeUndefined();
     expect(restarted.broker.state(restarted.b).command).toBeUndefined();
-    expect(() => restarted.broker.setTarget({ mode: "device" })).toThrow();
+    await expect(restarted.broker.setTarget({ mode: "device" })).rejects.toThrow();
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("a target change lets the current button take finish and never inherits a pinned selection", async () => {
+  const f = fixture();
+  await f.broker.setTarget({ mode: "device", device: { id: "linux", name: "Linux" } });
+  f.broker.press("epoch", 1);
+  const command = f.broker.state(f.b).command!;
+  expect(command.action).toBe("start");
+  await f.broker.setTarget({ mode: "off" });
+  // The take started on Linux keeps recording there.
+  expect(f.broker.state(f.b).command?.id).toBe(command.id);
+  f.broker.complete(f.b, command.takeID, f.owner);
+  expect(f.broker.state().selected).toBeUndefined();
+  await f.broker.setTarget({ mode: "device", device: { id: "linux", name: "Linux" } });
+  expect(f.broker.state().selected?.id).toBe(f.b);
+  // Back to "last computer I dictated on": nothing is selected until a shortcut take.
+  await f.broker.setTarget({ mode: "lastDictated" });
+  expect(f.broker.state().selected).toBeUndefined();
+});
+test("a target that cannot be saved is reported and not applied", async () => {
+  const f = fixture("/nonexistent-sottoduo-directory/button-target.json");
+  await expect(f.broker.setTarget({ mode: "off" })).rejects.toThrow();
+  expect(f.broker.state().buttonTarget).toEqual({ mode: "lastDictated" });
 });

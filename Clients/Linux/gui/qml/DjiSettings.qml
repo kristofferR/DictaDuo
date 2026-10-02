@@ -81,8 +81,9 @@ Group {
             return checking ? "Checking receiver…" : "Receiver has not been checked.";
         const source = receiver.source;
         const place = hostLabel ? "Plugged into " + hostLabel + " · " : "";
+        // Other computers only see the receiver when it is shared with them.
         if (!source && receiver.reported)
-            return place + (receiver.available ? "transmitter linked" : "not ready");
+            return place + "not shared with this computer. Share it on " + (hostLabel || "the server's computer") + ".";
         if (!source)
             return "No DJI receiver found. Plug it into " + (hostLabel || "the server's computer") + ".";
         if (source.link === "connected")
@@ -182,7 +183,7 @@ Group {
             currentIndex: root.targetIndex
             // A new model resets the index; restore the server's target.
             onModelChanged: currentIndex = Qt.binding(() => root.targetIndex)
-            enabled: bridge.connected && root.targetSupported && !root.targeting && !bridge.preview
+            enabled: bridge.connected && root.targetSupported && !root.targeting && !bridge.preview && !root.ui.busy
             onActivated: root.chooseTarget(currentIndex)
         }
     }

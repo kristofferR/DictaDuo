@@ -63,21 +63,25 @@ export class ButtonDestinations {
     this.timer.unref();
   }
   /** Where the button types. Shared by every destination and kept across restarts. */
-  setTarget(target: Target) {
+  async setTarget(target: Target) {
     if (target.mode === "device" && !target.device)
       throw new ServiceError(400, "invalid_button_target", "Choose a computer for the button.");
-    this.target =
+    const next: Target =
       target.mode === "device"
         ? { mode: "device", device: structuredClone(target.device!) }
         : { mode: target.mode };
-    if (target.mode !== "lastDictated") this.disarm();
     const file = this.targetFile;
     if (file) {
-      const data = JSON.stringify(this.target);
-      this.targetWrites = this.targetWrites
-        .then(() => atomicPrivateWrite(file, data))
-        .catch(() => {});
+      // Saved before it applies, so a failed write is reported and changes nothing.
+      const data = JSON.stringify(next);
+      const write = this.targetWrites.then(() => atomicPrivateWrite(file, data));
+      this.targetWrites = write.catch(() => {});
+      await write;
     }
+    const changed = JSON.stringify(next) !== JSON.stringify(this.target);
+    this.target = next;
+    // A take already recording finishes where it started; the new target applies after.
+    if (changed && !this.route) this.selected = undefined;
     return this.state();
   }
   /** A pinned computer is selected whenever it is connected; "off" never selects. */

@@ -41,13 +41,18 @@ export class MicrophoneSharing {
     this.persist();
   }
 
-  set(source: Identity, shared: boolean) {
+  /** Saved before it applies, so a failed write is reported and sharing is unchanged. */
+  async set(source: Identity, shared: boolean) {
+    const next = new Set(this.shared);
+    if (shared) next.add(key(source));
+    else next.delete(key(source));
+    const known = new Map(this.known).set(key(source), structuredClone(source));
+    if (this.file) await this.write(known, next);
+    // Apply only this change: discovery may have recorded other sources meanwhile.
     this.known.set(key(source), structuredClone(source));
     if (shared) this.shared.add(key(source));
     else this.shared.delete(key(source));
     this.seeded = true;
-    this.persist();
-    return this.writes;
   }
 
   /** Waits for pending writes, so tests and shutdown see the saved state. */
@@ -55,16 +60,22 @@ export class MicrophoneSharing {
     return this.writes;
   }
 
+  /** Discovery records new sources in the background; a later write retries it. */
   private persist() {
-    const file = this.file;
-    if (!file) return;
+    if (this.file) void this.write(this.known, this.shared).catch(() => {});
+  }
+
+  private write(known: Map<string, Identity>, shared: Set<string>) {
+    const file = this.file!;
     const saved: Saved = {
       version: 1,
-      known: [...this.known.values()],
-      shared: [...this.known.values()].filter((source) => this.shared.has(key(source))),
+      known: [...known.values()],
+      shared: [...known.values()].filter((source) => shared.has(key(source))),
     };
     const data = JSON.stringify(saved);
-    this.writes = this.writes.then(() => atomicPrivateWrite(file, data)).catch(() => {});
+    const write = this.writes.then(() => atomicPrivateWrite(file, data));
+    this.writes = write.catch(() => {});
+    return write;
   }
 }
 
