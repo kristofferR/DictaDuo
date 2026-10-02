@@ -4,13 +4,19 @@ Ref #9. This is the USB receiver path verified on Kris's Mic Mini 2S (2ca3:4011)
 
 ## Everyday behavior
 
-Enable server-button reception on each participating client. Use **Use this Mac** in Mac Device preferences or `sottoduo arm` on Linux. A successful computer-shortcut dictation also selects that computer, provided DJI is available. Microphone tests, local DJI-button takes, ordinary typing, and pointer movement never select a destination. A later explicit selection takes precedence over an older in-flight shortcut take.
+Enable **Let the DJI button type here** on each participating client (Microphone page). **Button types into** chooses the target and is stored on the server for every computer (`PUT /v1/button-destinations/target`):
+
+- **Last computer I dictated on** (default): a successful computer-shortcut dictation selects that computer, provided DJI is available. `sottoduo arm` on Linux still selects explicitly in this mode.
+- **Always <computer>**: that computer is selected whenever it is connected, including after lock, restart or reconnect. Dictating elsewhere does not move it.
+- **Nowhere**: taps are ignored without turning the receiver off.
+
+In the default mode, microphone tests, local DJI-button takes, ordinary typing, and pointer movement never select a destination. A later explicit selection takes precedence over an older in-flight shortcut take.
 
 One transmitter linking-button tap requests recording on the selected computer. That client establishes its text target before admitting capture. Tap again to stop. A button take uses the configured USB DJI source only, even when the computer's normal microphone profile would choose something else. Keyboard takes retain their existing pre-ready fallback. No mid-recording source switch is supported.
 
 Source and destination are pinned for the whole take. Menu/hotkey release only stops a keyboard take. Explicit cancel cancels the current local take. A button start received while that client is busy is declined; it cannot stop a keyboard take. A second deliberate tap during preparation cancels and disarms instead of leaving a delayed recording queued. Taps during stopping/processing do not start another take.
 
-Registration is per process with a fresh 256-bit owner secret and five-second lease. Clients renew once per polling cycle, using 1.5-second request timeouts and a one-second pause. Commands also expire within five seconds. No selection or button command is persisted. Lock, sleep, client/network loss, receiver monitor loss, unavailable source, or server restart clears selection. Unlock/reconnect registers the client again without selecting it. Use a fresh shortcut take or explicit selection to re-arm. A failed capture remains in history as appropriate and never resumes for delivery after restart.
+Registration is per process with a fresh 256-bit owner secret and five-second lease. Clients renew once per polling cycle, using 1.5-second request timeouts and a one-second pause. Commands also expire within five seconds. No button command is persisted, and only the target choice survives a restart. In the default mode, lock, sleep, client/network loss, receiver monitor loss, unavailable source, or server restart clears selection; unlock/reconnect registers the client again without selecting it, so use a fresh shortcut take or explicit selection to re-arm. A pinned computer is selected again as soon as it reconnects. A failed capture remains in history as appropriate and never resumes for delivery after restart.
 
 Mac settings show the chosen computer and receiver availability. Linux exposes `sottoduo button-status` and desktop capture notifications. This implementation does not control transmitter LEDs, beeps, or haptics. The microphone cannot confirm destination selection itself; check the client before dictating.
 

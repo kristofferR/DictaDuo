@@ -33,6 +33,16 @@ public protocol APIProtocol: Sendable {
     /// - Remark: HTTP `GET /v1/audio-sources`.
     /// - Remark: Generated from `#/paths//v1/audio-sources/get(listAudioSources)`.
     func listAudioSources(_ input: Operations.ListAudioSources.Input) async throws -> Operations.ListAudioSources.Output
+    /// Shares or stops sharing one source with other computers. Only a client on the computer that hosts the sources may change this.
+    ///
+    /// - Remark: HTTP `PUT /v1/audio-sources/sharing`.
+    /// - Remark: Generated from `#/paths//v1/audio-sources/sharing/put(setAudioSourceSharing)`.
+    func setAudioSourceSharing(_ input: Operations.SetAudioSourceSharing.Input) async throws -> Operations.SetAudioSourceSharing.Output
+    /// Chooses where the DJI button types. Stored on the server and shared by every destination.
+    ///
+    /// - Remark: HTTP `PUT /v1/button-destinations/target`.
+    /// - Remark: Generated from `#/paths//v1/button-destinations/target/put(setButtonTarget)`.
+    func setButtonTarget(_ input: Operations.SetButtonTarget.Input) async throws -> Operations.SetButtonTarget.Output
     /// - Remark: HTTP `POST /v2/captures`.
     /// - Remark: Generated from `#/paths//v2/captures/post(startCapture)`.
     func startCapture(_ input: Operations.StartCapture.Input) async throws -> Operations.StartCapture.Output
@@ -223,6 +233,32 @@ extension APIProtocol {
     /// - Remark: Generated from `#/paths//v1/audio-sources/get(listAudioSources)`.
     public func listAudioSources(headers: Operations.ListAudioSources.Input.Headers = .init()) async throws -> Operations.ListAudioSources.Output {
         try await listAudioSources(Operations.ListAudioSources.Input(headers: headers))
+    }
+    /// Shares or stops sharing one source with other computers. Only a client on the computer that hosts the sources may change this.
+    ///
+    /// - Remark: HTTP `PUT /v1/audio-sources/sharing`.
+    /// - Remark: Generated from `#/paths//v1/audio-sources/sharing/put(setAudioSourceSharing)`.
+    public func setAudioSourceSharing(
+        headers: Operations.SetAudioSourceSharing.Input.Headers = .init(),
+        body: Operations.SetAudioSourceSharing.Input.Body
+    ) async throws -> Operations.SetAudioSourceSharing.Output {
+        try await setAudioSourceSharing(Operations.SetAudioSourceSharing.Input(
+            headers: headers,
+            body: body
+        ))
+    }
+    /// Chooses where the DJI button types. Stored on the server and shared by every destination.
+    ///
+    /// - Remark: HTTP `PUT /v1/button-destinations/target`.
+    /// - Remark: Generated from `#/paths//v1/button-destinations/target/put(setButtonTarget)`.
+    public func setButtonTarget(
+        headers: Operations.SetButtonTarget.Input.Headers = .init(),
+        body: Operations.SetButtonTarget.Input.Body
+    ) async throws -> Operations.SetButtonTarget.Output {
+        try await setButtonTarget(Operations.SetButtonTarget.Input(
+            headers: headers,
+            body: body
+        ))
     }
     /// - Remark: HTTP `POST /v2/captures`.
     /// - Remark: Generated from `#/paths//v2/captures/post(startCapture)`.
