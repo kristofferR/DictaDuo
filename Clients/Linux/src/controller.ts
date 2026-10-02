@@ -118,6 +118,8 @@ export class Controller {
   start(button?: Take["button"], preview = false): boolean {
     if (this.take || !this.captureAllowed()) return false;
     this.result = undefined;
+    // Later cancels target this take, not an earlier one still cleaning up.
+    this.cancelling = undefined;
     const startedAt = Date.now();
     const take: Take = {
       owner: randomBytes(32).toString("hex"),
@@ -211,13 +213,16 @@ export class Controller {
   }
   /** Cancels the take the overlay shows; earlier takes keep processing. */
   async cancel(): Promise<void> {
-    this.result = undefined;
     // The overlay shows the cancelled take until its cleanup finishes, so a repeat
-    // joins that cancellation unless a new take has started recording.
-    if (this.cancelling && !this.held) return this.cancelling;
+    // joins that cancellation unless a new take has started since.
+    if (this.cancelling) return this.cancelling;
     const take = this.foreground;
     if (take) await this.cancelOne(take);
-    else this.announce("cancelled", "cancelled");
+    else {
+      // Earlier takes' results stay recoverable while another take is cancelled.
+      this.result = undefined;
+      this.announce("cancelled", "cancelled");
+    }
   }
   /** Cancels every take, or only those not yet delivering. */
   async cancelAll(includeDelivery = true): Promise<void> {
@@ -271,7 +276,9 @@ export class Controller {
     const cleanup = this.cancelTake(take);
     this.cancelling = cleanup;
     await cleanup;
-    if (this.cancelling === cleanup) this.cancelling = undefined;
+    // A newer take or cancellation owns the overlay now.
+    if (this.cancelling !== cleanup) return;
+    this.cancelling = undefined;
     const next = this.foreground;
     if (next) {
       this.feedback = next.feedback;

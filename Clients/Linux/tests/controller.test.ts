@@ -612,13 +612,13 @@ test("GUI microphone tests retain a preview without attempting desktop insertion
   expect(selected).toBe(false);
 });
 
-function heldInference() {
+function heldInference(call = 0) {
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
   let calls = 0;
   class HeldInference extends FakeInference {
     override async transcribe(...args: Parameters<FakeInference["transcribe"]>) {
-      if (calls++ === 0) await held;
+      if (calls++ === call) await held;
       return super.transcribe(...args);
     }
   }
@@ -884,6 +884,55 @@ test("a repeated cancel during slow cleanup keeps the earlier processing take", 
     held.release();
     await f.controller.settled();
     expect(ids.delivered).toEqual([ids.started[0]!]);
+  } finally {
+    held.release();
+    release();
+  }
+});
+
+test("cancelling the newest take keeps an earlier take's result", async () => {
+  const held = heldInference(1);
+  const f = await fixture(held.inference);
+  const ids = track(f);
+  f.delivery("preview");
+  try {
+    await record(f);
+    f.controller.stop();
+    await record(f);
+    f.controller.stop();
+    await until(() => f.controller.result !== undefined);
+    await f.controller.cancel();
+    expect(f.controller.result?.id).toBe(ids.started[0]);
+  } finally {
+    held.release();
+  }
+  await f.controller.settled();
+  expect(ids.delivered).toEqual([ids.started[0]!]);
+});
+
+test("a cancel after a newer take starts targets that take, not an earlier cleanup", async () => {
+  const held = heldInference();
+  const f = await fixture(held.inference);
+  const ids = track(f);
+  const cancel = f.api.cancel.bind(f.api);
+  let release!: () => void;
+  const cleanupGate = new Promise<void>((resolve) => (release = resolve));
+  f.api.cancel = async (...args) => {
+    await cancel(...args);
+    await cleanupGate;
+  };
+  try {
+    await record(f);
+    const first = f.controller.cancel();
+    await record(f);
+    f.controller.stop();
+    await until(async () => (await f.api.get(ids.started[1]!)).capture?.state === "sealed");
+    await f.controller.cancel();
+    held.release();
+    release();
+    await first;
+    await f.controller.settled();
+    expect(f.deliveries()).toBe(0);
   } finally {
     held.release();
     release();
