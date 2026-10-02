@@ -115,6 +115,8 @@ ApplicationWindow {
     readonly property string connection: bridge.connected ? (snapshot.setupRequired ? "Dictation needs setup" : serverConnection) : bridge.connectionStatus === "setupRequired" ? "Dictation needs setup" : bridge.connectionStatus === "connecting" ? "Connecting dictation…" : "Dictation unavailable"
     property string notice: ""
     property bool serverReady: false
+    // The last server health report; History reads what the server supports from it.
+    property var health: null
     property var pages: ["Dictation", "History", "Microphone", "Server preferences", "This computer"]
     onPageChanged: if (page === 2) refreshSources()
     palette.window: c.canvas
@@ -252,6 +254,7 @@ ApplicationWindow {
             if (action === "connection") {
                 app.serverConnection = data.ready ? "Server online" : data.message || "Server not ready";
                 app.serverReady = data.ready;
+                app.health = data;
             }
             if (action === "sources") {
                 app.sources = data;
@@ -292,11 +295,12 @@ ApplicationWindow {
             if (!bridge.connected)
                 return;
             // Receiver, sharing and DJI button controls display their errors beside the affected settings.
-            if (["history", "historyEntry", "historyAudio", "historyArtifact", "deleteHistory", "preferences", "savePreferences", "processingDefaults", "saveMicrophones", "testConnection", "saveConnection", "receiver", "saveButton", "setButtonTarget", "setSharing", "shortcuts", "saveShortcut", "checkShortcut", "endShortcutCheck"].includes(action))
+            if (["history", "historyEntry", "retryHistory", "historyAudio", "historyArtifact", "deleteHistory", "preferences", "savePreferences", "processingDefaults", "saveMicrophones", "testConnection", "saveConnection", "receiver", "saveButton", "setButtonTarget", "setSharing", "shortcuts", "saveShortcut", "checkShortcut", "endShortcutCheck"].includes(action))
                 return;
             if (action === "connection") {
                 app.serverConnection = "Server unavailable";
                 app.serverReady = false;
+                app.health = null;
             } else if (action === "sources") {
                 app.sourcesChecked = false;
                 app.sources = {

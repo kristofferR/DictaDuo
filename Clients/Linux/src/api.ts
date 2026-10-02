@@ -111,6 +111,32 @@ export class API {
   async discardRecording(id: string) {
     await this.request(`/v2/recordings/${encodeURIComponent(id)}/discard`, "POST", {});
   }
+  /** Transcribes a settled session's saved audio again. Nothing is pasted. */
+  async retryRecording(id: string) {
+    return validateBody(
+      "RecordingSnapshot",
+      await this.request(
+        `/v2/recordings/${encodeURIComponent(id)}/retry`,
+        "POST",
+        undefined,
+        undefined,
+        15_000,
+      ),
+    );
+  }
+  /** Transcribes a settled legacy generation's saved audio again. Nothing is pasted. */
+  async retryGeneration(id: string) {
+    return validateBody(
+      "GenerationRecord",
+      await this.request(
+        `/v1/generations/${encodeURIComponent(id)}/retry`,
+        "POST",
+        undefined,
+        undefined,
+        15_000,
+      ),
+    );
+  }
   async deleteHistory(id: string) {
     await this.request(`/v1/generations/${encodeURIComponent(id)}`, "DELETE");
   }

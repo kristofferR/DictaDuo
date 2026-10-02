@@ -8,7 +8,7 @@ import { GenerationService } from "../../../Server/src/generation-service.ts";
 import { createHTTPServer } from "../../../Server/src/http-server.ts";
 import { sha256 } from "../../../Server/src/storage.ts";
 import { FakeInference, openCaptureServices } from "../../../Server/tests/support.ts";
-import { API, type Generation, type Recording } from "../src/api.ts";
+import { API, APIError, type Generation, type Recording } from "../src/api.ts";
 import { HistoryTools } from "../src/history.ts";
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -410,4 +410,85 @@ test("a paused long recording is labelled paused and can be deleted", async () =
   expect(item).toMatchObject({ status: "queued", paused: true });
   await tools.action("deleteHistory", { id: snapshot.id, server: api.endpoint });
   expect(discarded).toEqual([snapshot.id]);
+});
+
+test("Transcribe again replaces a finished take's transcript and is followed until it settles", async () => {
+  const { tools, record, complete, address } = await fixture();
+  await complete();
+  const started = await tools.retry({ id: record.id, server: address });
+  expect(started.record).toMatchObject({ id: record.id, status: "queued", finalText: "" });
+  let entry = started.record;
+  for (let count = 0; !["completed", "failed"].includes(entry.status); count++) {
+    if (count > 400) throw Error("Retry did not settle");
+    await Bun.sleep(5);
+    entry = (await tools.entry({ id: record.id, server: address })).record;
+  }
+  expect(entry).toMatchObject({ status: "completed", finalText: "Hello world." });
+  await expect(tools.retry({ id: record.id, server: "https://other.example" })).rejects.toThrow(
+    "server changed",
+  );
+});
+
+test("Transcribe again uses the session or legacy route and explains refusals", async () => {
+  const api = new API("http://127.0.0.1:1", "token");
+  const session = {
+    id: randomUUID().toUpperCase(),
+    createdAt: new Date().toISOString(),
+    processingState: "failed",
+    captureState: "stopped",
+    streams: [],
+    previewText: "",
+  };
+  const legacy = randomUUID().toUpperCase();
+  api.history = async () => ({ items: [] });
+  api.recordingHistory = async () =>
+    ({ items: [session] }) as unknown as Awaited<ReturnType<API["recordingHistory"]>>;
+  const routes: string[] = [];
+  api.retryRecording = async (id) => {
+    routes.push(`v2 ${id}`);
+    return { ...session, processingState: "queued" } as unknown as Recording;
+  };
+  api.retryGeneration = async (id) => {
+    routes.push(`v1 ${id}`);
+    throw new APIError(409, "not_retryable");
+  };
+  const tools = new HistoryTools(api);
+  await tools.list(undefined, undefined, "q");
+  const retried = await tools.retry({ id: session.id.toLowerCase(), server: api.endpoint });
+  expect(retried.record).toMatchObject({ id: session.id, status: "queued" });
+  await expect(tools.retry({ id: legacy, server: api.endpoint })).rejects.toThrow(
+    "Only finished takes with saved audio",
+  );
+  api.retryGeneration = async () => {
+    throw new APIError(503, "server_unavailable");
+  };
+  await expect(tools.retry({ id: legacy, server: api.endpoint })).rejects.toThrow(
+    "speech engine is not ready",
+  );
+  expect(routes).toEqual([`v2 ${session.id}`, `v1 ${legacy}`]);
+});
+
+test("a failed retry of a finished session shows why next to the kept transcript", async () => {
+  const api = new API("http://127.0.0.1:1", "token");
+  const snapshot = {
+    id: randomUUID().toUpperCase(),
+    createdAt: new Date().toISOString(),
+    processingState: "completed",
+    captureState: "stopped",
+    streams: [],
+    previewText: "Kept.",
+    error: "Transcribing again failed: The engine stopped. The previous transcript is kept.",
+  };
+  api.history = async () => ({ items: [] });
+  api.recordingHistory = async () =>
+    ({ items: [snapshot] }) as unknown as Awaited<ReturnType<API["recordingHistory"]>>;
+  api.recording = async () =>
+    ({
+      snapshot,
+      result: { id: snapshot.id, status: "completed", finalText: "Kept." },
+    }) as unknown as Awaited<ReturnType<API["recording"]>>;
+  const tools = new HistoryTools(api);
+  await tools.list(undefined, undefined, "q");
+  const entry = await tools.entry({ id: snapshot.id, server: api.endpoint });
+  expect(entry.record).toMatchObject({ finalText: "Kept.", error: snapshot.error });
 });

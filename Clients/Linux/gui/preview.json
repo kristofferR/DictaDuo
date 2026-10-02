@@ -165,6 +165,7 @@
   "connection": {
     "ready": true,
     "message": "Server ready.",
+    "generationRetry": true,
     "cloudRecognition": false,
     "recognitionEngines": ["whisper"],
     "speech": {
@@ -291,6 +292,18 @@
         },
         "textProcessing": {
           "status": "applied"
+        },
+        "mode": "dictation",
+        "recognition": {
+          "provider": "soniox"
+        },
+        "detectedLanguage": "en",
+        "settings": {
+          "revision": 1,
+          "preferences": {
+            "recognitionEngine": "whisper",
+            "language": "auto"
+          }
         }
       },
       {
@@ -319,6 +332,114 @@
           "durationSeconds": 4,
           "sourceSHA256": "preview",
           "artifactSHA256": {}
+        }
+      },
+      {
+        "id": "preview-failed",
+        "createdAt": "2026-09-21T09:10:00Z",
+        "device": {
+          "id": "macbook",
+          "name": "MacBook"
+        },
+        "mode": "dictation",
+        "status": "failed",
+        "error": "The speech engine stopped responding. The audio is saved.",
+        "rawText": "",
+        "finalText": "",
+        "insertionText": "",
+        "previewText": "",
+        "inferenceAudio": {
+          "filename": "inference.wav",
+          "frameCount": 144000,
+          "sampleRate": 16000,
+          "channels": 1,
+          "byteCount": 576044,
+          "encoding": "pcm_f32le"
+        }
+      },
+      {
+        "id": "preview-cancelled",
+        "createdAt": "2026-09-21T08:55:00Z",
+        "device": {
+          "id": "macbook",
+          "name": "MacBook"
+        },
+        "mode": "dictation",
+        "status": "completed",
+        "recognition": {
+          "provider": "whisper",
+          "fallbackReason": "Cloud recognition is not configured."
+        },
+        "detectedLanguage": "no",
+        "rawText": "Husk å ringe rørleggeren på fredag.",
+        "finalText": "Husk å ringe rørleggeren på fredag.",
+        "insertionText": "Husk å ringe rørleggeren på fredag.",
+        "previewText": "",
+        "delivery": {
+          "status": "cancelled"
+        },
+        "inferenceAudio": {
+          "filename": "inference.wav",
+          "frameCount": 80000,
+          "sampleRate": 16000,
+          "channels": 1,
+          "byteCount": 320044,
+          "encoding": "pcm_f32le"
+        },
+        "textProcessing": {
+          "status": "unchanged"
+        }
+      },
+      {
+        "id": "preview-interrupted",
+        "createdAt": "2026-09-21T08:40:00Z",
+        "device": {
+          "id": "macbook",
+          "name": "MacBook"
+        },
+        "mode": "dictation",
+        "status": "queued",
+        "paused": true,
+        "rawText": "",
+        "finalText": "",
+        "insertionText": "",
+        "previewText": "",
+        "inferenceAudio": {
+          "filename": "inference.wav",
+          "frameCount": 496000,
+          "sampleRate": 16000,
+          "channels": 1,
+          "byteCount": 1984044,
+          "encoding": "pcm_f32le"
+        }
+      },
+      {
+        "id": "preview-test",
+        "createdAt": "2026-09-21T08:20:00Z",
+        "device": {
+          "id": "macbook",
+          "name": "MacBook"
+        },
+        "mode": "test",
+        "status": "completed",
+        "recognition": {
+          "provider": "whisper"
+        },
+        "detectedLanguage": "en",
+        "rawText": "Testing one two three.",
+        "finalText": "Testing one two three.",
+        "insertionText": "Testing one two three.",
+        "previewText": "",
+        "delivery": {
+          "status": "tested"
+        },
+        "inferenceAudio": {
+          "filename": "inference.wav",
+          "frameCount": 48000,
+          "sampleRate": 16000,
+          "channels": 1,
+          "byteCount": 192044,
+          "encoding": "pcm_f32le"
         }
       }
     ]

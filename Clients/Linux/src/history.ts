@@ -227,17 +227,46 @@ export class HistoryTools {
         : {}),
     };
   }
-  /** The full record of a listed recording session, whose list item is only a summary. */
+  /**
+   * The full record of an entry: a listed recording session's item is only a
+   * summary, and a take being transcribed again changes until it settles.
+   */
   async entry(request: Record<string, unknown>) {
     if (request.server !== this.api.endpoint)
       throw new ClientNotice("The connected server changed. Refresh history before continuing.");
     const id = identifier(request.id);
-    if (!this.recordings.has(id))
-      throw new ClientNotice("Refresh history before opening this entry.");
     try {
-      return { record: await this.session(id), server: this.api.endpoint };
+      const record: Entry = this.recordings.has(id)
+        ? await this.session(id)
+        : await this.api.get(id, 60_000);
+      return { record, server: this.api.endpoint };
     } catch (error) {
       return notice(error, "Loading the entry");
+    }
+  }
+  /**
+   * Transcribes a finished, failed or cancelled take's saved audio again.
+   * Returns at once; `entry` follows the take until it settles. Nothing is pasted.
+   */
+  async retry(request: Record<string, unknown>) {
+    if (request.server !== this.api.endpoint)
+      throw new ClientNotice("The connected server changed. Refresh history before continuing.");
+    const id = identifier(request.id);
+    if (this.busy) throw new ClientNotice("Wait for the current history action to finish.");
+    this.busy = true;
+    try {
+      const record: Entry = this.recordings.has(id)
+        ? summary(await this.api.retryRecording(id))
+        : await this.api.retryGeneration(id);
+      return { record, server: this.api.endpoint };
+    } catch (error) {
+      if (error instanceof APIError && error.status === 409)
+        throw new ClientNotice("Only finished takes with saved audio can be transcribed again.");
+      if (error instanceof APIError && error.status === 503)
+        throw new ClientNotice("The speech engine is not ready yet. Try again in a moment.");
+      return notice(error, "Transcribing again");
+    } finally {
+      this.busy = false;
     }
   }
   async action(
@@ -366,7 +395,11 @@ export class HistoryTools {
   private async session(id: string) {
     const detail = await this.api.recording(id, 60_000);
     const runs = originalRuns(detail.snapshot);
-    const record: Entry = detail.result ?? summary(detail.snapshot);
+    // A failed retry of a finished take keeps its result and reports why on the session.
+    const error = detail.snapshot.error;
+    const record: Entry = detail.result
+      ? { ...detail.result, ...(error ? { error } : {}) }
+      : summary(detail.snapshot);
     return runs ? { ...record, originalRuns: runs } : record;
   }
   private async directory() {

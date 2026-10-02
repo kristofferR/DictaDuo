@@ -210,6 +210,8 @@ export function createGUIHandler(
         return history.list(request.before, request.source, request.queryID);
       case "historyEntry":
         return history.entry(request);
+      case "retryHistory":
+        return history.retry(request);
       case "historyAudio":
       case "historyArtifact":
       case "deleteHistory":

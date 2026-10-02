@@ -10,53 +10,29 @@ ColumnLayout {
     required property var history
     readonly property var record: history.selected
     readonly property string transcript: record ? record.finalText || record.insertionText || record.previewText || "" : ""
-    readonly property var audio: record ? record.inferenceAudio || record.originalAudio : null
     readonly property var processing: record ? record.textProcessing : null
+    readonly property var status: history.status(record)
     readonly property bool terminal: !!record && ["completed", "failed", "cancelled"].includes(record.status)
-    // Paused long recordings can be deleted too; only their own computer can resume them.
-    readonly property bool deletable: terminal || (!!record && !!record.paused)
+    readonly property bool interrupted: !!record && !!record.paused
+    // Failed and interrupted takes need a decision; a banner holds the explanation and actions.
+    readonly property bool problem: interrupted || (!!record && record.status === "failed")
     // A listed session holds only the transcript's tail until its full record loads.
     readonly property bool partial: !!record && !!record.summaryOnly
+    readonly property bool retrying: !!record && history.retryingID === record.id
+    readonly property bool canRetry: history.canRetry(record) && history.available && history.retrySupported && !history.acting && !history.retryingID && !bridge.preview
     property string copiedID: ""
     onRecordChanged: copiedID = ""
 
-    // One label table for statuses both clients write; Mac uses the same words.
-    function statusLabel(status) {
-        return ({
-            receiving: "Recording",
-            queued: "Waiting to transcribe",
-            transcribing: "Transcribing",
-            proofreading: "Cleaning up text",
-            completed: "Done",
-            failed: "Transcription failed",
-            cancelled: "Cancelled"
-        })[status] || status;
-    }
-    function deliveryLabel(delivery) {
-        if (!delivery)
-            return "";
-        return ({
-            inserted: "Pasted",
-            listUpdated: "List updated",
-            copied: "Copied",
-            unconfirmed: "Check the field",
-            failed: "Couldn't paste",
-            tested: "Microphone test",
-            cancelled: "Not pasted",
-            none: "Not pasted"
-        })[delivery.status] || "";
-    }
     function cleanupLabel(processing) {
         const status = processing.status || (processing.enabled ? "applied" : "disabled");
         return ({
-            disabled: "Text cleanup off",
-            unavailable: "Text cleanup unavailable",
-            applied: "Text cleaned up",
+            unavailable: "Cleanup unavailable",
+            applied: "Text cleanup applied",
             unchanged: "Text cleanup made no changes",
-            rejected: "Text cleanup skipped",
-            failed: "Text cleanup failed",
-            skipped: "Text cleanup skipped"
-        })[status] || "Text cleanup";
+            rejected: "Cleanup not used (kept recognized text)",
+            failed: "Cleanup failed",
+            skipped: "Cleanup skipped"
+        })[status] || "";
     }
 
     // A zero budget means the engine has no vocabulary prompting at all.
@@ -64,12 +40,8 @@ ColumnLayout {
         if (!hints || !hints.omittedTerms.length)
             return "";
         if (hints.tokenBudget === 0)
-            return title + ": not used by this engine";
+            return "Vocabulary not used by this engine";
         return title + ": " + hints.omittedTerms.length + (hints.omittedTerms.length === 1 ? " term" : " terms") + " did not fit (" + hints.omittedTerms.join(", ") + ")";
-    }
-
-    function model(value) {
-        return value ? value.modelID + " · " + value.backend : "";
     }
 
     function sourceLabel(filename) {
@@ -82,13 +54,10 @@ ColumnLayout {
         })[filename] || filename;
     }
 
-    function duration() {
-        const value = audio && audio.sampleRate ? audio.frameCount / audio.sampleRate : record && record.importedSource ? record.importedSource.durationSeconds : undefined;
-        if (value === undefined || value <= 0)
-            return "";
-
-        const seconds = Math.round(value);
-        return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
+    function interruptedText() {
+        const saved = history.duration(record);
+        const own = !!bridge.snapshot.device && bridge.snapshot.device.id === record.device.id;
+        return "The recording stopped before it finished. " + (saved ? saved + " of audio is saved." : "Its audio is saved.") + (own ? "" : " Finish it on " + record.device.name + ".");
     }
 
     spacing: 12
@@ -122,7 +91,9 @@ ColumnLayout {
             ui: root.ui
             objectName: "deleteHistory"
             text: root.history.deleting ? "Deleting…" : "Delete"
-            enabled: root.deletable && root.history.available && !root.history.acting && !root.history.loading && !bridge.preview
+            // Interrupted takes are discarded from their banner.
+            visible: !root.interrupted
+            enabled: root.terminal && root.history.available && !root.history.acting && !root.history.loading && !bridge.preview
             onClicked: root.history.confirmDelete()
         }
 
@@ -130,11 +101,136 @@ ColumnLayout {
 
     SLabel {
         ui: root.ui
+        objectName: "historyDetailDevice"
         Layout.fillWidth: true
         visible: !!root.record
         color: root.ui.c.muted
         font.pixelSize: 12
-        text: root.record ? [root.record.device.name, root.record.importedSource ? "Wispr Flow" : "SottoDuo", root.record.paused ? "Paused on " + root.record.device.name : root.statusLabel(root.record.status), root.duration(), root.deliveryLabel(root.record.delivery)].filter(part => !!part).join(" · ") : ""
+        text: root.record ? [root.record.device.name, root.record.importedSource ? "Wispr Flow" : "", root.problem ? root.history.duration(root.record) : ""].filter(part => !!part).join(" · ") : ""
+    }
+
+    Rectangle {
+        id: bannerBox
+
+        objectName: "historyBanner"
+        readonly property color ink: root.interrupted ? root.ui.c.warning : root.ui.c.error
+
+        visible: !!root.record && root.problem
+        Layout.fillWidth: true
+        implicitHeight: banner.implicitHeight + 24
+        radius: 10
+        color: root.interrupted ? root.ui.c.warningTint : root.ui.c.errorTint
+
+        ColumnLayout {
+            id: banner
+
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: 8
+
+            SLabel {
+                ui: root.ui
+                Layout.fillWidth: true
+                text: root.status ? root.status.label : ""
+                color: bannerBox.ink
+                font.weight: Font.DemiBold
+            }
+
+            SLabel {
+                ui: root.ui
+                objectName: "historyBannerText"
+                Layout.fillWidth: true
+                color: bannerBox.ink
+                text: !root.record ? "" : root.interrupted ? root.interruptedText() : root.record.error || "No transcript was produced."
+            }
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: 8
+
+                SButton {
+                    ui: root.ui
+                    objectName: "bannerRetryHistory"
+                    primary: true
+                    text: root.retrying ? "Transcribing…" : "Transcribe again"
+                    visible: !root.interrupted && root.history.canRetry(root.record)
+                    enabled: root.canRetry
+                    ToolTip.visible: hovered && !root.history.retrySupported
+                    ToolTip.text: "Update SottoDuo on the server to transcribe recordings again."
+                    onClicked: root.history.transcribeAgain()
+                }
+
+                SButton {
+                    ui: root.ui
+                    objectName: "discardHistory"
+                    text: root.history.deleting ? "Discarding…" : "Discard"
+                    visible: root.interrupted
+                    enabled: root.history.available && !root.history.acting && !root.history.loading && !bridge.preview
+                    onClicked: root.history.confirmDelete()
+                }
+
+            }
+
+        }
+
+    }
+
+    RowLayout {
+        visible: !!root.record && !root.problem && !!root.status
+        Layout.fillWidth: true
+        spacing: 8
+
+        HistoryChip {
+            objectName: "historyDetailChip"
+            ui: root.ui
+            status: root.problem ? null : root.status
+        }
+
+        SLabel {
+            ui: root.ui
+            Layout.fillWidth: true
+            color: root.ui.c.muted
+            font.pixelSize: 12
+            visible: !!text
+            text: root.status ? root.status.detail : ""
+        }
+
+    }
+
+    SLabel {
+        ui: root.ui
+        objectName: "historyRecognition"
+        Layout.fillWidth: true
+        visible: !!root.record && !root.problem && !!text
+        color: root.ui.c.muted
+        font.pixelSize: 12
+        text: root.record ? root.history.recognitionLine(root.record) : ""
+        HoverHandler {
+            id: recognitionHover
+        }
+        ToolTip.visible: recognitionHover.hovered && !!ToolTip.text
+        ToolTip.text: root.record ? [root.record.speech, root.record.proofreading].filter(model => !!model).map(model => model.modelID + " · " + model.backend).join("\n") : ""
+    }
+
+    // A failed retry of a finished take keeps the transcript and says why.
+    Rectangle {
+        objectName: "historyErrorBanner"
+        visible: !!errorText.text
+        Layout.fillWidth: true
+        implicitHeight: errorText.implicitHeight + 24
+        radius: 10
+        color: root.ui.c.warningTint
+
+        SLabel {
+            id: errorText
+
+            ui: root.ui
+            anchors.fill: parent
+            anchors.margins: 12
+            color: root.ui.c.warning
+            text: root.record && !root.problem ? root.record.error || "" : ""
+        }
+
     }
 
     ScrollView {
@@ -149,13 +245,6 @@ ColumnLayout {
         ColumnLayout {
             width: scroll.availableWidth
             spacing: 16
-
-            SLabel {
-                ui: root.ui
-                Layout.fillWidth: true
-                visible: !!text
-                text: root.record ? root.record.error || "" : ""
-            }
 
             SLabel {
                 ui: root.ui
@@ -178,14 +267,16 @@ ColumnLayout {
                 background: null
                 color: root.ui.c.ink
                 font.pixelSize: 19
-                text: root.record ? root.transcript || "No transcript was produced." : "Select a dictation to read its transcript."
+                visible: !!text
+                // A problem banner already says why there is no transcript.
+                text: !root.record ? "Select a dictation to read its transcript." : root.transcript || (root.problem ? "" : root.terminal ? "No transcript was produced." : "No transcript yet.")
             }
 
             CheckBox {
                 id: original
 
                 objectName: "showRawHistory"
-                text: root.record && root.record.importedSource ? "Show original recognition (Wispr Flow)" : "Show original recognition"
+                text: root.record && root.record.importedSource ? "Show Wispr Flow's transcript" : "Show original transcript"
                 visible: !!root.record && !!root.record.rawText && root.record.rawText !== root.transcript
                 onVisibleChanged: checked = false
             }
@@ -213,9 +304,12 @@ ColumnLayout {
 
             SLabel {
                 ui: root.ui
+                objectName: "historyCleanup"
                 Layout.fillWidth: true
                 visible: !!text
-                text: root.processing ? root.cleanupLabel(root.processing) + (root.processing.reason ? ": " + root.processing.reason : "") : ""
+                color: root.ui.c.muted
+                font.pixelSize: 12
+                text: root.processing && root.cleanupLabel(root.processing) ? root.cleanupLabel(root.processing) + (root.processing.reason ? ": " + root.processing.reason : "") : ""
             }
 
             CheckBox {
@@ -257,23 +351,6 @@ ColumnLayout {
                 text: root.record ? root.hintText("Text cleanup vocabulary", root.record.proofreadingHints) : ""
             }
 
-            SLabel {
-                ui: root.ui
-                Layout.fillWidth: true
-                color: root.ui.c.muted
-                font.pixelSize: 12
-                visible: !!text
-                text: root.record && root.record.speech ? "Speech: " + root.model(root.record.speech) : ""
-            }
-
-            SLabel {
-                ui: root.ui
-                Layout.fillWidth: true
-                color: root.ui.c.muted
-                font.pixelSize: 12
-                visible: !!text
-                text: root.record && root.record.proofreading ? "Text cleanup: " + root.model(root.record.proofreading) : ""
-            }
 
         }
 
@@ -283,6 +360,18 @@ ColumnLayout {
         visible: !!root.record
         Layout.fillWidth: true
         spacing: 8
+
+        // Failed takes offer this in their banner. A finished take asks first.
+        SButton {
+            ui: root.ui
+            objectName: "retryHistory"
+            text: root.retrying ? "Transcribing…" : root.record && root.record.status === "completed" ? "Transcribe again…" : "Transcribe again"
+            visible: !root.problem && root.history.canRetry(root.record)
+            enabled: root.canRetry
+            ToolTip.visible: hovered
+            ToolTip.text: root.history.retrySupported ? "Transcribe the saved audio again. Nothing is pasted." : "Update SottoDuo on the server to transcribe recordings again."
+            onClicked: root.history.transcribeAgain()
+        }
 
         SButton {
             ui: root.ui
