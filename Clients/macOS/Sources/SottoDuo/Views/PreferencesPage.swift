@@ -183,6 +183,13 @@ struct ServerPreferencesPage: View {
         return dirty && base.revision != latest.revision
     }
     private var available: Bool { controller.sharedPreferences != nil && controller.serverHealth != nil }
+    /// Offered only when the server has another engine installed and reports its selection.
+    private var engineChoice: Bool {
+        draft.recognitionEngine != nil && (controller.serverHealth?.recognitionEngines?.count ?? 0) > 1
+    }
+    private var engine: Binding<RecognitionEngine> {
+        Binding { draft.recognitionEngine ?? .whisper } set: { draft.recognitionEngine = $0 }
+    }
     private let languages = [
         ("English", "en"), ("Detect automatically", "auto"), ("Spanish", "es"), ("French", "fr"),
         ("German", "de"), ("Italian", "it"), ("Portuguese", "pt"), ("Dutch", "nl"), ("Japanese", "ja"),
@@ -229,12 +236,20 @@ struct ServerPreferencesPage: View {
                 }
                 Section {
                     Picker("Speech recognition", selection: $draft.recognitionMode) {
-                        Text("Automatic (Soniox, with Whisper fallback)").tag(RecognitionMode.automatic)
+                        Text("Automatic (Soniox, with local fallback)").tag(RecognitionMode.automatic)
                         Text("Cloud only (Soniox)").tag(RecognitionMode.cloud)
-                        Text("Local only (Whisper)").tag(RecognitionMode.local)
+                        Text("Local only").tag(RecognitionMode.local)
                     }
                     .help("Automatic uses Soniox when configured on the server. Local only never sends audio to Soniox.")
                     .accessibilityIdentifier("preferences.recognition-mode")
+                    if engineChoice {
+                        Picker("Local engine", selection: engine) {
+                            Text("Whisper large-v3-turbo").tag(RecognitionEngine.whisper)
+                            Text("Parakeet v3").tag(RecognitionEngine.parakeet)
+                        }
+                        .help("Parakeet is faster but recognizes only 25 European languages, not Norwegian, and ignores recognition vocabulary.")
+                        .accessibilityIdentifier("preferences.recognition-engine")
+                    }
                     Picker("Language", selection: $draft.language) {
                         ForEach(languages, id: \.1) { name, code in Text(name).tag(code) }
                     }
@@ -261,14 +276,16 @@ struct ServerPreferencesPage: View {
                     }
                     TextField("Recognition vocabulary", text: $draft.vocabulary, axis: .vertical)
                         .lineLimit(3...5)
-                        .help("Names and specialized terms to help voice recognition.")
+                        .help(draft.recognitionEngine == .parakeet
+                            ? "Parakeet ignores recognition vocabulary. Dictionary replacements and cleanup still apply."
+                            : "Names and specialized terms to help voice recognition.")
                 } header: { Text("Processing").textCase(nil) }
                 .disabled(!available)
 
                 Section {
                     Toggle("Keep original microphone audio", isOn: $draft.keepOriginalAudio)
                         .accessibilityIdentifier("preferences.keep-original")
-                    Text("Whisper audio is always kept. This also saves the original microphone audio for future dictations.")
+                    Text("Recognition audio is always kept. This also saves the original microphone audio for future dictations.")
                         .font(.caption)
                         .foregroundStyle(SottoDuoPalette.muted)
                 } header: { Text("Shared history").textCase(nil) }

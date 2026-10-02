@@ -71,6 +71,27 @@ final class APIWireTests: XCTestCase {
         XCTAssertEqual(try SottoDuoAPI.decodeWire(PreferencesSnapshot.self, from: encoded), snapshot)
     }
 
+    func testRecognitionEngineIsOmittedUnlessTheServerReportsIt() throws {
+        let json = Data("""
+            {"revision":1,"preferences":{"language":"en","vocabulary":"","dictionary":{"lists":[]},
+             "textCorrectionEnabled":true,"keepOriginalAudio":true}}
+            """.utf8)
+        var snapshot = try SottoDuoAPI.decodeWire(PreferencesSnapshot.self, from: json)
+        XCTAssertNil(snapshot.preferences.recognitionEngine)
+        // An older server rejects unknown fields, so an unknown selection is never sent.
+        XCTAssertFalse(String(decoding: try SottoDuoAPI.encodeWire(snapshot), as: UTF8.self)
+            .contains("recognitionEngine"))
+        snapshot.preferences.recognitionEngine = .parakeet
+        let encoded = try SottoDuoAPI.encodeWire(snapshot)
+        XCTAssertEqual(try SottoDuoAPI.decodeWire(PreferencesSnapshot.self, from: encoded).preferences.recognitionEngine,
+                       .parakeet)
+        let health = ServerHealth(ready: true, speech: .init(modelID: "parakeet-tdt-0.6b-v3", backend: "local", ready: true),
+                                  proofreading: .init(modelID: "qwen", backend: "local", ready: true),
+                                  recognitionEngines: [.whisper, .parakeet])
+        XCTAssertEqual(try SottoDuoAPI.decodeWire(ServerHealth.self, from: SottoDuoAPI.encodeWire(health)).recognitionEngines,
+                       [.whisper, .parakeet])
+    }
+
     func testCompleteGenerationRoundTripsThroughGeneratedTypes() throws {
         let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
         var record = GenerationRecord(requestID: UUID(), device: .init(id: "test", name: "Test Mac"),

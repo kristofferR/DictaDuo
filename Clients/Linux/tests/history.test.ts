@@ -8,7 +8,7 @@ import { GenerationService } from "../../../Server/src/generation-service.ts";
 import { createHTTPServer } from "../../../Server/src/http-server.ts";
 import { sha256 } from "../../../Server/src/storage.ts";
 import { FakeInference, openCaptureServices } from "../../../Server/tests/support.ts";
-import { API, type Generation } from "../src/api.ts";
+import { API, type Generation, type Recording } from "../src/api.ts";
 import { HistoryTools } from "../src/history.ts";
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -251,7 +251,11 @@ test("recording sessions join legacy history and are opened and deleted on their
     if (count > 400) throw Error("Session did not complete");
     await Bun.sleep(5);
   }
-  const tools = new HistoryTools(new API(address, "history-fixture-token"));
+  const api = new API(address, "history-fixture-token");
+  let streamed: Recording | undefined;
+  await api.events(session.id, AbortSignal.timeout(3000), (snapshot) => (streamed = snapshot));
+  expect(streamed?.settings.preferences.recognitionEngine).toBe("whisper");
+  const tools = new HistoryTools(api);
   const page = await tools.list(undefined, undefined, "q");
   expect(page.items.map((item) => item.id)).toEqual([session.id, legacy.id]);
   expect(page.items[0]).toMatchObject({

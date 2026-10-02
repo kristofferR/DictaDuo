@@ -2,17 +2,26 @@ import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { availableParallelism } from "node:os";
-import type { ModelHintUsage } from "../api";
+import type { ModelHintUsage, RecognitionEngine } from "../api";
 import { HelperProcess, type HelperResponse } from "./helper-process";
 import { checkCancellation, InferenceError } from "./inference-error";
 import { ModelVerifier, type ModelPin } from "./model-verification";
-import { linuxProofModelPin, macProofManifestSHA256, speechModelPin } from "./model-pins";
+import { engineName } from "./engines";
+import {
+  linuxProofModelPin,
+  macProofManifestSHA256,
+  parakeetModelPin,
+  speechModelPin,
+} from "./model-pins";
 
 export { InferenceError } from "./inference-error";
 
 export interface InferenceConfiguration {
   speechHelper: string;
+  /** The Whisper model, always installed. */
   speechModel: string;
+  /** An optional Parakeet model served by the same speech helper. */
+  parakeetModel?: string;
   vadModel: string;
   proofHelper: string;
   proofModel: string;
@@ -86,17 +95,29 @@ export interface ProofInferenceResult {
   modelSHA256?: string;
 }
 
+/** Every speech call names its engine; omitted means Whisper. */
 export interface InferenceBackend {
   readonly timedSpeechSpans?: boolean;
-  findSpeechBoundary?(audioPath: string, signal?: AbortSignal): Promise<number | undefined>;
-  readiness(proofreadingEnabled?: boolean): Promise<InferenceReadiness>;
-  warmUp(proofreadingEnabled?: boolean, signal?: AbortSignal): Promise<void>;
+  /** Installed local recognition engines. Omitted means Whisper only. */
+  readonly engines?: readonly RecognitionEngine[];
+  findSpeechBoundary?(
+    audioPath: string,
+    signal?: AbortSignal,
+    engine?: RecognitionEngine,
+  ): Promise<number | undefined>;
+  readiness(proofreadingEnabled?: boolean, engine?: RecognitionEngine): Promise<InferenceReadiness>;
+  warmUp(
+    proofreadingEnabled?: boolean,
+    signal?: AbortSignal,
+    engine?: RecognitionEngine,
+  ): Promise<void>;
   transcribe(
     audioPath: string,
     language: string,
     vocabularyTerms: string[],
     onProgress?: (value: number) => void,
     signal?: AbortSignal,
+    engine?: RecognitionEngine,
   ): Promise<SpeechInferenceResult>;
   correct(
     text: string,
@@ -163,7 +184,9 @@ function vocabularyDiagnostics(
     tokenCount !== undefined &&
     tokenBudget !== undefined &&
     tokenCount >= 0 &&
-    tokenBudget > 0 &&
+    tokenBudget >= 0 &&
+    // An engine without vocabulary prompting reports a zero budget and no hints.
+    (tokenBudget > 0 || included.length === 0) &&
     tokenCount <= tokenBudget &&
     included.length + omitted.length === terms.length
   ) {
@@ -180,28 +203,33 @@ function vocabularyDiagnostics(
       return { includedTerms: included, omittedTerms: omitted, tokenCount, tokenBudget };
     }
   }
-  throw new InferenceError("invalidResponse", "Whisper returned invalid vocabulary diagnostics.");
+  throw new InferenceError("invalidResponse", "Speech returned invalid vocabulary diagnostics.");
+}
+
+interface SpeechEngine {
+  helper: HelperProcess;
+  model: string;
+  pin?: ModelPin;
 }
 
 /** The helper executables own inference; the server owns paths, deadlines and pins. */
 export class NativeInference implements InferenceBackend {
   readonly timedSpeechSpans = true;
+  readonly engines: readonly RecognitionEngine[];
   private readonly configuration: InferenceConfiguration;
-  private readonly speech: HelperProcess;
+  private readonly speech: Partial<Record<RecognitionEngine, SpeechEngine>> = {};
   private readonly proof: HelperProcess;
   private readonly verifier = new ModelVerifier();
-  private readonly speechPin?: ModelPin;
   private readonly proofPin?: ModelPin;
   private readonly proofManifestSHA256?: string;
 
   constructor(
     configuration: ConfigurationInput,
-    fixturePins?: { speech?: ModelPin; proof?: ModelPin },
+    fixturePins?: { speech?: ModelPin; parakeet?: ModelPin; proof?: ModelPin },
   ) {
     this.configuration = createInferenceConfiguration(configuration);
     // Constructor-only fixture injection is never exposed by server configuration
     // or the CLI. Production always enforces the immutable native-model pins.
-    this.speechPin = fixturePins ? fixturePins.speech : speechModelPin;
     this.proofPin = fixturePins
       ? fixturePins.proof
       : process.platform === "darwin"
@@ -210,21 +238,36 @@ export class NativeInference implements InferenceBackend {
     this.proofManifestSHA256 =
       !fixturePins && process.platform === "darwin" ? macProofManifestSHA256 : undefined;
     const config = this.configuration;
-    this.speech = new HelperProcess({
-      name: "Whisper",
-      executable: config.speechHelper,
-      arguments: [
-        "--model",
-        config.speechModel,
-        "--vad-model",
-        config.vadModel,
-        "--threads",
-        String(config.threads),
-      ],
-      requiredFiles: [config.speechModel, config.vadModel],
-      loadTimeout: config.speechLoadTimeout,
-      lineLimit: 1_048_576,
-    });
+    const models: [RecognitionEngine, string | undefined, ModelPin | undefined][] = [
+      ["whisper", config.speechModel, fixturePins ? fixturePins.speech : speechModelPin],
+      ["parakeet", config.parakeetModel, fixturePins ? fixturePins.parakeet : parakeetModelPin],
+    ];
+    for (const [engine, model, pin] of models) {
+      if (!model) continue;
+      // Each engine is its own warm process; a take never waits for a reload.
+      this.speech[engine] = {
+        model,
+        pin,
+        helper: new HelperProcess({
+          name: engineName(engine),
+          executable: config.speechHelper,
+          arguments: [
+            "--model",
+            model,
+            "--vad-model",
+            config.vadModel,
+            // The helper defaults to Whisper; omitting it keeps reused older helpers working.
+            ...(engine === "whisper" ? [] : ["--engine", engine]),
+            "--threads",
+            String(config.threads),
+          ],
+          requiredFiles: [model, config.vadModel],
+          loadTimeout: config.speechLoadTimeout,
+          lineLimit: 1_048_576,
+        }),
+      };
+    }
+    this.engines = models.flatMap(([engine]) => (this.speech[engine] ? [engine] : []));
     this.proof = new HelperProcess({
       name: "Qwen",
       executable: config.proofHelper,
@@ -235,15 +278,36 @@ export class NativeInference implements InferenceBackend {
     });
   }
 
-  async readiness(proofreadingEnabled = true): Promise<InferenceReadiness> {
+  private engine(engine: RecognitionEngine = "whisper") {
+    const selected = this.speech[engine];
+    if (!selected)
+      throw new InferenceError(
+        "unavailable",
+        `${engineName(engine)} is not installed on this server. Choose another recognition engine.`,
+      );
+    return selected;
+  }
+
+  async readiness(
+    proofreadingEnabled = true,
+    engine: RecognitionEngine = "whisper",
+  ): Promise<InferenceReadiness> {
     const config = this.configuration;
-    const speechState = this.speech.snapshot();
+    const speech = this.speech[engine];
+    if (!speech)
+      return {
+        available: false,
+        message: `${engineName(engine)} is not installed on this server.`,
+        speechLoaded: false,
+        proofLoaded: this.proof.snapshot().loaded,
+      };
+    const speechState = speech.helper.snapshot();
     const proofState = this.proof.snapshot();
     const helpers = proofreadingEnabled
       ? [config.speechHelper, config.proofHelper]
       : [config.speechHelper];
     const models = [
-      config.speechModel,
+      speech.model,
       config.vadModel,
       ...(proofreadingEnabled ? [config.proofModel] : []),
     ];
@@ -260,7 +324,7 @@ export class NativeInference implements InferenceBackend {
         }
       }
     }
-    const speechVerified = await this.verifier.isVerified(config.speechModel, this.speechPin);
+    const speechVerified = await this.verifier.isVerified(speech.model, speech.pin);
     const proofFileVerified = await this.verifier.isVerified(config.proofModel, this.proofPin);
     const proofVerified = proofFileVerified && (!this.proofManifestSHA256 || proofState.loaded);
     const warm = speechState.loaded && (!proofreadingEnabled || proofState.loaded);
@@ -278,9 +342,10 @@ export class NativeInference implements InferenceBackend {
     };
   }
 
-  async warmUp(proofreadingEnabled = true, signal?: AbortSignal) {
-    await this.verifier.verify(this.configuration.speechModel, this.speechPin, signal);
-    await this.speech.ensureLoaded(signal);
+  async warmUp(proofreadingEnabled = true, signal?: AbortSignal, engine?: RecognitionEngine) {
+    const speech = this.engine(engine);
+    await this.verifier.verify(speech.model, speech.pin, signal);
+    await speech.helper.ensureLoaded(signal);
     if (proofreadingEnabled) {
       await this.verifier.verify(this.configuration.proofModel, this.proofPin, signal);
       await this.proof.ensureLoaded(signal);
@@ -293,8 +358,11 @@ export class NativeInference implements InferenceBackend {
     vocabularyTerms: string[],
     onProgress?: (value: number) => void,
     signal?: AbortSignal,
+    engine?: RecognitionEngine,
   ): Promise<SpeechInferenceResult> {
     checkCancellation(signal);
+    const speech = this.engine(engine);
+    const name = engineName(engine ?? "whisper");
     let readable = true;
     try {
       await access(audioPath, constants.R_OK);
@@ -314,15 +382,11 @@ export class NativeInference implements InferenceBackend {
       ) ||
       vocabularyTerms.reduce((total, term) => total + bytes(term), 0) > 384 * 1024
     ) {
-      throw new InferenceError("invalidRequest", "Audio, language, or Whisper prompt is invalid.");
+      throw new InferenceError("invalidRequest", `Audio, language, or ${name} prompt is invalid.`);
     }
     if (new Set(vocabularyTerms).size !== vocabularyTerms.length)
-      throw new InferenceError("invalidRequest", "Whisper vocabulary terms must be unique.");
-    const digest = await this.verifier.verify(
-      this.configuration.speechModel,
-      this.speechPin,
-      signal,
-    );
+      throw new InferenceError("invalidRequest", `${name} vocabulary terms must be unique.`);
+    const digest = await this.verifier.verify(speech.model, speech.pin, signal);
     const request = {
       type: "transcribe",
       id: randomUUID(),
@@ -332,7 +396,7 @@ export class NativeInference implements InferenceBackend {
     };
     if (bytes(JSON.stringify(request)) >= 1_048_576)
       throw new InferenceError("invalidRequest", "The encoded vocabulary exceeds 1 MB.");
-    const response = await this.speech.request(
+    const response = await speech.helper.request(
       request,
       request.id,
       this.configuration.speechTimeout,
@@ -353,8 +417,8 @@ export class NativeInference implements InferenceBackend {
       !response.language.length ||
       bytes(response.language) > 32
     ) {
-      await this.speech.shutdown();
-      throw new InferenceError("invalidResponse", "Whisper returned an invalid transcript.");
+      await speech.helper.shutdown();
+      throw new InferenceError("invalidResponse", `${name} returned an invalid transcript.`);
     }
     let hints: ModelHintUsage | undefined;
     try {
@@ -362,18 +426,18 @@ export class NativeInference implements InferenceBackend {
       if (!validSpeechSpans(response.spans, response.duration, response.text))
         throw new InferenceError(
           "invalidResponse",
-          "Whisper returned missing or invalid timed speech spans. Rebuild the speech helper to match this server.",
+          `${name} returned missing or invalid timed speech spans. Rebuild the speech helper to match this server.`,
         );
       if (!validSpeechSpans(response.segmentSpans, response.duration, response.text))
         throw new InferenceError(
           "invalidResponse",
-          "Whisper returned invalid whole-segment coverage.",
+          `${name} returned invalid whole-segment coverage.`,
         );
     } catch (error) {
-      await this.speech.shutdown();
+      await speech.helper.shutdown();
       throw error;
     }
-    const state = this.speech.snapshot();
+    const state = speech.helper.snapshot();
     return {
       text: response.text,
       audioSeconds: response.duration,
@@ -387,11 +451,13 @@ export class NativeInference implements InferenceBackend {
     };
   }
 
-  async findSpeechBoundary(audioPath: string, signal?: AbortSignal) {
+  async findSpeechBoundary(audioPath: string, signal?: AbortSignal, engine?: RecognitionEngine) {
     checkCancellation(signal);
-    await this.verifier.verify(this.configuration.speechModel, this.speechPin, signal);
+    // Both helpers carry the same speech detector; ask the one already warm.
+    const speech = this.engine(engine);
+    await this.verifier.verify(speech.model, speech.pin, signal);
     const id = randomUUID();
-    const response = await this.speech.request(
+    const response = await speech.helper.request(
       { type: "boundary", id, path: audioPath },
       id,
       this.configuration.speechTimeout,
@@ -408,8 +474,11 @@ export class NativeInference implements InferenceBackend {
           response.boundarySeconds < 30 ||
           response.boundarySeconds > response.duration - 0.1))
     ) {
-      await this.speech.shutdown();
-      throw new InferenceError("invalidResponse", "Whisper returned an invalid acoustic boundary.");
+      await speech.helper.shutdown();
+      throw new InferenceError(
+        "invalidResponse",
+        `${engineName(engine ?? "whisper")} returned an invalid acoustic boundary.`,
+      );
     }
     return response.boundarySeconds;
   }
@@ -472,12 +541,19 @@ export class NativeInference implements InferenceBackend {
     };
   }
 
+  private get speechHelpers() {
+    return Object.values(this.speech).map((speech) => speech.helper);
+  }
   async cancel() {
     this.verifier.cancel();
-    this.speech.cancel();
+    for (const helper of this.speechHelpers) helper.cancel();
     this.proof.cancel();
   }
   async shutdown() {
-    await Promise.all([this.verifier.shutdown(), this.speech.shutdown(), this.proof.shutdown()]);
+    await Promise.all([
+      this.verifier.shutdown(),
+      ...this.speechHelpers.map((helper) => helper.shutdown()),
+      this.proof.shutdown(),
+    ]);
   }
 }

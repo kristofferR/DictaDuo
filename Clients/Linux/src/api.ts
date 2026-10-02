@@ -44,9 +44,10 @@ export class API {
         Authorization: `Bearer ${this.token}`,
         ...(destinationOwner ? { "X-SottoDuo-Destination-Owner": destinationOwner } : {}),
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-        // Legacy routes negotiate these fields; recording routes ignore the headers.
+        // Legacy routes negotiate these fields; recording routes negotiate only the engine.
         "X-SottoDuo-Capture": "capture-v1",
         "X-SottoDuo-Recognition": "streaming-v1",
+        "X-SottoDuo-Recognition-Engine": "engine-v1",
         ...(owner ? { "X-SottoDuo-Capture-Owner": owner } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -205,7 +206,11 @@ export class API {
     const response = await fetch(`${this.endpoint}/v2/recordings/${id}/events`, {
       redirect: "error",
       signal,
-      headers: { Authorization: `Bearer ${this.token}`, Accept: "application/x-ndjson" },
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        Accept: "application/x-ndjson",
+        "X-SottoDuo-Recognition-Engine": "engine-v1",
+      },
     });
     if (!response.ok || !response.body) {
       await response.body?.cancel();

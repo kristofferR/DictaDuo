@@ -71,6 +71,11 @@ const encodeFor = (request: FastifyRequest) => {
       )
         return undefined;
       if (
+        (key === "recognitionEngine" || key === "recognitionEngines") &&
+        request.headers["x-sottoduo-recognition-engine"] !== "engine-v1"
+      )
+        return undefined;
+      if (
         (key === "recognitionMode" || key === "recognition") &&
         request.headers["x-sottoduo-recognition"] !== "streaming-v1"
       )
@@ -143,7 +148,7 @@ export function createHTTPServer(
   app.addHook("onSend", async (_request, reply) => {
     reply.header("Cache-Control", "no-store");
   });
-  // Field negotiation is for v1 clients; v2 routes own their schemas and text bodies.
+  // v2 routes negotiate their own fields and must leave text bodies unquoted.
   app.addHook("preHandler", async (request, reply) => {
     if (!request.url.startsWith("/v2/")) reply.serializer(encodeFor(request));
   });

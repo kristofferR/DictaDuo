@@ -307,9 +307,27 @@ ColumnLayout {
 
                     ComboBox {
                         implicitWidth: 330
-                        model: ["Automatic (Soniox, with Whisper fallback)", "Cloud only (Soniox)", "Local only (Whisper)"]
+                        model: ["Automatic (Soniox, with local fallback)", "Cloud only (Soniox)", "Local only"]
                         currentIndex: root.draft ? ["automatic", "cloud", "local"].indexOf(root.draft.preferences.recognitionMode || "automatic") : 0
                         onActivated: root.edit("recognitionMode", ["automatic", "cloud", "local"][currentIndex])
+                    }
+
+                }
+
+                Setting {
+                    ui: root.ui
+                    title: "Local engine"
+                    // Offered only when the server has another engine installed and reports its selection.
+                    visible: !!(root.draft && root.draft.preferences.recognitionEngine && root.health && root.health.recognitionEngines && root.health.recognitionEngines.length > 1)
+
+                    ComboBox {
+                        objectName: "recognitionEngine"
+                        implicitWidth: 245
+                        model: ["Whisper large-v3-turbo", "Parakeet v3"]
+                        currentIndex: root.draft ? ["whisper", "parakeet"].indexOf(root.draft.preferences.recognitionEngine || "whisper") : 0
+                        Accessible.name: "Local engine"
+                        Accessible.description: "Parakeet is faster but recognizes only 25 European languages, not Norwegian, and ignores recognition vocabulary."
+                        onActivated: root.edit("recognitionEngine", ["whisper", "parakeet"][currentIndex])
                     }
 
                 }
@@ -456,7 +474,7 @@ ColumnLayout {
                 }
                 SLabel {
                     ui: root.ui
-                    text: "Whisper audio is always kept. This also saves the original microphone audio for future dictations."
+                    text: "Recognition audio is always kept. This also saves the original microphone audio for future dictations."
                     color: root.ui.c.muted
                     font.pixelSize: 13
                     Layout.fillWidth: true

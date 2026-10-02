@@ -38,6 +38,8 @@ public struct DeviceIdentity: Codable, Equatable, Sendable {
 
 public struct ServerPreferences: Codable, Equatable, Sendable {
     public var recognitionMode: RecognitionMode
+    /// Nil from a server that predates engine selection; omitted updates keep the server's choice.
+    public var recognitionEngine: RecognitionEngine?
     public var language: String
     public var proofreadingPrompt: String
     public var vocabulary: String
@@ -66,18 +68,22 @@ public struct ServerPreferences: Codable, Equatable, Sendable {
     public static let supportedLanguages = ["en", "auto", "es", "fr", "de", "it", "pt", "nl", "ja", "zh", "ko", "hi", "ar", "pl", "ru", "uk", "sv"]
     public init(language: String = "en", proofreadingPrompt: String = Self.defaultProofreadingPrompt, vocabulary: String = "",
                 dictionary: PersonalDictionary = .default, textCorrectionEnabled: Bool = true,
-                keepOriginalAudio: Bool = true, recognitionMode: RecognitionMode = .automatic) {
+                keepOriginalAudio: Bool = true, recognitionMode: RecognitionMode = .automatic,
+                recognitionEngine: RecognitionEngine? = nil) {
         self.recognitionMode = recognitionMode
+        self.recognitionEngine = recognitionEngine
         self.language = language; self.proofreadingPrompt = proofreadingPrompt; self.vocabulary = vocabulary
         self.dictionary = dictionary; self.textCorrectionEnabled = textCorrectionEnabled
         self.keepOriginalAudio = keepOriginalAudio
     }
     private enum CodingKeys: String, CodingKey {
-        case recognitionMode, language, proofreadingPrompt, vocabulary, dictionary, textCorrectionEnabled, keepOriginalAudio
+        case recognitionMode, recognitionEngine, language, proofreadingPrompt, vocabulary, dictionary
+        case textCorrectionEnabled, keepOriginalAudio
     }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         recognitionMode = try values.decodeIfPresent(RecognitionMode.self, forKey: .recognitionMode) ?? .automatic
+        recognitionEngine = try values.decodeIfPresent(RecognitionEngine.self, forKey: .recognitionEngine)
         language = try values.decode(String.self, forKey: .language)
         proofreadingPrompt = try values.decodeIfPresent(String.self, forKey: .proofreadingPrompt) ?? Self.defaultProofreadingPrompt
         vocabulary = try values.decode(String.self, forKey: .vocabulary)
@@ -131,15 +137,17 @@ public struct ServerHealth: Codable, Equatable, Sendable {
     public var isDev: Bool
     public var ready: Bool
     public var generationRetry: Bool?
+    /// Installed local engines. Nil means Whisper only.
+    public var recognitionEngines: [RecognitionEngine]?
     public var speech: ModelRuntimeInfo
     public var proofreading: ModelRuntimeInfo
     public var message: String?
     public init(apiVersion: Int = SottoDuoAPI.version, serverVersion: String = "0.1.0", isDev: Bool = true,
                 ready: Bool, speech: ModelRuntimeInfo, proofreading: ModelRuntimeInfo, message: String? = nil,
-                generationRetry: Bool? = nil) {
+                generationRetry: Bool? = nil, recognitionEngines: [RecognitionEngine]? = nil) {
         self.apiVersion = apiVersion; self.serverVersion = serverVersion; self.isDev = isDev
         self.ready = ready; self.speech = speech; self.proofreading = proofreading; self.message = message
-        self.generationRetry = generationRetry
+        self.generationRetry = generationRetry; self.recognitionEngines = recognitionEngines
     }
 }
 

@@ -9,9 +9,11 @@ Linux desktop installations can optionally capture a server-connected microphone
 | Apple Silicon macOS | Whisper large-v3-turbo / whisper.cpp / Metal | Qwen3-4B-Instruct-2507 / Swift MLX / 4-bit |
 | Linux x86_64 or ARM64 | Whisper large-v3-turbo / whisper.cpp / CPU or CUDA | Qwen3-4B-Instruct-2507 / llama.cpp / Q4_K_M |
 
+Parakeet TDT 0.6B v3 can be installed alongside Whisper as a second local engine on either platform.
+
 ## Cloud recognition
 
-Soniox real-time streaming is the default when `SONIOX_API_KEY` or `--soniox-key-file` is configured. Automatic mode falls back to the existing local Whisper pipeline when cloud recognition is unavailable. Choose Automatic, Cloud only, or Local only in shared server preferences. Audio, transcripts, history, and optional Qwen proofreading are preserved. See [streaming setup and behavior](../docs/soniox-streaming.md).
+Soniox real-time streaming is the default when `SONIOX_API_KEY` or `--soniox-key-file` is configured. Automatic mode falls back to the local engine when cloud recognition is unavailable. Choose Automatic, Cloud only, or Local only in shared server preferences. Audio, transcripts, history, and optional Qwen proofreading are preserved. See [streaming setup and behavior](../docs/soniox-streaming.md).
 
 ## Models
 
@@ -24,6 +26,14 @@ SOTTODUO_MODEL_DIR="$PWD/.local/models" ./scripts/download-model.sh
 ```
 
 This installs and verifies `ggml-large-v3-turbo.bin`. The URL, revision, and checksum are pinned in `scripts/download-model.sh` and `Clients/macOS/Sources/SottoDuoCore/SpeechModel.swift`. The server build separately downloads the pinned Silero VAD model.
+
+### Parakeet, optional
+
+```sh
+SOTTODUO_MODEL_DIR="$PWD/.local/models" ./scripts/download-model.sh parakeet
+```
+
+This installs and verifies `ggml-parakeet-tdt-0.6b-v3-f16.bin`. Pass it with `--parakeet-model` and the server offers **Local engine** in shared preferences. Whisper stays installed and remains the default. Parakeet is faster and detects 25 European languages itself, but not Norwegian, and it ignores recognition vocabulary; dictionary replacements and Qwen cleanup still apply. Each take keeps the engine selected when it started; if Parakeet is later removed from the server, its takes and retries run on Whisper. The server warms the selected engine and keeps an engine loaded once it has been used, so switching costs one model load.
 
 ### Qwen on macOS
 
@@ -113,6 +123,7 @@ For server-only development alongside an installed SottoDuo instance, use `--por
 | `--host`, `--port` | `SOTTODUO_SERVER_HOST`, `SOTTODUO_SERVER_PORT` |
 | `--data-dir`, `--token-file` | `SOTTODUO_SERVER_DATA_DIR`, `SOTTODUO_SERVER_TOKEN_FILE` |
 | `--speech-helper`, `--speech-model` | `SOTTODUO_ENGINE_PATH`, `SOTTODUO_SPEECH_MODEL` |
+| `--parakeet-model` (optional) | `SOTTODUO_PARAKEET_MODEL` |
 | `--vad-model` | `SOTTODUO_VAD_PATH` |
 | `--proof-helper`, `--proof-model` | `SOTTODUO_TEXT_ENGINE_PATH`, `SOTTODUO_TEXT_MODEL` |
 | `--dev` | `SOTTODUO_DEV=1` |

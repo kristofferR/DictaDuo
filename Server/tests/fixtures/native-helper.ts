@@ -4,6 +4,9 @@ import { appendFileSync } from "node:fs";
 
 const modelFlag = process.argv.indexOf("--model");
 const mode = basename(process.argv[modelFlag + 1] ?? "valid");
+const engineFlag = process.argv.indexOf("--engine");
+const engine = engineFlag < 0 ? "whisper" : process.argv[engineFlag + 1];
+const parakeet = engine === "parakeet";
 const emit = (value: object) => process.stdout.write(JSON.stringify(value) + "\n");
 
 if (mode === "no-ready") await new Promise(() => setInterval(() => {}, 10_000));
@@ -12,7 +15,11 @@ if (mode === "ignore-term") {
   process.on("SIGTERM", () => {});
   setInterval(() => {}, 10_000);
 }
-emit({ type: "ready", engineVersion: mode === "ignore-term" ? `pid:${process.pid}` : "fixture-1" });
+emit({
+  type: "ready",
+  engineVersion:
+    mode === "ignore-term" ? `pid:${process.pid}` : parakeet ? "parakeet-fixture" : "fixture-1",
+});
 let buffer = "";
 for await (const chunk of process.stdin) {
   buffer += chunk.toString();
@@ -80,7 +87,8 @@ for await (const chunk of process.stdin) {
       text: mode === "invalid-result" ? "\0bad" : "Hello world.",
       duration: 2,
       elapsed: 0.1,
-      language: "en",
+      // Parakeet detects its languages without reporting one.
+      language: parakeet ? "auto" : "en",
       ...(request.type === "transcribe"
         ? { segmentSpans: [{ text: "Hello world.", startSeconds: 0, endSeconds: 2 }] }
         : {}),
@@ -103,12 +111,19 @@ for await (const chunk of process.stdin) {
           }
         : {}),
       ...(request.type === "transcribe"
-        ? {
-            includedTerms: mode === "invalid-hints" ? ["invented"] : terms,
-            omittedTerms: [],
-            tokenCount: 1,
-            tokenBudget: 223,
-          }
+        ? parakeet
+          ? {
+              includedTerms: mode === "invalid-hints" ? ["invented"] : [],
+              omittedTerms: terms,
+              tokenCount: 0,
+              tokenBudget: 0,
+            }
+          : {
+              includedTerms: mode === "invalid-hints" ? ["invented"] : terms,
+              omittedTerms: [],
+              tokenCount: 1,
+              tokenBudget: 223,
+            }
         : {}),
     };
     if (mode === "split-json") {

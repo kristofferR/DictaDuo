@@ -1,4 +1,5 @@
 #include "whisper.h"
+#include "parakeet.h"
 #include "json.hpp"
 
 // whisper.cpp vendors dr_wav inside miniaudio. Compile only its file decoder;
@@ -172,12 +173,19 @@ struct Progress {
     int last = -1;
 };
 
-void reportProgress(whisper_context *, whisper_state *, int value, void *opaque) {
-    auto &progress = *static_cast<Progress *>(opaque);
+void reportProgress(Progress &progress, int value) {
     value = std::clamp(value, 0, 100);
     if (value <= progress.last) return;
     progress.last = value;
     emit({{"type", "progress"}, {"id", progress.id}, {"value", value / 100.0}});
+}
+
+void reportWhisperProgress(whisper_context *, whisper_state *, int value, void *opaque) {
+    reportProgress(*static_cast<Progress *>(opaque), value);
+}
+
+void reportParakeetProgress(parakeet_context *, parakeet_state *, int value, void *opaque) {
+    reportProgress(*static_cast<Progress *>(opaque), value);
 }
 
 std::optional<std::string> stringField(const json &request, const char *key) {
@@ -253,66 +261,124 @@ VocabularyHints selectVocabulary(whisper_context *context, const std::vector<std
     return hints;
 }
 
-void transcribe(whisper_context *context, whisper_vad_context *vad, int threads, const json &request) {
+struct Request {
+    std::string id;
+    std::string path;
+    std::string language;
+    std::vector<std::string> terms;
+};
+
+std::optional<Request> parseRequest(const json &request) {
     const auto id = stringField(request, "id");
     if (!id || id->empty() || id->size() > 256) {
         emitError("A transcription request needs a nonempty id (up to 256 bytes).");
-        return;
+        return std::nullopt;
     }
     const auto path = stringField(request, "path");
     if (!path || path->empty() || path->size() > 4096) {
         emitError("A transcription request needs a valid WAV path.", *id);
-        return;
+        return std::nullopt;
     }
     const auto language = request.contains("language") ? stringField(request, "language") : std::optional<std::string>("en");
     if (!language || (*language != "auto" && whisper_lang_id(language->c_str()) < 0)) {
         emitError("The requested language is not supported.", *id);
-        return;
+        return std::nullopt;
     }
-    const auto vocabulary = vocabularyTerms(request);
+    auto vocabulary = vocabularyTerms(request);
     if (const auto failure = std::get_if<std::string>(&vocabulary)) {
         emitError(*failure, *id);
-        return;
+        return std::nullopt;
     }
+    return Request{*id, *path, *language, std::move(std::get<std::vector<std::string>>(vocabulary))};
+}
 
-    const auto start = Clock::now();
-    const auto hints = selectVocabulary(context, std::get<std::vector<std::string>>(vocabulary));
-    auto loaded = readAudio(*path);
-    if (const auto failure = std::get_if<std::string>(&loaded)) {
-        emitError(*failure, *id);
-        return;
+/// Silero rejects fan noise, tones, and other nonspeech that a recognizer can
+/// otherwise turn into invented sentences. Its recurrent state resets per call.
+bool detectSpeech(whisper_vad_context *vad, Audio &audio, const std::string &id) {
+    if (audio.silent) return true;
+    if (!whisper_vad_detect_speech(vad, audio.samples.data(), static_cast<int>(audio.samples.size()))) {
+        emitError("Local speech detection failed. Try recording again.", id);
+        return false;
     }
-    auto &audio = std::get<Audio>(loaded);
-    Progress progress{*id};
-    reportProgress(nullptr, nullptr, 0, &progress);
+    auto detection = whisper_vad_default_params();
+    detection.threshold = 0.5f;
+    detection.min_speech_duration_ms = 120;
+    const std::unique_ptr<whisper_vad_segments, decltype(&whisper_vad_free_segments)> segments(
+        whisper_vad_segments_from_probs(vad, detection), whisper_vad_free_segments);
+    if (!segments) {
+        emitError("Local speech detection failed. Try recording again.", id);
+        return false;
+    }
+    // Keep the complete recording when there is speech; this avoids cutting
+    // off quiet word boundaries or short pauses inside a sentence.
+    audio.silent = whisper_vad_segments_n_segments(segments.get()) == 0;
+    return true;
+}
+
+/// Exact text pieces with acoustic times, in order. A piece is emitted only
+/// once it is complete UTF-8; invalid timing falls back to segment envelopes.
+struct TimedText {
     std::string text;
     json spans = json::array();
     json segmentSpans = json::array();
-    bool tokenAlignmentValid = true;
+    bool aligned = true;
     double previousStart = 0;
     double previousEnd = 0;
-    std::string detectedLanguage = *language;
-    if (!audio.silent) {
-        // A small CPU-only Silero pass rejects fan noise, tones, and other
-        // nonspeech that Whisper can otherwise turn into invented sentences.
-        // Its recurrent state is reset on each call, just like the ASR context.
-        if (!whisper_vad_detect_speech(vad, audio.samples.data(), static_cast<int>(audio.samples.size()))) {
-            emitError("Local speech detection failed. Try recording again.", *id);
-            return;
+    std::string pending;
+    double pendingStart = 0;
+
+    void add(const std::string &piece, double begin, double finish, double duration) {
+        // Clamp only the final timestamp quantization tick, never arbitrary bad data.
+        const bool overrun = finish > duration + 0.02;
+        finish = std::min(finish, duration);
+        if (begin < 0 || overrun || finish < begin || begin < previousStart || finish < previousEnd) {
+            aligned = false;
         }
-        auto detection = whisper_vad_default_params();
-        detection.threshold = 0.5f;
-        detection.min_speech_duration_ms = 120;
-        const std::unique_ptr<whisper_vad_segments, decltype(&whisper_vad_free_segments)> segments(
-            whisper_vad_segments_from_probs(vad, detection), whisper_vad_free_segments);
-        if (!segments) {
-            emitError("Local speech detection failed. Try recording again.", *id);
-            return;
+        if (pending.empty()) pendingStart = begin;
+        pending += piece;
+        if (completeUTF8(pending)) {
+            spans.push_back({{"text", pending}, {"startSeconds", pendingStart}, {"endSeconds", finish}});
+            pending.clear();
         }
-        audio.silent = whisper_vad_segments_n_segments(segments.get()) == 0;
-        // Keep the complete recording when there is speech; this avoids cutting
-        // off quiet word boundaries or short pauses inside a sentence.
+        previousStart = begin;
+        previousEnd = finish;
     }
+
+    void segment(const std::string &segmentText, double begin, double finish, double duration) {
+        if (segmentText.empty()) return;
+        const double start = std::clamp(begin, 0.0, duration);
+        segmentSpans.push_back({{"text", segmentText}, {"startSeconds", start},
+                                {"endSeconds", std::clamp(finish, start, duration)}});
+    }
+
+    json result(const std::string &id, const Audio &audio, Clock::time_point start, const std::string &language) {
+        // Do not fabricate corrected token evidence. Conservative segment
+        // envelopes retain every byte; ambiguous overlap then gets one fresh
+        // bounded decode.
+        if (!aligned || !pending.empty()) spans = segmentSpans;
+        return {{"type", "result"}, {"id", id}, {"text", trim(text)},
+                {"duration", audio.duration}, {"elapsed", std::chrono::duration<double>(Clock::now() - start).count()},
+                {"language", language}, {"spans", spans}, {"segmentSpans", segmentSpans}};
+    }
+};
+
+void transcribeWhisper(whisper_context *context, whisper_vad_context *vad, int threads, const json &input) {
+    const auto request = parseRequest(input);
+    if (!request) return;
+    const auto &id = request->id;
+    const auto start = Clock::now();
+    const auto hints = selectVocabulary(context, request->terms);
+    auto loaded = readAudio(request->path);
+    if (const auto failure = std::get_if<std::string>(&loaded)) {
+        emitError(*failure, id);
+        return;
+    }
+    auto &audio = std::get<Audio>(loaded);
+    Progress progress{id};
+    reportProgress(progress, 0);
+    TimedText timed;
+    std::string detectedLanguage = request->language;
+    if (!detectSpeech(vad, audio, id)) return;
     if (!audio.silent) {
         auto parameters = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH);
         parameters.n_threads = threads;
@@ -331,7 +397,7 @@ void transcribe(whisper_context *context, whisper_vad_context *vad, int threads,
         parameters.print_timestamps = false;
         parameters.suppress_blank = true;
         parameters.suppress_nst = true;
-        parameters.language = language->c_str();
+        parameters.language = request->language.c_str();
         parameters.prompt_tokens = hints.tokens.empty() ? nullptr : hints.tokens.data();
         parameters.prompt_n_tokens = static_cast<int>(hints.tokens.size());
         parameters.carry_initial_prompt = !hints.tokens.empty();
@@ -339,11 +405,11 @@ void transcribe(whisper_context *context, whisper_vad_context *vad, int threads,
         parameters.temperature_inc = 0; // Deterministic, bounded dictation latency.
         parameters.beam_search.beam_size = 5;
         parameters.no_speech_thold = 0.6f;
-        parameters.progress_callback = reportProgress;
+        parameters.progress_callback = reportWhisperProgress;
         parameters.progress_callback_user_data = &progress;
 
         if (whisper_full(context, parameters, audio.samples.data(), static_cast<int>(audio.samples.size())) != 0) {
-            emitError("Local transcription failed. Try recording again.", *id);
+            emitError("Local transcription failed. Try recording again.", id);
             return;
         }
         const auto lang = whisper_lang_str(whisper_full_lang_id(context));
@@ -351,51 +417,113 @@ void transcribe(whisper_context *context, whisper_vad_context *vad, int threads,
         for (int i = 0; i < whisper_full_n_segments(context); ++i) {
             if (whisper_full_get_segment_no_speech_prob(context, i) > parameters.no_speech_thold) continue;
             // Whisper owns punctuation and word spacing. Only trim the outside.
-            text += whisper_full_get_segment_text(context, i);
             const std::string segmentText = whisper_full_get_segment_text(context, i);
-            if (!segmentText.empty()) {
-                const double segmentStart = std::clamp(whisper_full_get_segment_t0(context, i) / 100.0, 0.0, audio.duration);
-                const double segmentEnd = std::clamp(whisper_full_get_segment_t1(context, i) / 100.0, segmentStart, audio.duration);
-                segmentSpans.push_back({{"text", segmentText}, {"startSeconds", segmentStart}, {"endSeconds", segmentEnd}});
-            }
+            timed.text += segmentText;
+            timed.segment(segmentText, whisper_full_get_segment_t0(context, i) / 100.0,
+                          whisper_full_get_segment_t1(context, i) / 100.0, audio.duration);
             std::string tokenText;
-            std::string pendingPiece;
-            double pendingStart = 0;
             for (int j = 0; j < whisper_full_n_tokens(context, i); ++j) {
                 const auto token = whisper_full_get_token_data(context, i, j);
                 if (token.id >= whisper_token_eot(context)) continue;
                 const std::string piece = whisper_full_get_token_text(context, i, j);
                 if (piece.empty()) continue;
-                // whisper.cpp estimates times in centiseconds. Clamp only the
-                // final timestamp quantization tick, never arbitrary bad data.
-                const double begin = token.t0 / 100.0;
-                const double finish = std::min(audio.duration, token.t1 / 100.0);
-                if (token.t0 < 0 || token.t1 < token.t0 || begin < previousStart ||
-                    finish < previousEnd || finish < begin || token.t1 / 100.0 > audio.duration + 0.02) {
-                    tokenAlignmentValid = false;
-                }
-                if (pendingPiece.empty()) pendingStart = begin;
-                pendingPiece += piece;
-                if (completeUTF8(pendingPiece)) {
-                    spans.push_back({{"text", pendingPiece}, {"startSeconds", pendingStart}, {"endSeconds", finish}});
-                    pendingPiece.clear();
-                }
+                // whisper.cpp estimates times in centiseconds.
+                timed.add(piece, token.t0 / 100.0, token.t1 / 100.0, audio.duration);
                 tokenText += piece;
-                previousStart = begin;
-                previousEnd = finish;
             }
-            if (!pendingPiece.empty() || tokenText != segmentText) tokenAlignmentValid = false;
+            if (tokenText != segmentText) timed.aligned = false;
         }
     }
-    // Upstream's energy-adjusted word estimates can contract past their start.
-    // Do not fabricate corrected token evidence. Conservative segment envelopes
-    // retain every byte; ambiguous overlap then gets one fresh bounded decode.
-    if (!tokenAlignmentValid) spans = segmentSpans;
-    reportProgress(nullptr, nullptr, 100, &progress);
-    emit({{"type", "result"}, {"id", *id}, {"text", trim(std::move(text))},
-          {"duration", audio.duration}, {"elapsed", std::chrono::duration<double>(Clock::now() - start).count()},
-          {"language", detectedLanguage}, {"spans", spans}, {"segmentSpans", segmentSpans}, {"includedTerms", hints.included}, {"omittedTerms", hints.omitted},
-          {"tokenCount", hints.tokens.size()}, {"tokenBudget", hints.tokenBudget}});
+    reportProgress(progress, 100);
+    auto result = timed.result(id, audio, start, detectedLanguage);
+    result["includedTerms"] = hints.included;
+    result["omittedTerms"] = hints.omitted;
+    result["tokenCount"] = hints.tokens.size();
+    result["tokenBudget"] = hints.tokenBudget;
+    emit(result);
+}
+
+bool sentenceEnd(const std::string &text) {
+    const auto last = text.find_last_not_of(" \t\r\n");
+    return last != std::string::npos && (text[last] == '.' || text[last] == '?' || text[last] == '!');
+}
+
+/// Parakeet TDT detects its supported languages itself and exposes neither a
+/// language ID nor vocabulary prompting. The result never claims either.
+void transcribeParakeet(parakeet_context *context, whisper_vad_context *vad, int threads, const json &input) {
+    const auto request = parseRequest(input);
+    if (!request) return;
+    const auto &id = request->id;
+    const auto start = Clock::now();
+    auto loaded = readAudio(request->path);
+    if (const auto failure = std::get_if<std::string>(&loaded)) {
+        emitError(*failure, id);
+        return;
+    }
+    auto &audio = std::get<Audio>(loaded);
+    Progress progress{id};
+    reportProgress(progress, 0);
+    TimedText timed;
+    if (!detectSpeech(vad, audio, id)) return;
+    if (!audio.silent) {
+        auto parameters = parakeet_full_default_params(PARAKEET_SAMPLING_GREEDY);
+        parameters.n_threads = threads;
+        parameters.no_context = true; // Never leak one dictation into the next.
+        parameters.progress_callback = reportParakeetProgress;
+        parameters.progress_callback_user_data = &progress;
+        // The full API covers recordings beyond the model's nominal context;
+        // parakeet_chunk would truncate them.
+        if (parakeet_full(context, parameters, audio.samples.data(), static_cast<int>(audio.samples.size())) != 0) {
+            emitError("Local transcription failed. Try recording again.", id);
+            return;
+        }
+        std::string expected;
+        // Parakeet returns one segment per call. Bounded windows commit text at
+        // segment ends, so split at sentence ends and long pauses instead.
+        std::string segmentText;
+        double segmentStart = 0, segmentEnd = 0;
+        for (int i = 0; i < parakeet_full_n_segments(context); ++i) {
+            expected += parakeet_full_get_segment_text(context, i);
+            for (int j = 0; j < parakeet_full_n_tokens(context, i); ++j) {
+                const auto token = parakeet_full_get_token_data(context, i, j);
+                const char *raw = parakeet_token_to_str(context, token.id);
+                if (!raw) continue;
+                const bool first = timed.text.empty();
+                std::string piece(static_cast<size_t>(std::max(0, parakeet_token_to_text(raw, first, nullptr, 0))), '\0');
+                if (piece.empty()) continue;
+                parakeet_token_to_text(raw, first, piece.data(), static_cast<int>(piece.size()) + 1);
+                // Times are 10 ms mel frames, like whisper.cpp's centiseconds.
+                const double begin = token.t0 / 100.0;
+                const double finish = token.t1 / 100.0;
+                if (!segmentText.empty() && piece.front() == ' ' &&
+                    (sentenceEnd(segmentText) || begin - segmentEnd >= 1.0)) {
+                    timed.segment(segmentText, segmentStart, segmentEnd, audio.duration);
+                    segmentText.clear();
+                }
+                if (segmentText.empty()) segmentStart = begin;
+                segmentText += piece;
+                segmentEnd = std::max(segmentEnd, finish);
+                timed.text += piece;
+                timed.add(piece, begin, finish, audio.duration);
+            }
+        }
+        timed.segment(segmentText, segmentStart, segmentEnd, audio.duration);
+        if (timed.text != expected) {
+            // Token pieces must reproduce the decoder's text exactly. Otherwise
+            // report it as one envelope rather than misattributing any byte.
+            timed.text = expected;
+            timed.segmentSpans = json::array();
+            timed.segment(trim(expected), 0, audio.duration, audio.duration);
+            timed.aligned = false;
+        }
+    }
+    reportProgress(progress, 100);
+    auto result = timed.result(id, audio, start, "auto");
+    result["includedTerms"] = json::array();
+    result["omittedTerms"] = request->terms;
+    result["tokenCount"] = 0;
+    result["tokenBudget"] = 0;
+    emit(result);
 }
 
 void findBoundary(whisper_vad_context *vad, const json &request) {
@@ -449,15 +577,18 @@ int main(int argc, char **argv) {
     std::ios::sync_with_stdio(false);
     std::string model;
     std::string vadModel;
+    std::string engine = "whisper";
     int threads = static_cast<int>(std::clamp(std::thread::hardware_concurrency(), 1u, 8u));
+    constexpr auto usage = "Usage: sottoduo-engine --model PATH --vad-model PATH [--engine whisper|parakeet] [--threads 1..32]";
     for (int i = 1; i < argc; ++i) {
         const std::string argument = argv[i];
         if (argument == "--help") {
-            std::fputs("Usage: sottoduo-engine --model PATH --vad-model PATH [--threads 1..32]\nJSON lines on stdin and stdout; diagnostics only on stderr.\n", stderr);
+            std::fprintf(stderr, "%s\nJSON lines on stdin and stdout; diagnostics only on stderr.\n", usage);
             return 0;
         }
-        if ((argument != "--model" && argument != "--vad-model" && argument != "--threads") || i + 1 >= argc) {
-            emitError("Usage: sottoduo-engine --model PATH --vad-model PATH [--threads 1..32]");
+        if ((argument != "--model" && argument != "--vad-model" && argument != "--engine" && argument != "--threads") ||
+            i + 1 >= argc) {
+            emitError(usage);
             return 2;
         }
         const std::string value = argv[++i];
@@ -465,6 +596,12 @@ int main(int argc, char **argv) {
             model = value;
         } else if (argument == "--vad-model") {
             vadModel = value;
+        } else if (argument == "--engine") {
+            if (value != "whisper" && value != "parakeet") {
+                emitError("The speech engine must be whisper or parakeet.");
+                return 2;
+            }
+            engine = value;
         } else {
             const auto parsed = std::from_chars(value.data(), value.data() + value.size(), threads);
             if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || threads < 1 || threads > 32) {
@@ -485,13 +622,24 @@ int main(int argc, char **argv) {
 
     watchParent();
     whisper_log_set(libraryLog, nullptr);
+    parakeet_log_set(libraryLog, nullptr);
     ggml_log_set(libraryLog, nullptr);
-    auto parameters = whisper_context_default_params();
-    parameters.use_gpu = true;
-    parameters.flash_attn = true;
-    const std::unique_ptr<whisper_context, decltype(&whisper_free)> context(
-        whisper_init_from_file_with_params(model.c_str(), parameters), whisper_free);
-    if (!context) {
+    std::unique_ptr<whisper_context, decltype(&whisper_free)> whisper(nullptr, whisper_free);
+    std::unique_ptr<parakeet_context, decltype(&parakeet_free)> parakeet(nullptr, parakeet_free);
+    std::string engineVersion;
+    if (engine == "parakeet") {
+        auto parameters = parakeet_context_default_params();
+        parameters.use_gpu = true;
+        parakeet.reset(parakeet_init_from_file_with_params(model.c_str(), parameters));
+        engineVersion = std::string("parakeet.cpp/") + parakeet_version();
+    } else {
+        auto parameters = whisper_context_default_params();
+        parameters.use_gpu = true;
+        parameters.flash_attn = true;
+        whisper.reset(whisper_init_from_file_with_params(model.c_str(), parameters));
+        engineVersion = whisper_version();
+    }
+    if (!whisper && !parakeet) {
         emitError("The model could not be loaded. Check available memory or download it again.");
         return 1;
     }
@@ -504,7 +652,7 @@ int main(int argc, char **argv) {
         emitError("The local speech detector could not load. Rebuild SottoDuo to restore it.");
         return 1;
     }
-    emit({{"type", "ready"}, {"engineVersion", whisper_version()}});
+    emit({{"type", "ready"}, {"engineVersion", engineVersion}});
 
     // Fixed-size reads prevent a malformed caller from allocating unbounded RAM.
     std::vector<char> buffer(maxRequestBytes + 1);
@@ -524,7 +672,8 @@ int main(int argc, char **argv) {
             emitError("Unknown request type.", stringField(request, "id").value_or(""));
             continue;
         }
-        transcribe(context.get(), vad.get(), threads, request);
+        if (parakeet) transcribeParakeet(parakeet.get(), vad.get(), threads, request);
+        else transcribeWhisper(whisper.get(), vad.get(), threads, request);
     }
     if (!std::cin.eof()) {
         emitError("The request exceeds the 1 MB limit.");

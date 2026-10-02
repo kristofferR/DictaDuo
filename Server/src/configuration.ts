@@ -24,9 +24,11 @@ export interface ServerConfiguration {
 
 export const usage = `SottoDuo server — independent dictation service
 sottoduo-server --data-dir PATH --speech-helper PATH --speech-model PATH --vad-model PATH \
-  --proof-helper PATH --proof-model PATH [--host 127.0.0.1] [--port 8391] [--token-file PATH] [--dev]
+  --proof-helper PATH --proof-model PATH [--parakeet-model PATH] [--host 127.0.0.1] [--port 8391] \
+  [--token-file PATH] [--dev]
 
 macOS uses Whisper/Metal and Qwen/MLX. Linux uses Whisper/CUDA or CPU and Qwen/llama.cpp.
+--parakeet-model additionally offers Parakeet TDT 0.6B v3 as a shared recognition engine choice.
 Soniox streaming is preferred when SONIOX_API_KEY or --soniox-key-file is configured.
 Whisper remains the automatic offline fallback.
 Models must already exist. The server never downloads or imports personal data automatically.
@@ -47,6 +49,7 @@ const names = new Set([
   "vad-model",
   "proof-helper",
   "proof-model",
+  "parakeet-model",
   "capture-helper",
   "capture-host-id",
   "button-helper",
@@ -88,6 +91,10 @@ export async function parseConfiguration(
     const raw = value(name, variable);
     if (!raw) throw new Error(`Configure --${name} or ${variable}.`);
     return expandPath(raw);
+  };
+  const optionalPath = (name: string, variable: string) => {
+    const raw = value(name, variable);
+    return raw ? expandPath(raw) : undefined;
   };
   const rawPort = value("port", "SOTTODUO_SERVER_PORT") ?? "8391";
   const port = Number(rawPort);
@@ -176,6 +183,7 @@ export async function parseConfiguration(
       vadModel: path("vad-model", "SOTTODUO_VAD_PATH"),
       proofHelper: path("proof-helper", "SOTTODUO_TEXT_ENGINE_PATH"),
       proofModel: path("proof-model", "SOTTODUO_TEXT_MODEL"),
+      parakeetModel: optionalPath("parakeet-model", "SOTTODUO_PARAKEET_MODEL"),
     }),
   } satisfies ServerConfiguration;
 }

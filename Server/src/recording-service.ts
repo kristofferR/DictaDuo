@@ -32,6 +32,12 @@ import type {
 import { ServiceError } from "./errors.ts";
 import { InferenceError } from "./inference/inference-error.ts";
 import {
+  detectedLanguage,
+  localSpeechModel,
+  recognitionEngine,
+  reportedEngine,
+} from "./inference/engines.ts";
+import {
   startSonioxLiveStream,
   type SonioxConfiguration,
   type StartLiveSpeechStream,
@@ -545,9 +551,16 @@ export class RecordingService {
           snapshot.device.id === request.device.id,
       );
       if (existing) return copy(existing.snapshot);
-      await this.hooks.admit?.();
+      // Readiness must cover the settings this session freezes; preferences
+      // that change during the check are checked again.
+      let settings = await this.hooks.getPreferences();
+      for (;;) {
+        await this.hooks.admit?.();
+        const current = await this.hooks.getPreferences();
+        if (current.revision === settings.revision) break;
+        settings = current;
+      }
       await requireDiskSpace(this.configuration.dataDirectory);
-      const settings = await this.hooks.getPreferences();
       const id = uuid();
       await ensureDirectory(this.directory(id));
       await this.syncDirectory(this.root);
@@ -1095,7 +1108,11 @@ export class RecordingService {
    * real time. The result lands in history; nothing is delivered.
    */
   async retry(id: string) {
-    const readiness = await this.inference.readiness(false);
+    const engine = recognitionEngine(
+      this.lookup(id).snapshot.settings.preferences,
+      this.inference.engines,
+    );
+    const readiness = await this.inference.readiness(false, engine);
     return this.mutate(async () => {
       this.assertRunning();
       const manifest = copy(this.lookup(id));
@@ -1108,7 +1125,11 @@ export class RecordingService {
           "not_retryable",
           "Only failed recordings with saved audio can be transcribed again.",
         );
-      if (!readiness.available) throw failure("server_unavailable", readiness.message, 503);
+      if (!readiness.available) {
+        // Verify and load the take's engine so a later retry can run.
+        void this.inference.warmUp(false, undefined, engine).catch(() => {});
+        throw failure("server_unavailable", readiness.message, 503);
+      }
       manifest.snapshot.processingState = "queued";
       delete manifest.snapshot.error;
       manifest.snapshot.recognition = { provider: "whisper" };
@@ -1591,7 +1612,7 @@ export class RecordingService {
             formattingRejectionReason: assembled.formatted.formattingRejectionReason,
             inferenceAudio: this.audioMetadata(manifest.snapshot, "inference"),
             originalAudio: this.audioMetadata(manifest.snapshot, "original"),
-            detectedLanguage: assembled.speech?.language,
+            detectedLanguage: assembled.speech && detectedLanguage(assembled.speech.language),
             speech: assembled.speech
               ? manifest.snapshot.recognition?.provider === "soniox" && this.configuration.soniox
                 ? {
@@ -1600,9 +1621,15 @@ export class RecordingService {
                     processingSeconds: assembled.speechSeconds,
                   }
                 : {
-                    modelID: "whisper-large-v3-turbo",
+                    // The windows' engine, which a restart may have uninstalled since.
+                    ...localSpeechModel(
+                      reportedEngine(assembled.speech.engineVersion) ??
+                        recognitionEngine(
+                          manifest.snapshot.settings.preferences,
+                          this.inference.engines,
+                        ),
+                    ),
                     modelSHA256: assembled.speech.modelSHA256,
-                    backend: process.platform === "darwin" ? "whisper.cpp/Metal" : "whisper.cpp",
                     engineVersion: assembled.speech.engineVersion,
                     processingSeconds: assembled.speechSeconds,
                   }
@@ -1680,7 +1707,11 @@ export class RecordingService {
               bytes,
             ]),
           );
-          const boundary = await this.inference.findSpeechBoundary(wavPath, signal);
+          const boundary = await this.inference.findSpeechBoundary(
+            wavPath,
+            signal,
+            recognitionEngine(settings, this.inference.engines),
+          );
           if (boundary !== undefined) {
             const offset = Math.round(boundary * 16000);
             if (
@@ -1892,6 +1923,7 @@ export class RecordingService {
         recognitionVocabularyTerms(settings.dictionary, settings.vocabulary),
         undefined,
         signal,
+        recognitionEngine(settings, this.inference.engines),
       );
     return transcribe().catch((error: unknown) => {
       signal.throwIfAborted();

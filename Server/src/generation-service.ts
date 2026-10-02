@@ -27,12 +27,19 @@ import type {
   WisprFlowImportRequest,
   WisprFlowKnownIDsRequest,
 } from "./api.ts";
-import { API_VERSION } from "./api.ts";
+import { API_VERSION, type RecognitionEngine } from "./api.ts";
 import type { components } from "./generated/api.ts";
 import { decodePersonalDictionary } from "./domain/dictionary.ts";
 import { validateBody } from "./validation.ts";
 import type { InferenceBackend } from "./inference/native-inference.ts";
 import { ServiceError } from "./errors.ts";
+import {
+  detectedLanguage,
+  engineName,
+  localSpeechModel,
+  recognitionEngine,
+  selectedEngine,
+} from "./inference/engines.ts";
 import {
   atomicPrivateWrite,
   ensureDirectory,
@@ -89,6 +96,7 @@ export const defaultPreferences = (): PreferencesSnapshot => ({
   revision: 0,
   preferences: {
     recognitionMode: "automatic",
+    recognitionEngine: "whisper",
     language: "en",
     proofreadingPrompt: defaultProofreadingPrompt,
     vocabulary: "",
@@ -106,6 +114,7 @@ function normalizePreferences(
   return {
     ...value,
     recognitionMode: value.recognitionMode ?? "automatic",
+    recognitionEngine: selectedEngine(value),
     dictionary: dictionary.value!,
     proofreadingPrompt: value.proofreadingPrompt ?? defaultProofreadingPrompt,
   };
@@ -146,7 +155,9 @@ export class GenerationService {
   private processingQueue: Promise<void> = Promise.resolve();
   private warmController?: AbortController;
   private warmTask?: Promise<void>;
-  private warming = false;
+  /** The engine warming now, and engines to warm in turn once it or a run ends. */
+  private warming?: RecognitionEngine;
+  private queuedWarmups = new Set<RecognitionEngine>();
   private stopping = false;
   private timer?: ReturnType<typeof setInterval>;
   private queue: Promise<unknown> = Promise.resolve();
@@ -323,7 +334,8 @@ export class GenerationService {
     });
   }
   async health(): Promise<ServerHealth> {
-    const state = await this.inference.readiness(false);
+    const engine = recognitionEngine(this.preferences.preferences, this.engines);
+    const state = await this.inference.readiness(false, engine);
     let writable = true;
     try {
       await access(this.configuration.dataDirectory, constants.W_OK);
@@ -350,12 +362,14 @@ export class GenerationService {
       return {
         apiVersion: API_VERSION,
         generationRetry: true,
+        recognitionEngines: [...this.engines],
         serverVersion: "0.1.0",
         isDev: this.configuration.development,
         ready,
         speech: {
-          modelID: cloud ? this.configuration.soniox!.model : "whisper-large-v3-turbo",
-          backend: cloud ? "soniox/websocket" : this.speechBackend,
+          ...(cloud
+            ? { modelID: this.configuration.soniox!.model, backend: "soniox/websocket" }
+            : localSpeechModel(engine)),
           ready:
             this.preferences.preferences.recognitionMode === "cloud"
               ? cloud
@@ -407,11 +421,20 @@ export class GenerationService {
           "stale_preferences",
           "Preferences changed on another device. Reload and try again.",
         );
+      const current = this.preferences.preferences;
       const normalized = normalizePreferences({
         ...update.preferences,
-        recognitionMode:
-          update.preferences.recognitionMode ?? this.preferences.preferences.recognitionMode,
+        recognitionMode: update.preferences.recognitionMode ?? current.recognitionMode,
+        recognitionEngine: update.preferences.recognitionEngine ?? current.recognitionEngine,
       });
+      const engine = selectedEngine(normalized);
+      // Keeping an engine that was since uninstalled is allowed; choosing one is not.
+      if (engine !== selectedEngine(current) && !this.engines.includes(engine))
+        throw new ServiceError(
+          400,
+          "invalid_preferences",
+          `${engineName(engine)} is not installed on this server.`,
+        );
       const error = preferencesValidationError(normalized);
       if (error) throw new ServiceError(400, "invalid_preferences", error);
       const next = { revision: this.preferences.revision + 1, preferences: normalized };
@@ -432,10 +455,14 @@ export class GenerationService {
     request: CreateGenerationRequest,
     remote?: { source: components["schemas"]["AudioSourceIdentity"]; owner: string },
   ) {
-    const state = await this.inference.readiness(false);
+    const checked = recognitionEngine(this.preferences.preferences, this.engines);
+    let state = await this.inference.readiness(false, checked);
     return this.mutate(async () => {
       if (this.stopping)
         throw new ServiceError(503, "server_stopping", "The server is shutting down.");
+      // The take freezes the preferences current now; a concurrent engine switch is checked again.
+      const engine = recognitionEngine(this.preferences.preferences, this.engines);
+      if (engine !== checked) state = await this.inference.readiness(false, engine);
       const validLabel = (text: string) =>
         text.length > 0 &&
         graphemes(text) <= 128 &&
@@ -836,7 +863,8 @@ export class GenerationService {
    * Soniox stream cannot be replayed.
    */
   async retry(id: string) {
-    const state = await this.inference.readiness(false);
+    const engine = recognitionEngine(this.getInternal(id).settings.preferences, this.engines);
+    const state = await this.inference.readiness(false, engine);
     return this.mutate(async () => {
       if (this.stopping)
         throw new ServiceError(503, "server_stopping", "The server is shutting down.");
@@ -854,7 +882,8 @@ export class GenerationService {
           "Only failed or cancelled recordings can be transcribed again.",
         );
       if (!state.available) {
-        this.beginWarmup();
+        // The take's frozen engine may differ from the shared preference.
+        this.beginWarmup(engine);
         throw new ServiceError(503, "server_unavailable", state.message);
       }
       // Keep the saved audio and metadata, but drop the previous run's output.
@@ -1346,7 +1375,7 @@ export class GenerationService {
       record.recognition = { ...recognition.state };
       delete record.recognition.partialText;
       record.rawText = speech.text;
-      record.detectedLanguage = speech.language;
+      record.detectedLanguage = detectedLanguage(speech.language);
       record.recognitionHints = speech.hints;
       record.speech = {
         modelID: speech.modelID,
@@ -1375,7 +1404,7 @@ export class GenerationService {
         structured.text,
         settings,
         cleaned !== transcript,
-        speech.language,
+        detectedLanguage(speech.language) ?? settings.language,
         signal,
       );
       signal.throwIfAborted();
@@ -1541,25 +1570,35 @@ export class GenerationService {
     ])
       await rm(join(this.directory(id), name), { force: true }).catch(() => {});
   }
-  private beginWarmup() {
-    if (this.stopping || this.warming || this.processingControllers.size) return;
-    this.warming = true;
+  private beginWarmup(requested?: RecognitionEngine) {
+    if (this.stopping) return;
+    const selected = () => recognitionEngine(this.preferences.preferences, this.engines);
+    if (this.warming || this.processingControllers.size) {
+      // A retry's frozen engine or a newly selected one must not be dropped.
+      const engine = requested ?? selected();
+      if (engine !== this.warming) this.queuedWarmups.add(engine);
+      return;
+    }
+    const engine = requested ?? this.queuedWarmups.values().next().value ?? selected();
+    this.queuedWarmups.delete(engine);
+    this.warming = engine;
     const controller = new AbortController();
     this.warmController = controller;
     this.warmTask = this.inference
-      .warmUp(this.preferences.preferences.textCorrectionEnabled, controller.signal)
+      .warmUp(this.preferences.preferences.textCorrectionEnabled, controller.signal, engine)
       .catch(() => {})
       .finally(() => {
-        this.warming = false;
+        this.warming = undefined;
         this.warmController = undefined;
         this.warmTask = undefined;
+        if (this.queuedWarmups.size) this.beginWarmup();
       });
   }
   private get prefersCloud() {
     return this.preferences.preferences.recognitionMode !== "local" && !!this.configuration.soniox;
   }
-  private get speechBackend() {
-    return process.platform === "darwin" ? "whisper.cpp/Metal" : "whisper.cpp";
+  private get engines() {
+    return this.inference.engines ?? ["whisper"];
   }
   private get proofBackend() {
     return process.platform === "darwin" ? "MLX" : "llama.cpp";

@@ -196,25 +196,32 @@ test("shared GUI settings preserve untouched preferences and reject a stale revi
   const { createHTTPServer } = await import("../../../Server/src/http-server.ts");
   const { FakeInference } = await import("../../../Server/tests/support.ts");
   const dir = await mkdtemp(join(tmpdir(), "sottoduo-gui-prefs-"));
+  const inference = Object.assign(new FakeInference(), {
+    engines: ["whisper", "parakeet"] as const,
+  });
   const service = await GenerationService.open(
     { dataDirectory: dir, development: true },
-    new FakeInference(),
+    inference,
   );
   const server = createHTTPServer(service, "test-token");
   try {
     const endpoint = await server.listen({ host: "127.0.0.1", port: 0 });
     const api = new API(endpoint, "test-token");
+    expect((await api.health()).recognitionEngines).toEqual(["whisper", "parakeet"]);
     const old = await api.preferences();
+    expect(old.preferences.recognitionEngine).toBe("whisper");
     const current = await api.savePreferences({
       ...old,
       preferences: {
         ...old.preferences,
         proofreadingPrompt: "Preserve this prompt",
         recognitionMode: "local",
+        recognitionEngine: "parakeet",
         vocabulary: "First computer",
       },
     });
     expect(current.preferences.recognitionMode).toBe("local");
+    expect(current.preferences.recognitionEngine).toBe("parakeet");
     await expect(
       api.savePreferences({
         ...old,
@@ -229,6 +236,7 @@ test("shared GUI settings preserve untouched preferences and reject a stale revi
     expect(saved.preferences.recognitionMode).toBe("local");
     expect(saved.preferences.vocabulary).toBe("Current computer");
     expect((await api.preferences()).preferences.recognitionMode).toBe("local");
+    expect(saved.preferences.recognitionEngine).toBe("parakeet");
   } finally {
     await service.shutdown();
     await server.close();

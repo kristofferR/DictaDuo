@@ -1,5 +1,5 @@
 import websocket from "@fastify/websocket";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { RawData, WebSocket } from "ws";
 import { ServiceError } from "./errors.ts";
 import {
@@ -46,7 +46,17 @@ const maximumPayloadBytes = Math.max(
 const heartbeatInterval = 30_000;
 const progressInterval = 500;
 
-function streamRecording(socket: WebSocket, id: string, service: RecordingService) {
+// Engine fields postdate the v2 schemas, which older clients decode strictly.
+const encodeFor = (request: FastifyRequest) =>
+  request.headers["x-sottoduo-recognition-engine"] === "engine-v1"
+    ? (value: unknown) => JSON.stringify(value)
+    : (value: unknown) =>
+        JSON.stringify(value, (key, item) =>
+          key === "recognitionEngine" || key === "recognitionEngines" ? undefined : item,
+        );
+type Encode = ReturnType<typeof encodeFor>;
+
+function streamRecording(socket: WebSocket, id: string, service: RecordingService, encode: Encode) {
   let epoch: number | undefined;
   let queuedBytes = 0;
   let queuedMessages = 0;
@@ -59,7 +69,7 @@ function streamRecording(socket: WebSocket, id: string, service: RecordingServic
 
   const send = (message: RecordingServerMessage) => {
     if (closed || socket.readyState !== socket.OPEN) return;
-    const payload = JSON.stringify(message);
+    const payload = encode(message);
     if (socket.bufferedAmount + Buffer.byteLength(payload) > maximumOutboundBytes) {
       socket.terminate();
       return;
@@ -245,7 +255,7 @@ const settled = (snapshot: RecordingSnapshot) =>
   snapshot.processingState === "failed";
 
 /** NDJSON snapshots for clients that watch a session without uploading audio. */
-function recordingEvents(service: RecordingService, id: string) {
+function recordingEvents(service: RecordingService, id: string, encode: Encode) {
   const queue: RecordingSnapshot[] = [];
   let wake: (() => void) | undefined;
   let closed = false;
@@ -259,12 +269,12 @@ function recordingEvents(service: RecordingService, id: string) {
     (async function* () {
       try {
         latest = await service.get(id);
-        yield `${JSON.stringify(latest)}\n`;
+        yield `${encode(latest)}\n`;
         while (!closed && !settled(latest)) {
           const next = queue.shift();
           if (next) {
             latest = next;
-            yield `${JSON.stringify(next)}\n`;
+            yield `${encode(next)}\n`;
             continue;
           }
           // Repeat the latest state so idle client requests never time out.
@@ -276,7 +286,7 @@ function recordingEvents(service: RecordingService, id: string) {
             };
           });
           wake = undefined;
-          if (repeat && !closed) yield `${JSON.stringify(await service.get(id))}\n`;
+          if (repeat && !closed) yield `${encode(await service.get(id))}\n`;
         }
       } finally {
         unsubscribe();
@@ -307,6 +317,11 @@ export function registerRecordingRoutes(
         handleProtocols: (protocols) =>
           protocols.has(RECORDING_WS_PROTOCOL) ? RECORDING_WS_PROTOCOL : false,
       },
+    });
+    // Set here, not in preHandler: a reply serializer would also quote text bodies.
+    routes.addHook("preSerialization", async (request, reply, payload) => {
+      reply.serializer(encodeFor(request));
+      return payload;
     });
     routes.get("/v2/recordings/capabilities", () => ({
       protocol: RECORDING_WS_PROTOCOL,
@@ -367,7 +382,7 @@ export function registerRecordingRoutes(
       return service.recordDelivery(id, validateBody("DeliveryReceipt", request.body));
     });
     routes.get<{ Params: IDParams }>("/v2/recordings/:id/events", async (request, reply) => {
-      const events = recordingEvents(service, identifier(request.params.id));
+      const events = recordingEvents(service, identifier(request.params.id), encodeFor(request));
       reply.raw.once("close", () => events.close());
       return reply.type("application/x-ndjson").send(events.source);
     });
@@ -438,7 +453,8 @@ export function registerRecordingRoutes(
             );
         },
       },
-      (socket, request) => streamRecording(socket, identifier(request.params.id), service),
+      (socket, request) =>
+        streamRecording(socket, identifier(request.params.id), service, encodeFor(request)),
     );
   });
 }

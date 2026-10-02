@@ -1,6 +1,7 @@
 import type { RecognitionState, ServerPreferences } from "../api.ts";
 import type { InferenceBackend } from "./native-inference.ts";
 import { InferenceError } from "./inference-error.ts";
+import { localSpeechModel, recognitionEngine } from "./engines.ts";
 import {
   startSonioxStream,
   type SonioxConfiguration,
@@ -89,8 +90,9 @@ export class RecognitionSession {
     }
     if (this.mode === "cloud") throw new Error(this.error ?? "Soniox is unavailable.");
     // Replay the entire sealed recording. Never join cloud tokens to a local suffix.
+    const engine = recognitionEngine(this.settings, this.local.engines);
     const transcribe = () =>
-      this.local.transcribe(path, this.settings.language, this.terms, progress, signal);
+      this.local.transcribe(path, this.settings.language, this.terms, progress, signal, engine);
     // The sealed audio is still on disk, so a transient engine failure gets one
     // more attempt before the recording is reported as failed. Only an early
     // failure qualifies: after a timeout or a late failure, a second model load and
@@ -106,10 +108,6 @@ export class RecognitionSession {
         throw error;
       return transcribe();
     });
-    return {
-      ...speech,
-      modelID: "whisper-large-v3-turbo",
-      backend: process.platform === "darwin" ? "whisper.cpp/Metal" : "whisper.cpp",
-    };
+    return { ...speech, ...localSpeechModel(engine) };
   }
 }

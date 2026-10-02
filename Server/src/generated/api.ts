@@ -665,14 +665,24 @@ export interface components {
     };
     /** @enum {string} */
     RecognitionMode: "automatic" | "cloud" | "local";
+    /**
+     * @description The local speech model. Whisper large-v3-turbo covers Whisper's languages and uses vocabulary hints; Parakeet TDT 0.6B v3 is faster, detects 25 European languages itself, and ignores vocabulary hints.
+     * @enum {string}
+     */
+    RecognitionEngine: "whisper" | "parakeet";
     RecognitionState: {
-      /** @enum {string} */
+      /**
+       * @description whisper means local server recognition, whichever recognition engine is selected.
+       * @enum {string}
+       */
       provider: "soniox" | "whisper";
       fallbackReason?: string;
       partialText?: string;
     };
     ServerPreferences: {
       recognitionMode?: components["schemas"]["RecognitionMode"];
+      /** @description Request this field with X-SottoDuo-Recognition-Engine: engine-v1. Missing values select Whisper; updates that omit it keep the server's selection. */
+      recognitionEngine?: components["schemas"]["RecognitionEngine"];
       /** @enum {string} */
       language:
         | "en"
@@ -717,6 +727,8 @@ export interface components {
       ready: boolean;
       /** @description Whether failed or cancelled generations with sealed audio can be retried. Request this field with X-SottoDuo-Generation-Retry: retry-v1. An omitted value means unsupported. */
       generationRetry?: boolean;
+      /** @description Local recognition engines installed on this server. Request this field with X-SottoDuo-Recognition-Engine: engine-v1. An omitted value means Whisper only. */
+      recognitionEngines?: components["schemas"]["RecognitionEngine"][];
       speech: components["schemas"]["ModelRuntimeInfo"];
       proofreading: components["schemas"]["ModelRuntimeInfo"];
       message?: string;
