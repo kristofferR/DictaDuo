@@ -27,7 +27,7 @@ import type {
   WisprFlowImportRequest,
   WisprFlowKnownIDsRequest,
 } from "./api.ts";
-import { API_VERSION } from "./api.ts";
+import { API_VERSION, type RecognitionEngine } from "./api.ts";
 import type { components } from "./generated/api.ts";
 import { decodePersonalDictionary } from "./domain/dictionary.ts";
 import { validateBody } from "./validation.ts";
@@ -155,7 +155,9 @@ export class GenerationService {
   private processingQueue: Promise<void> = Promise.resolve();
   private warmController?: AbortController;
   private warmTask?: Promise<void>;
-  private warming = false;
+  /** The engine warming now, and one a retry needs once that warm-up or run ends. */
+  private warming?: RecognitionEngine;
+  private queuedWarmup?: RecognitionEngine;
   private stopping = false;
   private timer?: ReturnType<typeof setInterval>;
   private queue: Promise<unknown> = Promise.resolve();
@@ -1567,18 +1569,28 @@ export class GenerationService {
     ])
       await rm(join(this.directory(id), name), { force: true }).catch(() => {});
   }
-  private beginWarmup(engine = recognitionEngine(this.preferences.preferences, this.engines)) {
-    if (this.stopping || this.warming || this.processingControllers.size) return;
-    this.warming = true;
+  private beginWarmup(requested?: RecognitionEngine) {
+    if (this.stopping) return;
+    if (this.warming || this.processingControllers.size) {
+      if (requested && requested !== this.warming) this.queuedWarmup = requested;
+      return;
+    }
+    const engine =
+      requested ??
+      this.queuedWarmup ??
+      recognitionEngine(this.preferences.preferences, this.engines);
+    this.queuedWarmup = undefined;
+    this.warming = engine;
     const controller = new AbortController();
     this.warmController = controller;
     this.warmTask = this.inference
       .warmUp(this.preferences.preferences.textCorrectionEnabled, controller.signal, engine)
       .catch(() => {})
       .finally(() => {
-        this.warming = false;
+        this.warming = undefined;
         this.warmController = undefined;
         this.warmTask = undefined;
+        if (this.queuedWarmup) this.beginWarmup();
       });
   }
   private get prefersCloud() {

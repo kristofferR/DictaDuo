@@ -23,6 +23,8 @@ class Engines extends FakeInference {
   /** Engines whose model is unverified, as after a restart, until warmed. */
   cold = new Set<RecognitionEngine>();
   warmed: RecognitionEngine[] = [];
+  /** Holds warm-ups open, as a slow model load would. */
+  warmGate?: Promise<void>;
   failures = 0;
   constructor(readonly engines: readonly RecognitionEngine[] = ["whisper", "parakeet"]) {
     super();
@@ -36,6 +38,7 @@ class Engines extends FakeInference {
     engine?: RecognitionEngine,
   ) {
     this.warmed.push(engine ?? "whisper");
+    await this.warmGate;
     this.cold.delete(engine ?? "whisper");
   }
   override async transcribe(
@@ -251,6 +254,38 @@ test("retrying a take after a restart warms the take's engine, not the preferenc
   expect((await service.retry(record.id)).status).toBe("queued");
   await until(async () => (await service.get(record.id)).status === "completed");
   expect(inference.calls.map((call) => call.engine)).toEqual(["parakeet"]);
+});
+
+test("a retry during another engine's warm-up warms the take's engine next", async () => {
+  const { service, inference } = await open();
+  await select(service, "parakeet");
+  const record = await service.create({
+    requestID: randomUUID(),
+    device: { id: "fixture", name: "Test Mac" },
+    mode: "test",
+  });
+  await service.appendAudio(
+    record.id,
+    "inference",
+    0,
+    { sampleRate: 16000, channels: 1 },
+    Buffer.alloc(16_000),
+  );
+  inference.failures = 2;
+  await service.finish(record.id, { inferenceFrames: 4000 });
+  await until(async () => (await service.get(record.id)).status === "failed");
+  let loaded!: () => void;
+  inference.warmGate = new Promise((resolve) => (loaded = resolve));
+  inference.cold.add("parakeet");
+  inference.warmed.length = 0;
+  await select(service, "whisper");
+  await until(() => inference.warmed.includes("whisper"));
+  await expect(service.retry(record.id)).rejects.toMatchObject({ code: "server_unavailable" });
+  loaded();
+  await until(() => inference.warmed.includes("parakeet"));
+  await until(() => !inference.cold.has("parakeet"));
+  expect((await service.retry(record.id)).status).toBe("queued");
+  await until(async () => (await service.get(record.id)).status === "completed");
 });
 
 test("retrying a recording session warms the session's engine", async () => {
