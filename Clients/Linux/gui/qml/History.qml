@@ -115,18 +115,21 @@ ColumnLayout {
         load(false);
     }
 
-    function openAudio(kind) {
+    function openAudio(kind, runID) {
         if (!selected || acting || !available || bridge.preview)
             return ;
 
         audioID = selected.id;
         audioKind = kind;
         message = "Downloading saved audio…";
-        bridge.request("historyAudio", {
+        const request = {
             "id": audioID,
             "kind": kind,
             "server": server
-        });
+        };
+        if (runID)
+            request.runID = runID;
+        bridge.request("historyAudio", request);
     }
 
     function openArtifact(filename) {

@@ -327,3 +327,50 @@ test("merged pages never show an entry before a newer unfetched one", async () =
     "Invalid history cursor",
   );
 });
+
+test("original runs recorded in different formats open one at a time", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sottoduo-history-"));
+  const previous = process.env.XDG_RUNTIME_DIR;
+  process.env.XDG_RUNTIME_DIR = directory;
+  cleanup.push(async () => {
+    if (previous === undefined) delete process.env.XDG_RUNTIME_DIR;
+    else process.env.XDG_RUNTIME_DIR = previous;
+    await rm(directory, { recursive: true, force: true });
+  });
+  const api = new API("http://127.0.0.1:1", "token");
+  const [first, second] = [randomUUID().toUpperCase(), randomUUID().toUpperCase()];
+  const stream = (runID: string, sampleRate: number) => ({
+    runID,
+    kind: "original",
+    frameCount: 100,
+    format: { sampleRate, channels: 1 },
+  });
+  const snapshot = {
+    id: randomUUID().toUpperCase(),
+    createdAt: new Date().toISOString(),
+    processingState: "failed",
+    captureState: "stopped",
+    streams: [stream(first, 48_000), stream(second, 44_100)],
+    previewText: "",
+  };
+  api.history = async () => ({ items: [] });
+  api.recordingHistory = async () =>
+    ({ items: [snapshot] }) as unknown as Awaited<ReturnType<API["recordingHistory"]>>;
+  api.recording = async () => ({ snapshot }) as unknown as Awaited<ReturnType<API["recording"]>>;
+  const requested: (string | undefined)[] = [];
+  api.historyAudio = async (_id, _filename, _recording, runID) => {
+    requested.push(runID);
+    return new Response(Buffer.from("RIFF\0\0\0\0WAVE"));
+  };
+  const tools = new HistoryTools(api);
+  const [item] = (await tools.list(undefined, undefined, "q")).items;
+  expect(item).not.toHaveProperty("originalAudio");
+  expect(item).toMatchObject({ originalRuns: [{ runID: first }, { runID: second }] });
+  const request = { id: snapshot.id, kind: "original", server: api.endpoint };
+  await expect(tools.action("historyAudio", request)).rejects.toThrow("no saved recording");
+  await tools.action("historyAudio", { ...request, runID: second.toLowerCase() });
+  await expect(tools.action("historyAudio", { ...request, runID: randomUUID() })).rejects.toThrow(
+    "no saved recording",
+  );
+  expect(requested).toEqual([second]);
+});

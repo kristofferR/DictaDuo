@@ -251,6 +251,19 @@ ColumnLayout {
             onClicked: root.history.openAudio("original")
         }
 
+        // Runs recorded in different formats are saved, and opened, separately.
+        Repeater {
+            model: root.record ? root.record.originalRuns || [] : []
+            delegate: SButton {
+                required property var modelData
+                required property int index
+                ui: root.ui
+                text: "Open original run " + (index + 1)
+                enabled: root.history.available && !root.history.acting && !bridge.preview
+                onClicked: root.history.openAudio("original", modelData.runID)
+            }
+        }
+
         SButton {
             ui: root.ui
             text: "Open Wispr Flow audio"

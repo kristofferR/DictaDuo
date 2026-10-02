@@ -110,9 +110,10 @@ export class API {
     id: string,
     filename: "inference.wav" | "original.wav" | components["schemas"]["WisprFlowArtifactName"],
     recording = false,
+    runID?: string,
   ) {
     const path = recording
-      ? `/v2/recordings/${encodeURIComponent(id)}/audio/${filename.replace(".wav", "")}`
+      ? `/v2/recordings/${encodeURIComponent(id)}/audio/${filename.replace(".wav", "")}${runID ? `/${encodeURIComponent(runID)}` : ""}`
       : `/v1/generations/${encodeURIComponent(id)}/artifacts/${filename}`;
     const response = await fetch(`${this.endpoint}${path}`, {
       redirect: "error",

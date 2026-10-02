@@ -64,10 +64,28 @@ function parseCursor(before: string): Cursor {
   } catch {}
   throw new ClientNotice("Invalid history cursor. Refresh history.");
 }
+/** Runs recorded in different formats; the server exports their originals only one at a time. */
+type OriginalRun = { runID: string; byteCount: number };
+type Entry = Generation & { originalRuns?: OriginalRun[] };
+function originalRuns(snapshot: Recording): OriginalRun[] | undefined {
+  const streams = snapshot.streams.filter((stream) => stream.kind === "original");
+  const format = streams[0]?.format;
+  const uniform = streams.every(
+    (stream) =>
+      stream.format.sampleRate === format?.sampleRate && stream.format.channels === format.channels,
+  );
+  const runs = streams
+    .filter((stream) => stream.frameCount > 0)
+    .map((stream) => ({
+      runID: stream.runID,
+      byteCount: stream.frameCount * stream.format.channels * 4 + 44,
+    }));
+  return uniform || !runs.length ? undefined : runs;
+}
 const newestFirst = (a: Generation, b: Generation) =>
   Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id.localeCompare(a.id);
 /** A history entry for a session without a materialized result. */
-function summary(snapshot: Recording): Generation {
+function summary(snapshot: Recording): Entry {
   const audio = (kind: "inference" | "original") => {
     const streams = snapshot.streams.filter((stream) => stream.kind === kind);
     const frameCount = streams.reduce((sum, stream) => sum + stream.frameCount, 0);
@@ -89,7 +107,8 @@ function summary(snapshot: Recording): Generation {
       : undefined;
   };
   const inferenceAudio = audio("inference"),
-    originalAudio = audio("original");
+    originalAudio = audio("original"),
+    runs = originalRuns(snapshot);
   return {
     schemaVersion: 1,
     id: snapshot.id,
@@ -119,6 +138,7 @@ function summary(snapshot: Recording): Generation {
     ...(snapshot.capture ? { capture: snapshot.capture } : {}),
     ...(inferenceAudio ? { inferenceAudio } : {}),
     ...(originalAudio ? { originalAudio } : {}),
+    ...(runs ? { originalRuns: runs } : {}),
   };
 }
 async function privateDirectory(path: string) {
@@ -226,7 +246,7 @@ export class HistoryTools {
     this.busy = true;
     try {
       const recording = this.recordings.has(id);
-      const record = recording ? await this.session(id) : await this.api.get(id, 60_000);
+      const record: Entry = recording ? await this.session(id) : await this.api.get(id, 60_000);
       if (action === "deleteHistory") {
         if (!terminal.has(record.status))
           throw new ClientNotice("Finish or cancel this recording before deleting it.");
@@ -237,6 +257,12 @@ export class HistoryTools {
         return { id, server: this.api.endpoint };
       }
       const kind = request.kind;
+      const run =
+        request.runID === undefined
+          ? undefined
+          : record.originalRuns?.find((item) => item.runID === identifier(request.runID));
+      if (request.runID !== undefined && (kind !== "original" || !run))
+        throw new ClientNotice("This entry has no saved recording of that kind.");
       const filename =
         action === "historyArtifact"
           ? artifactName(request.filename) &&
@@ -245,7 +271,7 @@ export class HistoryTools {
             : undefined
           : kind === "inference" && record.inferenceAudio
             ? "inference.wav"
-            : kind === "original" && record.originalAudio
+            : kind === "original" && (record.originalAudio || run)
               ? "original.wav"
               : kind === "imported" && record.importedSource?.artifactNames.includes("source.wav")
                 ? "source.wav"
@@ -264,13 +290,13 @@ export class HistoryTools {
       );
       const file = await open(path, "wx+", 0o600);
       try {
-        const response = await this.api.historyAudio(id, filename, recording);
+        const response = await this.api.historyAudio(id, filename, recording, run?.runID);
         if (!response.body) throw new Error("Empty audio response");
         const reader = response.body.getReader();
         try {
           // A session export has no duration limit; bound it by the advertised WAV size instead.
           const exported = recording
-            ? (filename === "original.wav" ? record.originalAudio : record.inferenceAudio)
+            ? (run ?? (filename === "original.wav" ? record.originalAudio : record.inferenceAudio))
                 ?.byteCount
             : undefined;
           const maximumBytes = filename.endsWith(".json")
@@ -334,7 +360,9 @@ export class HistoryTools {
   }
   private async session(id: string) {
     const detail = await this.api.recording(id, 60_000);
-    return detail.result ?? summary(detail.snapshot);
+    const runs = originalRuns(detail.snapshot);
+    const record: Entry = detail.result ?? summary(detail.snapshot);
+    return runs ? { ...record, originalRuns: runs } : record;
   }
   private async directory() {
     const runtime = process.env.XDG_RUNTIME_DIR;
