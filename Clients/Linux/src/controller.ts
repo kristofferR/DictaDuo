@@ -597,6 +597,8 @@ export class Controller {
     // Decide only now, so a take still queued behind another can be cancelled with undo.
     if (!(await take.gate.consume())) {
       // Cancelled and not undone: the transcript stays in history only.
+      // Nothing is inserted, so later takes need not wait for the receipt.
+      take.delivered();
       if (!this.live(take)) return;
       take.activity = { ...take.activity, kept: true };
       this.setState(take, "Saved to history", "cancelled");

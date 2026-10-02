@@ -1415,6 +1415,8 @@ final class SottoDuoController: ObservableObject {
                 // Decide only now, so a take still queued behind another can be cancelled with Undo.
                 guard await pending.gate.consume() else {
                     // Cancelled and not undone: the transcript stays in history only.
+                    // Nothing is inserted, so later takes need not wait for the receipt.
+                    insertionFinished.continuation.finish()
                     try? await connection.delivery(id, receipt: DeliveryReceipt(status: "cancelled",
                         message: "Cancelled before pasting. Kept in history."))
                     try Task.checkCancellation()
