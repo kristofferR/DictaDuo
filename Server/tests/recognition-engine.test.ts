@@ -29,7 +29,12 @@ class Engines extends FakeInference {
   constructor(readonly engines: readonly RecognitionEngine[] = ["whisper", "parakeet"]) {
     super();
   }
+  /** Holds one readiness check open, as a slow helper probe would. */
+  readinessGate?: Promise<void>;
   override async readiness(_proofreading?: boolean, engine: RecognitionEngine = "whisper") {
+    const gate = this.readinessGate;
+    this.readinessGate = undefined;
+    await gate;
     return { ...(await super.readiness()), available: !this.cold.has(engine) };
   }
   override async warmUp(
@@ -254,6 +259,25 @@ test("retrying a take after a restart warms the take's engine, not the preferenc
   expect((await service.retry(record.id)).status).toBe("queued");
   await until(async () => (await service.get(record.id)).status === "completed");
   expect(inference.calls.map((call) => call.engine)).toEqual(["parakeet"]);
+});
+
+test("an engine switch during admission checks the engine the take freezes", async () => {
+  const { service, inference } = await open();
+  await select(service, "whisper");
+  inference.cold.add("parakeet");
+  let warmed!: () => void;
+  inference.warmGate = new Promise((resolve) => (warmed = resolve));
+  let probed!: () => void;
+  inference.readinessGate = new Promise((resolve) => (probed = resolve));
+  const creating = service.create({
+    requestID: randomUUID(),
+    device: { id: "fixture", name: "Test Mac" },
+    mode: "test",
+  });
+  await select(service, "parakeet");
+  probed();
+  await expect(creating).rejects.toMatchObject({ code: "server_unavailable" });
+  warmed();
 });
 
 test("choosing an engine during another engine's warm-up warms it next", async () => {

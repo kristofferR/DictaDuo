@@ -455,13 +455,14 @@ export class GenerationService {
     request: CreateGenerationRequest,
     remote?: { source: components["schemas"]["AudioSourceIdentity"]; owner: string },
   ) {
-    const state = await this.inference.readiness(
-      false,
-      recognitionEngine(this.preferences.preferences, this.engines),
-    );
+    const checked = recognitionEngine(this.preferences.preferences, this.engines);
+    let state = await this.inference.readiness(false, checked);
     return this.mutate(async () => {
       if (this.stopping)
         throw new ServiceError(503, "server_stopping", "The server is shutting down.");
+      // The take freezes the preferences current now; a concurrent engine switch is checked again.
+      const engine = recognitionEngine(this.preferences.preferences, this.engines);
+      if (engine !== checked) state = await this.inference.readiness(false, engine);
       const validLabel = (text: string) =>
         text.length > 0 &&
         graphemes(text) <= 128 &&
