@@ -612,13 +612,22 @@ export class Controller {
       value.captureState === "discarded" || ["completed", "failed"].includes(value.processingState);
     let detail: RecordingDetail = { snapshot: stopped };
     let deadline: number | undefined;
+    let failingSince: number | undefined;
     while (this.live(take) && !settled(detail.snapshot)) {
       if (detail.snapshot.processingState !== "queued") deadline ??= Date.now() + budget;
       if (deadline !== undefined && Date.now() >= deadline)
         throw new Error("Processing timed out.");
       await Bun.sleep(300);
       if (!this.live(take)) return;
-      detail = await this.api.recording(take.id);
+      try {
+        detail = await this.api.recording(take.id);
+        failingSince = undefined;
+      } catch (error) {
+        // The sealed take is durable on the server, so ride out a brief outage.
+        if (error instanceof APIError && error.status < 500) throw error;
+        failingSince ??= Date.now();
+        if (Date.now() - failingSince >= this.processingTimeoutMS) throw error;
+      }
     }
     if (!this.live(take)) return;
     this.verify(detail.snapshot, take);

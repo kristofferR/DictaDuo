@@ -439,8 +439,8 @@ extension ServerClient {
         return try await recordingJSON(path: "v2/recordings", query: query)
     }
 
-    func discardRecording(_ id: UUID) async throws {
-        try await send(path: "v2/recordings/\(id)/discard", method: "POST")
+    func discardRecording(_ id: UUID, timeout: TimeInterval = 12) async throws {
+        try await send(path: "v2/recordings/\(id)/discard", method: "POST", timeout: timeout)
     }
 
     func retryRecording(_ id: UUID) async throws -> RecordingSnapshot {

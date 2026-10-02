@@ -519,6 +519,7 @@ test("a polling failure after sealing preserves the completed take in history", 
     cancellations++;
     return cancel(...args);
   };
+  f.controller.processingTimeoutMS = 200;
   f.controller.start();
   await until(() => f.controller.state.startsWith("recording"));
   f.controller.stop();
@@ -526,6 +527,22 @@ test("a polling failure after sealing preserves the completed take in history", 
   expect(cancellations).toBe(0);
   expect(sealedID).toBeDefined();
   await until(async () => (await read(sealedID!)).snapshot.processingState === "completed");
+});
+
+test("a brief polling outage after sealing still delivers the take", async () => {
+  const f = await fixture();
+  const read = f.api.recording.bind(f.api);
+  let failures = 0;
+  f.api.recording = async (...args) => {
+    if (failures++ < 2) throw new Error("Polling connection lost");
+    return read(...args);
+  };
+  f.controller.start();
+  await until(() => f.controller.state.startsWith("recording"));
+  f.controller.stop();
+  await f.controller.settled();
+  expect(failures).toBeGreaterThan(2);
+  expect(f.deliveries()).toBe(1);
 });
 
 test("an ambiguous stop response cannot cancel a sealed take", async () => {

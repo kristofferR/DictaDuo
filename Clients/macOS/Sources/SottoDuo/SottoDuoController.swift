@@ -1291,7 +1291,8 @@ final class SottoDuoController: ObservableObject {
         await recorder.preserve()
         // A released take's writer seals its spool before this process exits.
         _ = try? await recorderStopTask?.value
-        shutdown()
+        // Send remote discards before exit; an expired lease would seal them into history.
+        for discard in shutdown() { await discard.value }
     }
 
     func copyLastTranscript() {
@@ -1320,8 +1321,9 @@ final class SottoDuoController: ObservableObject {
 
     var pendingOutputRestore: Task<Void, Never>? { outputMuter.pendingRestore }
 
-    func shutdown() {
-        guard !isShuttingDown else { return }
+    @discardableResult
+    func shutdown() -> [Task<Void, Never>] {
+        guard !isShuttingDown else { return [] }
         isShuttingDown = true
         remoteButtons?.close(); remoteButtons = nil
         wisprFlowPrepareTask?.cancel(); wisprFlowImportTask?.cancel()
@@ -1339,8 +1341,11 @@ final class SottoDuoController: ObservableObject {
         let connection = activeClient
         let shouldCancel = activeSpool == nil && (remoteCapture?.shouldCancelServer ?? true)
         resetSession()
-        if shouldCancel, let generation, let connection { Task { try? await connection.discardRecording(generation) } }
-        stopPendingDictations()
+        var discards: [Task<Void, Never>] = []
+        if shouldCancel, let generation, let connection {
+            discards.append(Task { try? await connection.discardRecording(generation, timeout: 3) })
+        }
+        discards += stopPendingDictations()
         for task in recoveryTasks.values { task.cancel() }
         recoveryTasks.removeAll()
         sourceMonitorTask?.cancel()
@@ -1353,6 +1358,7 @@ final class SottoDuoController: ObservableObject {
         if let lockObserver { DistributedNotificationCenter.default().removeObserver(lockObserver) }
         if let unlockObserver { DistributedNotificationCenter.default().removeObserver(unlockObserver) }
         try? FileManager.default.removeItem(at: FileManager.default.temporaryDirectory.appendingPathComponent("SottoDuo-remote-preview"))
+        return discards
     }
 
     private func bindServices() {
@@ -2233,16 +2239,20 @@ final class SottoDuoController: ObservableObject {
         while isHoldingCapture, (try? await Task.sleep(for: .milliseconds(50))) != nil {}
     }
 
-    private func stopPendingDictations() {
+    private func stopPendingDictations() -> [Task<Void, Never>] {
         clearUndo(for: nil)
+        var discards: [Task<Void, Never>] = []
         for pending in pendingDictations {
             pending.cancel()
             // Durable local takes stay on disk and are recovered archive-only.
-            if pending.spool == nil, pending.shouldCancelServer { Task { try? await pending.client.discardRecording(pending.id) } }
+            if pending.spool == nil, pending.shouldCancelServer {
+                discards.append(Task { try? await pending.client.discardRecording(pending.id, timeout: 3) })
+            }
         }
         pendingDictations.removeAll()
         deliveryTail = nil
         insertionRebases.removeAll()
+        return discards
     }
 
     private func continuation(for destination: DictationDestination) -> ContinuationAnchor? {
