@@ -20,6 +20,36 @@ export async function command(args: string[], timeout = 1500, input?: string): P
     clearTimeout(timer);
   }
 }
+/**
+ * Posts SottoDuo's notifications through notify-send, each replacing the
+ * previous one instead of stacking. Sends are serialized so every one knows the ID.
+ */
+export class Notifier {
+  private id?: string;
+  private queue: Promise<void> = Promise.resolve();
+  constructor(private run: (args: string[]) => Promise<string> = command) {}
+  notify(title: string, body?: string): void {
+    this.queue = this.queue.then(async () => {
+      try {
+        const output = await this.run([
+          "notify-send",
+          "--app-name=SottoDuo",
+          "--expire-time=6000",
+          "--print-id",
+          ...(this.id ? [`--replace-id=${this.id}`] : []),
+          title,
+          ...(body ? [body] : []),
+        ]);
+        const id = output.trim();
+        if (/^\d+$/.test(id)) this.id = id;
+      } catch {}
+    });
+  }
+  /** Resolves once queued notifications were handed to notify-send. */
+  settled(): Promise<void> {
+    return this.queue;
+  }
+}
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -184,15 +214,9 @@ export class HyprlandDesktop implements Desktop {
       return undefined;
     }
   }
-  notify(message: string): void {
-    void command([
-      "notify-send",
-      "--app-name=SottoDuo",
-      "--expire-time=3500",
-      "--hint=string:x-canonical-private-synchronous:sottoduo",
-      "SottoDuo",
-      message,
-    ]).catch(() => {});
+  private notifier = new Notifier();
+  notify(title: string, body?: string): void {
+    this.notifier.notify(title, body);
   }
   async capture(): Promise<Destination> {
     const startedAt = Date.now();

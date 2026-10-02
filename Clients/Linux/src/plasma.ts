@@ -1,6 +1,6 @@
 import { pipeWireInputs } from "../../../Server/src/capture/pipewire-discovery.ts";
 import type { Desktop, Destination } from "./controller.ts";
-import { command } from "./desktop.ts";
+import { command, Notifier } from "./desktop.ts";
 import type { SourceID } from "./sources.ts";
 import { NativeDestinations } from "./native-destination.ts";
 
@@ -193,14 +193,9 @@ export class PlasmaDesktop implements Desktop {
     }
   }
 
-  notify(message: string): void {
-    void command([
-      "notify-send",
-      "--app-name=SottoDuo",
-      "--expire-time=3500",
-      "SottoDuo",
-      message,
-    ]).catch(() => {});
+  private notifier = new Notifier();
+  notify(title: string, body?: string): void {
+    this.notifier.notify(title, body);
   }
 
   async capture(): Promise<Destination> {
