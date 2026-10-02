@@ -807,7 +807,8 @@ final class SottoDuoController: ObservableObject {
         let shown = !isCapturing && pending.session == sessionID
         pendingDictations.removeAll { $0 === pending }
         pending.cancel()
-        Task { try? await pending.client.cancel(pending.id) }
+        // A remote stop in flight may already have sealed the audio on the server.
+        if pending.shouldCancelServer { Task { try? await pending.client.cancel(pending.id) } }
         if shown { showCancelled() }
     }
 
