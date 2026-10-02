@@ -174,7 +174,7 @@ struct DictationPage: View {
                         .foregroundStyle(SottoDuoPalette.muted)
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Button("Retry synchronization", action: controller.retryPendingRecordings)
+                    Button("Upload saved recordings", action: controller.retryPendingRecordings)
                         .disabled(controller.pendingRecordingCount == 0 || controller.isBusy)
                         .opacity(controller.pendingRecordingCount == 0 ? 0 : 1)
                 }

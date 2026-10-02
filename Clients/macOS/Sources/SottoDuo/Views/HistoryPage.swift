@@ -134,7 +134,7 @@ struct HistoryPage: View {
                                     .accessibilityLabel("Discard saved recording")
                             }
                             HStack {
-                                Text(controller.pendingRecordingIsPaused(recording.id) ? "Recording paused" : "Awaiting processing")
+                                Text(controller.pendingRecordingIsPaused(recording.id) ? "Paused" : "Saved on this Mac, waiting to upload")
                                 Spacer()
                                 Text(sottoduoDuration(controller.pendingRecordingAudioSeconds(recording.id))).monospacedDigit()
                             }
@@ -142,14 +142,16 @@ struct HistoryPage: View {
                             HStack {
                                 Button("Resume") { controller.resumePendingRecording(recording.id) }
                                     .disabled(!controller.canResumePendingRecording(recording.id))
+                                    .help("Keep recording into this take.")
                                 Button("Finish") { controller.finishPendingRecording(recording.id) }
                                     .disabled(!controller.canFinishPendingRecording(recording.id))
+                                    .help("Stop here and transcribe what was saved.")
                             }
                             .buttonStyle(.borderless)
                         }
                         .padding(.vertical, 8)
                     }
-                    Button("Retry synchronization", action: controller.retryPendingRecordings)
+                    Button("Upload saved recordings", action: controller.retryPendingRecordings)
                         .buttonStyle(.borderless)
                         .disabled(controller.isBusy)
                 }
@@ -215,7 +217,7 @@ struct HistoryPage: View {
                     if selected.importedSource == nil { Text(statusLabel(selected.status)) }
                     if let delivery = deliveryLabel(selected.delivery?.status) { Text(delivery) }
                     if let sourceStatus = selected.importedSource?.sourceStatus, !sourceStatus.isEmpty {
-                        Text("Flow status: \(sourceStatus)")
+                        Text("Wispr Flow: \(sourceStatus)")
                     }
                     if selected.audioSeconds > 0 { Text(sottoduoDuration(selected.audioSeconds)).monospacedDigit() }
                     let gapSeconds = controller.recordingGapSeconds(selected.id)
@@ -240,7 +242,7 @@ struct HistoryPage: View {
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         if !selected.rawText.isEmpty && selected.rawText != selected.finalText {
-                            DisclosureGroup(selected.importedSource == nil ? "Original transcript" : "Wispr Flow ASR") {
+                            DisclosureGroup(selected.importedSource == nil ? "Original transcript" : "Wispr Flow's transcript") {
                                 Text(selected.rawText)
                                     .font(.callout)
                                     .foregroundStyle(SottoDuoPalette.muted)
@@ -250,7 +252,7 @@ struct HistoryPage: View {
                             }
                         }
                         if let source = selected.importedSource, !source.variantNames.isEmpty {
-                            Text("Stored text versions: \(source.variantNames.joined(separator: ", "))")
+                            Text("Text versions from Wispr Flow: \(source.variantNames.joined(separator: ", "))")
                                 .font(.caption)
                                 .foregroundStyle(SottoDuoPalette.muted)
                         }
@@ -397,9 +399,9 @@ struct HistoryPage: View {
         switch filename {
         case .sourceJSON: "Full source data"
         case .sourceWAV: "Wispr Flow audio"
-        case .opusJSON: "Opus packets"
+        case .opusJSON: "Compressed audio (Opus)"
         case .screenshotPNG: "Screenshot"
-        case .builtInAudio: "Built-in audio (unarchived)"
+        case .builtInAudio: "Built-in audio (not imported)"
         }
     }
 
@@ -485,9 +487,9 @@ private struct WisprFlowImportSheet: View {
                 Divider()
                 countRow("With transcripts", count: preview.transcriptCount)
                 countRow("Without text", count: preview.sessionCount - preview.transcriptCount)
-                countRow("Metadata only", count: preview.metadataOnlyCount)
+                countRow("Details only, no text or audio", count: preview.metadataOnlyCount)
                 countRow("WAV found", count: preview.wavCount)
-                countRow("Opus packet sets", count: preview.opusCount)
+                countRow("Compressed audio", count: preview.opusCount)
                 countRow("Screenshots", count: preview.screenshotCount)
                 countRow("Dictionary entries to archive", count: preview.dictionaryCount)
                 if let knownCount {
@@ -519,7 +521,7 @@ private struct WisprFlowImportSheet: View {
             Text("\(counts.processed) of \(counts.total) processed")
                 .monospacedDigit()
                 .foregroundStyle(SottoDuoPalette.muted)
-            Text("\(counts.imported) imported · \(counts.enriched) enriched · \(counts.skipped) complete · \(counts.partial) partial · \(counts.failed) failed")
+            Text("\(counts.imported) new · \(counts.enriched) updated · \(counts.skipped) already here · \(counts.partial) missing files · \(counts.failed) failed")
                 .font(.caption)
         }
     }
@@ -531,10 +533,10 @@ private struct WisprFlowImportSheet: View {
                 .font(.headline)
             Text("\(counts.processed) of \(preview.sessionCount) sessions processed")
                 .monospacedDigit()
-            countRow("Imported", count: counts.imported)
-            countRow("Enriched", count: counts.enriched)
-            countRow("Already complete", count: counts.skipped)
-            countRow("Partial media", count: counts.partial)
+            countRow("New", count: counts.imported)
+            countRow("Updated with more files", count: counts.enriched)
+            countRow("Already in SottoDuo", count: counts.skipped)
+            countRow("Missing some files", count: counts.partial)
             countRow("Failed", count: counts.failed)
             if preview.dictionaryCount > 0 {
                 Text(counts.dictionaryArchived ? "Dictionary archived" : "Dictionary was not archived")

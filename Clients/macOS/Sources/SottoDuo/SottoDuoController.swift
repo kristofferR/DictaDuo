@@ -770,14 +770,12 @@ final class SottoDuoController: ObservableObject {
                 case .partial:
                     counts.partial += 1
                     if counts.unarchivedWarning == nil {
-                        let sourceReported = session.unarchivedArtifacts.map { omitted in
-                            "\(omitted.filename.rawValue) (\(ByteCountFormatter.string(fromByteCount: Int64(omitted.byteCount), countStyle: .file)), SHA-256 \(omitted.sha256))"
-                        }
-                        let mediaNames = sourceReported.isEmpty
-                            ? result.unarchivedArtifactNames.map(\.rawValue).joined(separator: ", ")
-                            : sourceReported.joined(separator: ", ")
-                        let mediaWarning = mediaNames.isEmpty ? nil
-                            : "Session \(sourceID.uuidString) has unarchived media: \(mediaNames). Source version details are in source.json."
+                        // Exact sizes and hashes stay in each entry's source data, not the UI.
+                        let names = session.unarchivedArtifacts.isEmpty
+                            ? result.unarchivedArtifactNames.map(\.rawValue)
+                            : session.unarchivedArtifacts.map(\.filename.rawValue)
+                        let mediaWarning = names.isEmpty ? nil
+                            : "Some recordings are missing files Wispr Flow did not keep (\(Set(names).sorted().joined(separator: ", "))). Each entry's Full source data lists them."
                         let warnings = [mediaWarning, session.provenanceWarning].compactMap { $0 }
                         if !warnings.isEmpty { counts.unarchivedWarning = warnings.joined(separator: "\n") }
                     }
@@ -1314,7 +1312,7 @@ final class SottoDuoController: ObservableObject {
             }
         }
         if pendingRecordingCount > 0 && recoveryMessage == nil {
-            recoveryMessage = "\(pendingRecordingCount) saved recording\(pendingRecordingCount == 1 ? "" : "s") pending recovery"
+            recoveryMessage = "\(pendingRecordingCount) recording\(pendingRecordingCount == 1 ? "" : "s") saved on this Mac \(pendingRecordingCount == 1 ? "is" : "are") waiting to upload"
         }
     }
 
