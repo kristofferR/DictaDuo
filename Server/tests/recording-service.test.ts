@@ -530,6 +530,9 @@ test("a finished take can be transcribed again, and a failed retry keeps the old
     (value) => value.processingState === "completed" && !!value.error,
   );
   expect(kept.error).toContain("previous transcript is kept");
+  expect((await service.detail(snapshot.id)).result?.error).toContain(
+    "previous transcript is kept",
+  );
   expect((await service.detail(snapshot.id)).result?.finalText).toContain("second pass");
   // Nothing is left over to restore again after a restart.
   const restarted = await restart(context);

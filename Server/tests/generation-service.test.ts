@@ -638,6 +638,31 @@ test("a cancelled sealed recording can be transcribed again without overwriting 
   expect(final.finalText).toBe("Recording 2.");
 });
 
+test("a retry of a finished take stopped during cleanup gives back the finished transcript", async () => {
+  const inference = new QueuedInference();
+  const { service, path } = await setup(inference);
+  const record = await upload(service);
+  await service.finish(record.id, { inferenceFrames: 4000 });
+  inference.releases[0]!.release();
+  const done = await completed(service, record.id);
+  expect(done.status).toBe("completed");
+  inference.proofStarted = deferred();
+  inference.proofRelease = deferred();
+  await service.retry(record.id);
+  inference.releases[1]!.release();
+  // The retry has new speech but no finished text when the server stops.
+  await inference.proofStarted.promise;
+  await service.shutdown();
+  const restarted = await GenerationService.open(
+    { dataDirectory: path, development: true },
+    new FakeInference(),
+  );
+  resources.push({ service: restarted, path });
+  const recovered = await restarted.get(record.id);
+  expect(recovered.rawText).toBe(done.rawText);
+  expect(recovered.finalText).toBe(done.finalText);
+});
+
 test("a retry that fails before new speech keeps the transcript it replaced", async () => {
   const inference = new QueuedInference();
   inference.proofRelease = deferred();

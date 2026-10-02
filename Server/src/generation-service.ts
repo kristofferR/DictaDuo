@@ -933,12 +933,12 @@ export class GenerationService {
     });
   }
   /**
-   * A retry that failed before producing new speech gives back the transcript
-   * it replaced; newer text from the retry wins.
+   * A retry that did not finish gives back the whole output it replaced, even
+   * when it had recognized new speech before failing or being interrupted.
    */
   private async restorePreviousOutput(record: GenerationRecord) {
     const path = join(this.directory(record.id), PREVIOUS_OUTPUT);
-    if (!record.rawText) {
+    if (!record.finalText) {
       try {
         const previous = JSON.parse(
           (await readRegularFile(path, MAX_METADATA_BYTES)).toString("utf8"),

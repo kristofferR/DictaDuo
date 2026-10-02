@@ -2192,6 +2192,8 @@ export class RecordingService {
             ).toString(),
           ) as GenerationRecord)
         : undefined;
+    // A failed retry keeps the previous result; its error explains why nothing changed.
+    if (result && snapshot.error) result.error = snapshot.error;
     return { snapshot, result };
   }
   history(limit: number, before?: string): Promise<RecordingPage> {

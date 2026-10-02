@@ -220,6 +220,8 @@ final class SottoDuoController: ObservableObject {
     private var recordingBaseSeconds: TimeInterval = 0
     private var capturePowerActivity: NSObjectProtocol?
     private var microphoneStartTask: Task<Void, Never>?
+    /// The latest connection check; a slower, older one never applies its result.
+    private var connectionProbe: Task<Void, Never>?
     private var recorderStopTask: Task<CapturedAudio, Error>?
     private var deliveryTail: Task<Void, Never>?
     private var insertionRebases = ConfirmedInsertionRebases<InsertionTarget>()
@@ -448,15 +450,18 @@ final class SottoDuoController: ObservableObject {
     /// Checks the address, token and API version before replacing a working connection.
     func saveConnection(endpoint: String, token: String, deviceName: String) {
         guard !isBusy, wisprFlowImportTask == nil else { return }
-        guard serverClientFactory == nil, let probe = try? ServerClient(endpoint: endpoint, token: token) else {
+        // Probe with the token exactly as it will be saved.
+        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard serverClientFactory == nil, let probe = try? ServerClient(endpoint: endpoint, token: trimmedToken) else {
             applyConnection(endpoint: endpoint, token: token, deviceName: deviceName)
             return
         }
         serverStatusMessage = "Checking connection…"
-        Task { [weak self] in
+        connectionProbe?.cancel()
+        connectionProbe = Task { [weak self] in
             do {
                 let health = try await probe.health()
-                guard let self else { return }
+                guard let self, !Task.isCancelled else { return }
                 guard health.apiVersion == SottoDuoAPI.version else {
                     errorMessage = health.apiVersion > SottoDuoAPI.version
                         ? "The server is newer than this app. Update SottoDuo on this Mac."
@@ -466,7 +471,7 @@ final class SottoDuoController: ObservableObject {
                 }
                 applyConnection(endpoint: endpoint, token: token, deviceName: deviceName)
             } catch {
-                guard let self else { return }
+                guard let self, !Task.isCancelled else { return }
                 if case ServerClientError.rejected(let status, _) = error, [401, 403].contains(status) {
                     errorMessage = "The server rejected this access token. Check it and try again."
                 } else {
@@ -898,6 +903,13 @@ final class SottoDuoController: ObservableObject {
 
     func updateSharedPreferences(_ value: ServerPreferences, expectedRevision: Int? = nil) {
         guard !isSavingPreferences, let snapshot = sharedPreferences else { return }
+        // One replacement phrase per line: blank lines are editing leftovers, not phrases.
+        var value = value
+        for list in value.dictionary.lists.indices {
+            for entry in value.dictionary.lists[list].entries.indices {
+                value.dictionary.lists[list].entries[entry].aliases.removeAll { $0.isEmpty }
+            }
+        }
         isSavingPreferences = true
         Task { [weak self] in
             guard let self else { return }
