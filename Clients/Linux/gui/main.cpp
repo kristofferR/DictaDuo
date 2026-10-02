@@ -71,6 +71,10 @@ int main(int argc, char **argv) {
                      [&bridge] { bridge.requestShortcutEdge("start"); });
     QObject::connect(&portalShortcuts, &PortalShortcuts::released, &bridge,
                      [&bridge] { bridge.requestShortcutEdge("stop"); });
+    QObject::connect(&portalShortcuts, &PortalShortcuts::action, &bridge,
+                     [&bridge](const QString &name) {
+                       bridge.request(name == "copy" ? "copyLast" : name);
+                     });
   }
   if (parser.isSet("theme"))
     bridge.setTheme(parser.value("theme"));

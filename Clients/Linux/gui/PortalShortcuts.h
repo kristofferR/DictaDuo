@@ -24,6 +24,8 @@ signals:
   void changed();
   void pressed();
   void released();
+  /** One-shot shortcuts: cancel the take, copy the last result, or paste a cancelled take. */
+  void action(const QString &name);
 private:
   void run();
   void created(void *source, void *result);

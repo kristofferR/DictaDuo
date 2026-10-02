@@ -2,6 +2,7 @@ import { defaultProofreadingPrompt, saveSharedPreferences } from "./processing.t
 import { HistoryTools } from "./history.ts";
 import { legacySourceEdit, microphoneSnapshot } from "./microphones.ts";
 import { ClientNotice } from "./errors.ts";
+import { command } from "./desktop.ts";
 import { readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
 import { validateBody } from "../../../Server/src/validation.ts";
 import { API, APIError } from "./api.ts";
@@ -109,6 +110,15 @@ export function createGUIHandler(
       case "cancel":
         await controller.cancel();
         return {};
+      case "undo":
+        controller.undo();
+        return {};
+      case "copyLast": {
+        const result = controller.result;
+        if (!result) throw new ClientNotice("There is no dictation to copy yet.");
+        await command(["wl-copy", "--type", "text/plain;charset=utf-8"], 1500, result.text);
+        return {};
+      }
       case "saveActivationMode":
         if (request.mode !== "hold" && request.mode !== "doubleTap")
           throw new ClientNotice("Choose hold or double tap.");
