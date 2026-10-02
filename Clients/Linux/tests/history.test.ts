@@ -208,6 +208,8 @@ test("recording sessions join legacy history and are opened and deleted on their
     device: { id: "desktop", name: "Desktop" },
     mode: "test",
   });
+  // Distinct millisecond timestamps keep the ID tie-break out of the order.
+  await Bun.sleep(5);
   const created = await services.recordings.create({
     requestID: randomUUID(),
     device: { id: "desktop", name: "Desktop" },

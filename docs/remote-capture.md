@@ -18,7 +18,7 @@ All routes retain server bearer authentication and Host/Origin policy. The initi
 | --- | --- |
 | `POST /v2/captures` | `{requestID, device, mode, source}` admits a recording session, prepares capture and returns 201 `RecordingSnapshot` only after provider readiness. Mode is dictation or test. |
 | `POST /v2/recordings/:id/capture/heartbeat` | Renew the owner lease every second; 204 on renewal. |
-| `POST /v2/recordings/:id/context` | `{continuationID?}` fixes the take's continuation, or none, as soon as the destination is known. Processing holds for at most 3 seconds after admission waiting for it; afterwards the take starts fresh and a late context is a conflict. |
+| `POST /v2/recordings/:id/context` | `{continuationID?}` fixes the take's continuation, or none, as soon as the destination is known. Processing holds while the provider prepares and for at most 3 seconds after acknowledged `recording` readiness; afterwards the take starts fresh and a late context is a conflict. |
 | `POST /v2/recordings/:id/capture/stop` | `{continuationID?}` stops and drains provider audio, validates exact final counts and seals the run; 202 with the snapshot. The continuation applies only if context was not fixed yet. |
 | `GET /v2/recordings/:id/events` | NDJSON `RecordingSnapshot` lines with capture state, peak level and preview text, repeated every two seconds, until the session completes, fails or is discarded. |
 | `POST /v2/recordings/:id/discard` | Requires the owner secret while a remote session is unsettled or still recording; aborts preparation/capture and discards the audio. Settled sessions are shared history and need no owner. |

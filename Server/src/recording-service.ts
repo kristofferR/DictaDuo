@@ -1378,12 +1378,13 @@ export class RecordingService {
   }
   private async processNext(id: string) {
     const work = await this.mutate(async () => {
-      const manifest = copy(this.lookup(id));
+      const stored = this.lookup(id);
       if (
-        manifest.snapshot.captureState === "discarded" ||
-        ["completed", "failed"].includes(manifest.snapshot.processingState)
+        stored.snapshot.captureState === "discarded" ||
+        ["completed", "failed"].includes(stored.snapshot.processingState)
       )
         return undefined;
+      const manifest = copy(stored);
       if (manifest.snapshot.recognition?.provider === "soniox" && !this.live) {
         // The provider was configured at admission but not after a restart.
         const reason = "Soniox is no longer configured on this server.";

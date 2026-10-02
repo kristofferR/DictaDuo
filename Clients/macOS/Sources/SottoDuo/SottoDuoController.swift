@@ -158,6 +158,9 @@ final class SottoDuoController: ObservableObject {
     private var recoveryTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingSpools: [UUID: RecordingSpool] = [:]
     private var recoveredSpoolIDs = Set<UUID>()
+    /// Spools whose automatic transfer failed permanently. Health checks skip
+    /// them until the user retries, finishes or resumes the recording.
+    private var failedRecoveryIDs = Set<UUID>()
     private var wisprFlowReader: WisprFlowSourceReader?
     private var wisprFlowPrepareTask: Task<Void, Never>?
     private var wisprFlowPrepareGate: WisprFlowPreparationGate?
@@ -571,7 +574,10 @@ final class SottoDuoController: ObservableObject {
         }
     }
 
-    func retryPendingRecordings() { recoverPendingRecordings() }
+    func retryPendingRecordings() {
+        failedRecoveryIDs.removeAll()
+        recoverPendingRecordings()
+    }
 
     func setHistorySourceFilter(_ source: String) {
         guard ["all", "sottoduo", "wispr-flow"].contains(source), source != historySourceFilter else { return }
@@ -1225,7 +1231,7 @@ final class SottoDuoController: ObservableObject {
     private func resumePendingTransfers() {
         guard !isShuttingDown, let connection = try? client() else { return }
         for (id, spool) in pendingSpools {
-            guard recoveryTasks[id] == nil, spool.endpoint == connection.endpoint,
+            guard recoveryTasks[id] == nil, !failedRecoveryIDs.contains(id), spool.endpoint == connection.endpoint,
                   spool.deviceIdentity == preferences.deviceID else { continue }
             let transport = RecordingClient(client: connection, spool: spool, socketFactory: recordingSocketFactory)
             recoveryTasks[id] = Task { [weak self] in
@@ -1244,6 +1250,8 @@ final class SottoDuoController: ObservableObject {
                     refreshHistory()
                 } catch is CancellationError {
                 } catch {
+                    // The transport retries transient failures itself.
+                    failedRecoveryIDs.insert(id)
                     recoveryMessage = "Recording saved locally. " + error.localizedDescription
                 }
             }
@@ -2005,6 +2013,7 @@ final class SottoDuoController: ObservableObject {
         guard canFinishPendingRecording(id), let spool = pendingSpools[id] else { return }
         do {
             try spool.seal(interrupted: spool.interruption)
+            failedRecoveryIDs.remove(id)
             updatePendingRecordingSummary()
             recoveryMessage = "Finishing saved recording. Nothing will be pasted."
             // A settled paused socket may be awaiting its next server message.
@@ -2091,6 +2100,7 @@ final class SottoDuoController: ObservableObject {
                 await recovery?.value
                 guard sessionID == current, !Task.isCancelled else { return }
                 recoveryTasks[id] = nil
+                failedRecoveryIDs.remove(id)
                 try spool.markSnapshot(snapshot)
                 try spool.prepareToResume()
                 activeSpool = spool
