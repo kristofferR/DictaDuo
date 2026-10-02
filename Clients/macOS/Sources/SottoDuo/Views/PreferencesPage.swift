@@ -158,7 +158,7 @@ struct ServerPreferencesPage: View {
         ("English", "en"), ("Detect automatically", "auto"), ("Spanish", "es"), ("French", "fr"),
         ("German", "de"), ("Italian", "it"), ("Portuguese", "pt"), ("Dutch", "nl"), ("Japanese", "ja"),
         ("Chinese", "zh"), ("Korean", "ko"), ("Hindi", "hi"), ("Arabic", "ar"), ("Polish", "pl"),
-        ("Russian", "ru"), ("Ukrainian", "uk"), ("Swedish", "sv")
+        ("Russian", "ru"), ("Ukrainian", "uk"), ("Swedish", "sv"), ("Norwegian", "no")
     ]
 
 

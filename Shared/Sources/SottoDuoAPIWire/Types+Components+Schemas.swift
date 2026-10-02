@@ -342,6 +342,7 @@ extension Components {
                 case ru = "ru"
                 case uk = "uk"
                 case sv = "sv"
+                case no = "no"
             }
             /// - Remark: Generated from `#/components/schemas/ServerPreferences/language`.
             public var language: Components.Schemas.ServerPreferences.LanguagePayload

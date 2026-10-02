@@ -1202,6 +1202,7 @@ components:
             - "ru"
             - "uk"
             - "sv"
+            - "no"
         proofreadingPrompt:
           type: "string"
           minLength: 1

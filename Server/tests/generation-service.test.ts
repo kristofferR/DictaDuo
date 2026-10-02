@@ -6,9 +6,11 @@ import { randomUUID } from "node:crypto";
 import { GenerationService } from "../src/generation-service.ts";
 import type { InferenceBackend } from "../src/inference/native-inference.ts";
 import { InferenceError } from "../src/inference/inference-error.ts";
+import { validateBody } from "../src/validation.ts";
 
 class FakeInference implements InferenceBackend {
   failProof = false;
+  languages: string[] = [];
   blocked = false;
   text = "Hello Codex.";
   readiness() {
@@ -24,11 +26,12 @@ class FakeInference implements InferenceBackend {
   }
   async transcribe(
     _path: string,
-    _language: string,
+    language: string,
     _terms: string[],
     progress?: (value: number) => void,
     signal?: AbortSignal,
   ) {
+    this.languages.push(language);
     if (this.blocked)
       await new Promise<void>((_resolve, reject) => {
         if (signal?.aborted) reject(new Error("Cancelled"));
@@ -107,6 +110,18 @@ test("repeated requests return the same frozen generation while new recordings a
   await expect(service.updatePreferences(preferences)).rejects.toMatchObject({
     code: "stale_preferences",
   });
+});
+test("Norwegian is a supported language and reaches recognition as \"no\"", async () => {
+  const { service, inference } = await setup();
+  const preferences = await service.getPreferences();
+  preferences.preferences.language = "no";
+  expect(validateBody("ServerPreferences", preferences.preferences).language).toBe("no");
+  await service.updatePreferences(preferences);
+  expect((await service.getPreferences()).preferences.language).toBe("no");
+  const record = await upload(service);
+  await service.finish(record.id, { inferenceFrames: 4000 });
+  expect((await completed(service, record.id)).status).toBe("completed");
+  expect(inference.languages).toEqual(["no"]);
 });
 test("generation timestamps retain milliseconds for cross-device ordering", async () => {
   const { service } = await setup();

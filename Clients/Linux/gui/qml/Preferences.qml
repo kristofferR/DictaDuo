@@ -354,10 +354,10 @@ ColumnLayout {
                     detail: root.parakeet ? "Used for cloud recognition. Parakeet detects the language itself." : ""
 
                     ComboBox {
-                        property var codes: ["auto", "en", "es", "fr", "de", "it", "pt", "nl", "ja", "zh", "ko", "hi", "ar", "pl", "ru", "uk", "sv"]
+                        property var codes: ["auto", "en", "es", "fr", "de", "it", "pt", "nl", "ja", "zh", "ko", "hi", "ar", "pl", "ru", "uk", "sv", "no"]
 
                         implicitWidth: 245
-                        model: ["Detect automatically", "English", "Spanish", "French", "German", "Italian", "Portuguese", "Dutch", "Japanese", "Chinese", "Korean", "Hindi", "Arabic", "Polish", "Russian", "Ukrainian", "Swedish"]
+                        model: ["Detect automatically", "English", "Spanish", "French", "German", "Italian", "Portuguese", "Dutch", "Japanese", "Chinese", "Korean", "Hindi", "Arabic", "Polish", "Russian", "Ukrainian", "Swedish", "Norwegian"]
                         currentIndex: root.draft ? codes.indexOf(root.draft.preferences.language) : 0
                         onActivated: root.edit("language", codes[currentIndex])
                     }

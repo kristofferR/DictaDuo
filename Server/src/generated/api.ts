@@ -735,7 +735,8 @@ export interface components {
         | "pl"
         | "ru"
         | "uk"
-        | "sv";
+        | "sv"
+        | "no";
       /** @description Missing values use the built-in cleanup prompt; maximum UTF-8 size is 4096 bytes. */
       proofreadingPrompt?: string;
       /** @description Maximum UTF-8 size is 16384 bytes. */
