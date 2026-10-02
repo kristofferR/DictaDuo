@@ -15,7 +15,8 @@ struct HistoryStatus: Equatable {
 enum HistoryLabels {
     static func delivery(_ status: String?) -> HistoryStatus? {
         switch status {
-        case "inserted", "listUpdated": .init(label: "Pasted", tone: .ok, detail: "Pasted at your cursor.")
+        case "inserted": .init(label: "Pasted", tone: .ok, detail: "Pasted at your cursor.")
+        case "listUpdated": .init(label: "List updated", tone: .ok, detail: "The list was updated. Nothing was pasted.")
         case "copied": .init(label: "Copied", tone: .neutral, detail: "Copied to the clipboard.")
         case "unconfirmed": .init(label: "Check the field", tone: .warning, detail: "The paste could not be confirmed.")
         case "cancelled": .init(label: "Not pasted", tone: .neutral, detail: "You cancelled this take.")

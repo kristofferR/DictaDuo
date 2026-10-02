@@ -55,6 +55,7 @@ export class API {
         "X-SottoDuo-Cloud-Recognition": "cloud-v1",
         "X-SottoDuo-Features": "features-v1",
         "X-SottoDuo-Language": "language-v2",
+        "X-SottoDuo-Generation-Retry": "retry-v1",
         ...(owner ? { "X-SottoDuo-Capture-Owner": owner } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),

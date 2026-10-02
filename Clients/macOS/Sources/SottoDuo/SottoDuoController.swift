@@ -576,7 +576,13 @@ final class SottoDuoController: ObservableObject {
                 from: newPosition)
             let fetched = merged.items
             let fetchedIDs = Set(fetched.map(\.id))
-            for snapshot in recordings.items { recordingSnapshots[snapshot.id] = snapshot }
+            for snapshot in recordings.items {
+                // A take transcribed again elsewhere stays completed but has a new revision.
+                if let cached = recordingSnapshots[snapshot.id], cached.revision != snapshot.revision {
+                    generationDetails[snapshot.id] = nil
+                }
+                recordingSnapshots[snapshot.id] = snapshot
+            }
             for item in fetched where generationDetails[item.id]?.status != item.status {
                 generationDetails[item.id] = nil
             }

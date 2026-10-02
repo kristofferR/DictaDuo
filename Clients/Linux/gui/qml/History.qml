@@ -63,7 +63,7 @@ ColumnLayout {
     function deliveryStatus(status) {
         return ({
             inserted: { label: "Pasted", tone: "ok", detail: "Pasted at your cursor." },
-            listUpdated: { label: "Pasted", tone: "ok", detail: "Pasted at your cursor." },
+            listUpdated: { label: "List updated", tone: "ok", detail: "The list was updated. Nothing was pasted." },
             copied: { label: "Copied", tone: "neutral", detail: "Copied to the clipboard." },
             unconfirmed: { label: "Check the field", tone: "warning", detail: "The paste could not be confirmed." },
             cancelled: { label: "Not pasted", tone: "neutral", detail: "You cancelled this take." },

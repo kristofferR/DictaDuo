@@ -18,7 +18,7 @@ final class HistoryLabelsTests: XCTestCase {
         var pasted = record(.completed)
         pasted.delivery = DeliveryReceipt(status: "listUpdated")
         XCTAssertEqual(HistoryLabels.status(pasted, interrupted: false),
-                       HistoryStatus(label: "Pasted", tone: .ok, detail: "Pasted at your cursor."))
+                       HistoryStatus(label: "List updated", tone: .ok, detail: "The list was updated. Nothing was pasted."))
         XCTAssertEqual(HistoryLabels.status(record(.queued), interrupted: true)?.label, "Interrupted")
         XCTAssertEqual(HistoryLabels.status(record(.failed), interrupted: false)?.tone, .error)
         XCTAssertEqual(HistoryLabels.status(record(.cancelled), interrupted: false)?.label, "Not pasted")
