@@ -265,7 +265,7 @@ ColumnLayout {
 
                 Setting {
                     ui: root.ui
-                    title: "Proofreading"
+                    title: "Text cleanup"
 
                     RowLayout {
                         spacing: 8
@@ -288,7 +288,7 @@ ColumnLayout {
                             property string status: root.health && root.health.proofreading ? root.health.proofreading.ready ? "Ready" : "Not ready" : "Unavailable"
                             ready: !!(root.health && root.health.proofreading && root.health.proofreading.ready)
                             Accessible.ignored: false
-                            Accessible.name: "Proofreading " + status
+                            Accessible.name: "Text cleanup " + status
                         }
                     }
 
@@ -349,11 +349,11 @@ ColumnLayout {
 
                 Setting {
                     ui: root.ui
-                    title: "Proofread with Qwen"
+                    title: "Clean up text after transcribing"
 
                     Switch {
                         checked: root.draft ? root.draft.preferences.textCorrectionEnabled : false
-                        Accessible.name: "Proofread with Qwen"
+                        Accessible.name: "Clean up text after transcribing"
                         onClicked: root.edit("textCorrectionEnabled", checked)
                     }
 
@@ -361,7 +361,7 @@ ColumnLayout {
 
                 Setting {
                     ui: root.ui
-                    title: "Cleanup instructions"
+                    title: "Text cleanup instructions"
 
                     SButton {
                         ui: root.ui
@@ -396,7 +396,7 @@ ColumnLayout {
 
                         objectName: "cleanupInstructions"
                         text: root.draft ? (root.draft.preferences.proofreadingPrompt !== undefined ? root.draft.preferences.proofreadingPrompt : root.defaultPrompt) : ""
-                        Accessible.name: "Cleanup instructions"
+                        Accessible.name: "Text cleanup instructions"
                         color: root.ui.c.ink
                         selectionColor: root.ui.c.accent
                         selectedTextColor: root.ui.c.onAccent

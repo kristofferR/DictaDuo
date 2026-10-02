@@ -181,7 +181,7 @@ struct ServerPreferencesPage: View {
                 if let health = controller.serverHealth {
                     Section {
                         runtimeRow("Voice", runtime: health.speech)
-                        runtimeRow("Proofreading", runtime: health.proofreading)
+                        runtimeRow("Text cleanup", runtime: health.proofreading)
                     } header: { Text("Server models").textCase(nil) }
                 }
                 Section {
@@ -203,10 +203,10 @@ struct ServerPreferencesPage: View {
                     Picker("Language", selection: $draft.language) {
                         ForEach(languages, id: \.1) { name, code in Text(name).tag(code) }
                     }
-                    Toggle("Proofread with Qwen", isOn: $draft.textCorrectionEnabled)
+                    Toggle("Clean up text after transcribing", isOn: $draft.textCorrectionEnabled)
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("Cleanup instructions")
+                            Text("Text cleanup instructions")
                             Spacer()
                             Button("Reset to default") {
                                 draft.proofreadingPrompt = ServerPreferences.defaultProofreadingPrompt
@@ -221,7 +221,7 @@ struct ServerPreferencesPage: View {
                             .frame(height: 352)
                             .background(SottoDuoPalette.surface, in: RoundedRectangle(cornerRadius: 6))
                             .overlay { RoundedRectangle(cornerRadius: 6).stroke(SottoDuoPalette.muted.opacity(0.25)) }
-                            .accessibilityLabel("Cleanup instructions")
+                            .accessibilityLabel("Text cleanup instructions")
                             .accessibilityIdentifier("preferences.cleanup-prompt")
                     }
                     TextField("Recognition vocabulary", text: $draft.vocabulary, axis: .vertical)

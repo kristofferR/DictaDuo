@@ -222,7 +222,7 @@ ColumnLayout {
                 color: root.ui.c.muted
                 font.pixelSize: 12
                 visible: !!text
-                text: root.record && root.record.proofreading ? "Cleanup: " + root.model(root.record.proofreading) : ""
+                text: root.record && root.record.proofreading ? "Text cleanup: " + root.model(root.record.proofreading) : ""
             }
 
         }
