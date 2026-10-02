@@ -256,6 +256,19 @@ test("retrying a take after a restart warms the take's engine, not the preferenc
   expect(inference.calls.map((call) => call.engine)).toEqual(["parakeet"]);
 });
 
+test("choosing an engine during another engine's warm-up warms it next", async () => {
+  const { service, inference } = await open();
+  let loaded!: () => void;
+  inference.warmGate = new Promise((resolve) => (loaded = resolve));
+  inference.cold.add("parakeet");
+  inference.warmed.length = 0;
+  await select(service, "whisper");
+  await until(() => inference.warmed.includes("whisper"));
+  await select(service, "parakeet");
+  loaded();
+  await until(() => !inference.cold.has("parakeet"));
+});
+
 test("a retry during another engine's warm-up warms the take's engine next", async () => {
   const { service, inference } = await open();
   await select(service, "parakeet");

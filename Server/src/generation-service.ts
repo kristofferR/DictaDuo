@@ -155,9 +155,9 @@ export class GenerationService {
   private processingQueue: Promise<void> = Promise.resolve();
   private warmController?: AbortController;
   private warmTask?: Promise<void>;
-  /** The engine warming now, and one a retry needs once that warm-up or run ends. */
+  /** The engine warming now, and engines to warm in turn once it or a run ends. */
   private warming?: RecognitionEngine;
-  private queuedWarmup?: RecognitionEngine;
+  private queuedWarmups = new Set<RecognitionEngine>();
   private stopping = false;
   private timer?: ReturnType<typeof setInterval>;
   private queue: Promise<unknown> = Promise.resolve();
@@ -1571,15 +1571,15 @@ export class GenerationService {
   }
   private beginWarmup(requested?: RecognitionEngine) {
     if (this.stopping) return;
+    const selected = () => recognitionEngine(this.preferences.preferences, this.engines);
     if (this.warming || this.processingControllers.size) {
-      if (requested && requested !== this.warming) this.queuedWarmup = requested;
+      // A retry's frozen engine or a newly selected one must not be dropped.
+      const engine = requested ?? selected();
+      if (engine !== this.warming) this.queuedWarmups.add(engine);
       return;
     }
-    const engine =
-      requested ??
-      this.queuedWarmup ??
-      recognitionEngine(this.preferences.preferences, this.engines);
-    this.queuedWarmup = undefined;
+    const engine = requested ?? this.queuedWarmups.values().next().value ?? selected();
+    this.queuedWarmups.delete(engine);
     this.warming = engine;
     const controller = new AbortController();
     this.warmController = controller;
@@ -1590,7 +1590,7 @@ export class GenerationService {
         this.warming = undefined;
         this.warmController = undefined;
         this.warmTask = undefined;
-        if (this.queuedWarmup) this.beginWarmup();
+        if (this.queuedWarmups.size) this.beginWarmup();
       });
   }
   private get prefersCloud() {
