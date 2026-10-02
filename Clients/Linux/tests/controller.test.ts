@@ -664,6 +664,28 @@ test("a sealed take processes while the next take records, and deliveries keep r
   expect(f.controller.busy).toBe(false);
 });
 
+test("a pairing-button start is declined while an earlier take processes", async () => {
+  const held = heldInference();
+  const f = await fixture(held.inference);
+  let sealed = false;
+  const stop = f.api.stop.bind(f.api);
+  f.api.stop = async (...args) => {
+    const record = await stop(...args);
+    sealed = true;
+    return record;
+  };
+  await record(f);
+  f.controller.stop();
+  await until(() => sealed);
+  await Bun.sleep(20);
+  expect(f.controller.startButton(crypto.randomUUID(), { hostID: "desktop", id: "dji" })).toBe(
+    false,
+  );
+  held.release();
+  await f.controller.settled();
+  expect(f.starts).toEqual(["dji"]);
+});
+
 test("a completed take waits for a newer held take before delivering", async () => {
   const f = await fixture();
   const ids = track(f);

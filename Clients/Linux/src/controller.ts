@@ -191,6 +191,8 @@ export class Controller {
     if (this.take && !this.take.button) this.take.released = true;
   }
   startButton(ticket: string, source: SourceID): boolean {
+    // Pairing-button taps are declined while any take records or processes.
+    if (this.busy) return false;
     return this.start({ ticket, source });
   }
   stopButton(ticket: string): void {
