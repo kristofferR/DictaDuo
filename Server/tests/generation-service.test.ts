@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { GenerationService } from "../src/generation-service.ts";
+import { createHTTPServer } from "../src/http-server.ts";
 import type { InferenceBackend } from "../src/inference/native-inference.ts";
 import { InferenceError } from "../src/inference/inference-error.ts";
 import { validateBody } from "../src/validation.ts";
@@ -122,6 +123,24 @@ test('Norwegian is a supported language and reaches recognition as "no"', async 
   await service.finish(record.id, { inferenceFrames: 4000 });
   expect((await completed(service, record.id)).status).toBe("completed");
   expect(inference.languages).toEqual(["no"]);
+});
+test("older clients see Norwegian as automatic and cannot overwrite it", async () => {
+  const { service } = await setup();
+  const app = createHTTPServer(service);
+  const preferences = await service.getPreferences();
+  preferences.preferences.language = "no";
+  await service.updatePreferences(preferences);
+  const v2 = { "x-sottoduo-language": "language-v2" };
+  expect(
+    (await app.inject({ url: "/v1/preferences", headers: v2 })).json().preferences.language,
+  ).toBe("no");
+  const legacy = (await app.inject({ url: "/v1/preferences" })).json();
+  expect(legacy.preferences.language).toBe("auto");
+  // Saving what an older client was shown keeps Norwegian.
+  const saved = await app.inject({ method: "PUT", url: "/v1/preferences", payload: legacy });
+  expect(saved.statusCode).toBe(200);
+  expect((await service.getPreferences()).preferences.language).toBe("no");
+  await app.close();
 });
 test("health reports text cleanup as loading while warm-up loads it", async () => {
   let loaded!: () => void;

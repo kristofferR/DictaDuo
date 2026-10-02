@@ -54,6 +54,7 @@ export class API {
         "X-SottoDuo-Microphone-Sharing": "sharing-v1",
         "X-SottoDuo-Cloud-Recognition": "cloud-v1",
         "X-SottoDuo-Features": "features-v1",
+        "X-SottoDuo-Language": "language-v2",
         ...(owner ? { "X-SottoDuo-Capture-Owner": owner } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -231,6 +232,7 @@ export class API {
         Accept: "application/x-ndjson",
         "X-SottoDuo-Recognition-Engine": "engine-v1",
         "X-SottoDuo-Microphone-Sharing": "sharing-v1",
+        "X-SottoDuo-Language": "language-v2",
       },
     });
     if (!response.ok || !response.body) {

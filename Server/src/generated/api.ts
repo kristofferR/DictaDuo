@@ -717,7 +717,10 @@ export interface components {
       recognitionMode?: components["schemas"]["RecognitionMode"];
       /** @description Request this field with X-SottoDuo-Recognition-Engine: engine-v1. Missing values select Whisper; updates that omit it keep the server's selection. */
       recognitionEngine?: components["schemas"]["RecognitionEngine"];
-      /** @enum {string} */
+      /**
+       * @description Norwegian (no) is sent only to clients that send X-SottoDuo-Language: language-v2; others see auto, and saving auto keeps Norwegian.
+       * @enum {string}
+       */
       language:
         | "en"
         | "auto"

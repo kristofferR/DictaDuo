@@ -99,6 +99,7 @@ struct ServerClient: Sendable {
         request.setValue("sharing-v1", forHTTPHeaderField: "X-SottoDuo-Microphone-Sharing")
         request.setValue("cloud-v1", forHTTPHeaderField: "X-SottoDuo-Cloud-Recognition")
         request.setValue("features-v1", forHTTPHeaderField: "X-SottoDuo-Features")
+        request.setValue("language-v2", forHTTPHeaderField: "X-SottoDuo-Language")
         if let destinationOwner { request.setValue(destinationOwner, forHTTPHeaderField: "X-SottoDuo-Destination-Owner") }
         if let captureOwner { request.setValue(captureOwner, forHTTPHeaderField: "X-SottoDuo-Capture-Owner") }
         if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
