@@ -41,18 +41,21 @@ export class MicrophoneSharing {
     this.persist();
   }
 
-  /** Saved before it applies, so a failed write is reported and sharing is unchanged. */
-  async set(source: Identity, shared: boolean) {
-    const next = new Set(this.shared);
-    if (shared) next.add(key(source));
-    else next.delete(key(source));
-    const known = new Map(this.known).set(key(source), structuredClone(source));
-    if (this.file) await this.write(known, next);
-    // Apply only this change: discovery may have recorded other sources meanwhile.
-    this.known.set(key(source), structuredClone(source));
-    if (shared) this.shared.add(key(source));
-    else this.shared.delete(key(source));
-    this.seeded = true;
+  /**
+   * Each change reads, saves and applies the current state as one queued step,
+   * so overlapping changes cannot drop each other; a failed write changes nothing.
+   */
+  set(source: Identity, shared: boolean) {
+    return this.enqueue(async () => {
+      const next = new Set(this.shared);
+      if (shared) next.add(key(source));
+      else next.delete(key(source));
+      const known = new Map(this.known).set(key(source), structuredClone(source));
+      await this.save(known, next);
+      this.known = known;
+      this.shared = next;
+      this.seeded = true;
+    });
   }
 
   /** Waits for pending writes, so tests and shutdown see the saved state. */
@@ -62,20 +65,23 @@ export class MicrophoneSharing {
 
   /** Discovery records new sources in the background; a later write retries it. */
   private persist() {
-    if (this.file) void this.write(this.known, this.shared).catch(() => {});
+    void this.enqueue(() => this.save(this.known, this.shared)).catch(() => {});
   }
 
-  private write(known: Map<string, Identity>, shared: Set<string>) {
-    const file = this.file!;
+  private enqueue(step: () => Promise<void>) {
+    const run = this.writes.then(step);
+    this.writes = run.catch(() => {});
+    return run;
+  }
+
+  private async save(known: Map<string, Identity>, shared: Set<string>) {
+    if (!this.file) return;
     const saved: Saved = {
       version: 1,
       known: [...known.values()],
       shared: [...known.values()].filter((source) => shared.has(key(source))),
     };
-    const data = JSON.stringify(saved);
-    const write = this.writes.then(() => atomicPrivateWrite(file, data));
-    this.writes = write.catch(() => {});
-    return write;
+    await atomicPrivateWrite(this.file, JSON.stringify(saved));
   }
 }
 
