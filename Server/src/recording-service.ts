@@ -173,7 +173,11 @@ export class RecordingService {
             this.readAudioRange(id, runID, "inference", firstFrame, frameCount),
           preview: (id, text) => this.publishPreview(id, text),
           segment: () => this.schedule(),
-          failed: (id, reason) => void this.liveFailed(id, reason).catch(() => {}),
+          // An idle worker gets no other wakeup, so retry after a storage failure.
+          failed: (id, reason) =>
+            void this.liveFailed(id, reason).catch(() => {
+              setTimeout(() => this.schedule(), 5000).unref?.();
+            }),
         },
       );
   }
