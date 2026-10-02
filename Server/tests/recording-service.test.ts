@@ -156,6 +156,48 @@ test("recovery reconciles durable receipt after crash before manifest update", a
   expect(resumed.streams[0]?.nextSequence).toBe(1);
 });
 
+test("recovery ignores a receipt past the accepted endpoint after a failed manifest commit", async () => {
+  const context = await setup();
+  const snapshot = await context.service.resume((await context.service.create(request())).id);
+  const runID = randomUUID().toUpperCase();
+  const bytes = Buffer.alloc(64000);
+  await context.service.appendAudio(snapshot.id, header(snapshot, runID, 0, 0, bytes), bytes);
+  await context.service.pause(
+    snapshot.id,
+    snapshot.epoch,
+    [{ runID, inferenceFrames: 16000 }],
+    [
+      {
+        runID,
+        startedAt: "2026-09-21T10:00:00.000Z",
+        endedAt: "2026-09-21T10:00:01.000Z",
+        gapBeforeMilliseconds: 0,
+      },
+    ],
+  );
+  await context.service.shutdown();
+  // The receipt was written, but its manifest commit failed before the run sealed.
+  const chunks = join(context.path, "sessions", snapshot.id, runID, "inference");
+  const orphan = header(snapshot, runID, 1, 16000, bytes);
+  await writeFile(join(chunks, "1.pcm"), bytes);
+  await writeFile(
+    join(chunks, "1.json"),
+    JSON.stringify({
+      runID,
+      kind: orphan.kind,
+      sequence: orphan.sequence,
+      firstFrame: orphan.firstFrame,
+      frameCount: orphan.frameCount,
+      format: orphan.format,
+      sha256: orphan.sha256,
+    }),
+  );
+  const service = await restart(context);
+  const recovered = await service.get(snapshot.id);
+  expect(recovered.streams[0]?.frameCount).toBe(16000);
+  expect(recovered.streams[0]?.nextSequence).toBe(1);
+});
+
 test("accepted stop totals are immutable and finalization waits for contiguous uploads", async () => {
   const { service } = await setup();
   const snapshot = await service.resume((await service.create(request())).id);

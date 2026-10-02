@@ -161,6 +161,8 @@ final class SottoDuoController: ObservableObject {
     /// Spools whose automatic transfer failed permanently. Health checks skip
     /// them until the user retries, finishes or resumes the recording.
     private var failedRecoveryIDs = Set<UUID>()
+    /// Locally discarded spools whose server discard is in flight.
+    private var discardingSpoolIDs = Set<UUID>()
     private var wisprFlowReader: WisprFlowSourceReader?
     private var wisprFlowPrepareTask: Task<Void, Never>?
     private var wisprFlowPrepareGate: WisprFlowPreparationGate?
@@ -1211,8 +1213,12 @@ final class SottoDuoController: ObservableObject {
     private func recoverPendingRecordings() {
         guard !isShuttingDown else { return }
         let owned = Set(pendingSpools.keys).union(pendingDictations.compactMap { $0.spool?.snapshot.id })
-            .union([activeSpool?.snapshot.id].compactMap { $0 })
+            .union([activeSpool?.snapshot.id].compactMap { $0 }).union(discardingSpoolIDs)
         for spool in RecordingSpool.recover(in: recordingRoot, excluding: owned) {
+            if spool.isDiscardRequested {
+                finishDiscard(spool)
+                continue
+            }
             guard !spool.finalManifest.isEmpty else {
                 // A process can close after admission but before hardware opens.
                 try? spool.discard()
@@ -1271,13 +1277,28 @@ final class SottoDuoController: ObservableObject {
         guard let spool = pendingSpools[id] else { return }
         recoveryTasks[id]?.cancel()
         recoveryTasks[id] = nil
-        do { try spool.discard() }
+        do { try spool.requestDiscard() }
         catch { errorMessage = error.localizedDescription; return }
         pendingSpools[id] = nil
         recoveredSpoolIDs.remove(id)
+        failedRecoveryIDs.remove(id)
         updatePendingRecordingSummary()
-        if let connection = try? client(), connection.endpoint == spool.endpoint {
-            Task { try? await connection.discardRecording(id) }
+        finishDiscard(spool)
+    }
+
+    /// Deletes a tombstoned spool only once its server session is discarded.
+    /// Otherwise recovery retries, so the server never keeps an orphaned take.
+    private func finishDiscard(_ spool: RecordingSpool) {
+        let id = spool.snapshot.id
+        guard !discardingSpoolIDs.contains(id), let connection = try? client(),
+              connection.endpoint == spool.endpoint else { return }
+        discardingSpoolIDs.insert(id)
+        Task { [weak self] in
+            defer { self?.discardingSpoolIDs.remove(id) }
+            do { try await connection.discardRecording(id) }
+            catch ServerClientError.rejected(404, _) {}
+            catch { return }
+            try? spool.discard()
         }
     }
 

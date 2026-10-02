@@ -146,7 +146,7 @@ static void watchdog(void *context, uint64_t expirations) {
     (void)expirations;
     struct capture *c = context;
     double now = boot_time();
-    if (now - c->tick > 2 || now - c->started > 181 ||
+    if (now - c->tick > 2 ||
         (!c->ready && now - c->started > CAPTURE_STARTUP_TIMEOUT_SECONDS) ||
         (c->ready && now - c->last_audio > 1)) fail(c);
     c->tick = now;

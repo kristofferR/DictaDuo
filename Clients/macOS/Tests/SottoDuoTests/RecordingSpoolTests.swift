@@ -72,6 +72,22 @@ final class RecordingSpoolTests: XCTestCase {
         XCTAssertTrue(RecordingSpool.recover(in: root).isEmpty)
     }
 
+    func testRequestedDiscardSurvivesRecoveryWithoutServingAudio() throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let spool = try makeSpool(root: root)
+        try spool.beginCapture(originalSampleRate: nil, originalChannels: nil)
+        try spool.append(chunk(frames: 160))
+        try spool.checkpoint()
+        try spool.requestDiscard()
+        XCTAssertNil(try spool.nextBatch(after: []))
+        let recovered = try XCTUnwrap(RecordingSpool.recover(in: root).first)
+        XCTAssertTrue(recovered.isDiscardRequested)
+        XCTAssertNil(try recovered.nextBatch(after: []))
+        try recovered.discard()
+        XCTAssertTrue(RecordingSpool.recover(in: root).isEmpty)
+    }
+
     func testHardwareCallbacksCoalesceAndSealingFlushesExactTail() throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }

@@ -283,7 +283,17 @@ export class RecordingService {
         const positions: ChunkPosition[] = [];
         let sequence = 0,
           frameCount = 0;
-        while (true) {
+        // A receipt can outlive a failed manifest commit after its run was sealed.
+        // Audio past an accepted endpoint was never acknowledged, so stop there.
+        const endpoint = (manifest.snapshot.stopRuns ?? manifest.snapshot.closedRuns)?.find(
+          (run) => run.runID === stream.runID,
+        );
+        const limit = endpoint
+          ? stream.kind === "inference"
+            ? endpoint.inferenceFrames
+            : (endpoint.originalFrames ?? 0)
+          : Number.POSITIVE_INFINITY;
+        while (frameCount < limit) {
           const path = service.chunkPath(id, stream.runID, stream.kind, sequence, "json");
           let receipt: Receipt;
           try {

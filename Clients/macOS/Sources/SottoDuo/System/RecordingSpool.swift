@@ -33,6 +33,7 @@ final class RecordingSpool: @unchecked Sendable {
         var deliveryAttempted = false
         var continuationID: UUID?
         var contextReady: Bool? = false
+        var discardRequested: Bool? = false
     }
 
     enum SpoolError: LocalizedError {
@@ -64,6 +65,7 @@ final class RecordingSpool: @unchecked Sendable {
     var deviceIdentity: String { lock.withLock { manifest.deviceIdentity } }
     var isSealed: Bool { lock.withLock { manifest.sealed } }
     var isPaused: Bool { lock.withLock { manifest.paused == true } }
+    var isDiscardRequested: Bool { lock.withLock { manifest.discardRequested == true } }
     var runTimings: [RecordingRunTiming] {
         lock.withLock {
             manifest.runs.map { RecordingRunTiming(runID: $0.id, startedAt: $0.startedAt, endedAt: $0.endedAt,
@@ -108,6 +110,7 @@ final class RecordingSpool: @unchecked Sendable {
         self.directory = directory
         manifest = try RecordingWire.decoder().decode(Manifest.self, from: Data(contentsOf: directory.appendingPathComponent("manifest.json")))
         guard manifest.version == 1 else { throw SpoolError.invalid("Unsupported local recording version.") }
+        discarded = manifest.discardRequested == true
         for run in manifest.runs {
             let runCheckpointURL = directory.appendingPathComponent(run.id.uuidString).appendingPathComponent("capture-checkpoint.json")
             let committedRun: [RecordingStreamCheckpoint]?
@@ -472,6 +475,17 @@ final class RecordingSpool: @unchecked Sendable {
             let previous = manifest
             manifest.deliveryAttempted = true
             do { try saveManifest() } catch { manifest = previous; throw error }
+        }
+    }
+
+    /// A durable tombstone: the spool stops serving audio but survives until
+    /// the server has also discarded its session.
+    func requestDiscard() throws {
+        try lock.withLock {
+            let previous = manifest
+            manifest.discardRequested = true
+            do { try saveManifest() } catch { manifest = previous; throw error }
+            discarded = true
         }
     }
 
