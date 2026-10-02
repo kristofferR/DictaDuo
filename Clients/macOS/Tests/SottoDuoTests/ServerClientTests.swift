@@ -30,6 +30,24 @@ final class ServerClientTests: XCTestCase {
         XCTAssertEqual(fixture.requests.count, 2)
     }
 
+    func testDiscardRetriesTransientFailuresButNotRejections() async throws {
+        let fixture = HTTPFixture()
+        defer { fixture.session.invalidateAndCancel() }
+        fixture.respond = { [weak fixture] _ in
+            (fixture?.requests.count ?? 0) < 3 ? (503, Data()) : (200, Data("{}".utf8))
+        }
+        let client = try ServerClient(endpoint: fixture.endpoint, token: "", session: fixture.session)
+        await client.discardRecordingRetrying(UUID(), delays: [.milliseconds(5), .milliseconds(5), .milliseconds(5)])
+        XCTAssertEqual(fixture.requests.count, 3)
+
+        let rejected = HTTPFixture()
+        defer { rejected.session.invalidateAndCancel() }
+        rejected.respond = { _ in (404, Data()) }
+        let other = try ServerClient(endpoint: rejected.endpoint, token: "", session: rejected.session)
+        await other.discardRecordingRetrying(UUID(), delays: [.milliseconds(5)])
+        XCTAssertEqual(rejected.requests.count, 1)
+    }
+
     func testQueuedEventsReconnectUntilTerminalResult() async throws {
         let fixture = HTTPFixture()
         defer { fixture.session.invalidateAndCancel() }

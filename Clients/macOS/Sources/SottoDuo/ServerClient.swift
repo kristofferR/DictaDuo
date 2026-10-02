@@ -443,6 +443,17 @@ extension ServerClient {
         try await send(path: "v2/recordings/\(id)/discard", method: "POST", timeout: timeout)
     }
 
+    /// An explicit cancel must win over the server sealing an expired lease, so a
+    /// discard that fails transiently keeps retrying through a brief outage.
+    func discardRecordingRetrying(_ id: UUID,
+                                  delays: [Duration] = [.seconds(1), .seconds(2), .seconds(4), .seconds(8), .seconds(15)]) async {
+        for delay in [Duration.zero] + delays {
+            try? await Task.sleep(for: delay)
+            do { try await discardRecording(id); return }
+            catch { guard Self.isTransient(error) else { return } }
+        }
+    }
+
     func retryRecording(_ id: UUID) async throws -> RecordingSnapshot {
         try await recordingJSON(path: "v2/recordings/\(id)/retry", method: "POST")
     }

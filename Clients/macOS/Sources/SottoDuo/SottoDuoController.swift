@@ -974,7 +974,7 @@ final class SottoDuoController: ObservableObject {
                 }
             } else {
                 resetSession()
-                if shouldCancel, let generation, let connection { Task { try? await connection.discardRecording(generation) } }
+                if shouldCancel, let generation, let connection { Task { await connection.discardRecordingRetrying(generation) } }
             }
             showCancelled()
         } else if activity.isBusy, let pending = pendingDictations.last(where: { $0.session == sessionID }) {
@@ -1115,7 +1115,7 @@ final class SottoDuoController: ObservableObject {
             }
         } else if pending.shouldCancelServer {
             // A remote stop in flight may already have sealed the audio on the server.
-            Task { try? await pending.client.discardRecording(pending.id) }
+            Task { await pending.client.discardRecordingRetrying(pending.id) }
         }
         if shown { showCancelled() }
     }
@@ -1180,7 +1180,7 @@ final class SottoDuoController: ObservableObject {
         guard let spool = activeSpool else {
             resetSession()
             showError(message)
-            if cancelServer, let generation, let connection { Task { try? await connection.discardRecording(generation) } }
+            if cancelServer, let generation, let connection { Task { await connection.discardRecordingRetrying(generation) } }
             refreshHistory()
             return
         }
@@ -1226,7 +1226,7 @@ final class SottoDuoController: ObservableObject {
                 // A process can close after admission but before hardware opens.
                 try? spool.discard()
                 if let connection = try? client(), connection.endpoint == spool.endpoint {
-                    Task { try? await connection.discardRecording(spool.snapshot.id) }
+                    Task { await connection.discardRecordingRetrying(spool.snapshot.id) }
                 }
                 continue
             }
@@ -1616,7 +1616,7 @@ final class SottoDuoController: ObservableObject {
             let created = try await connection.startCapture(.init(requestID: requestID, device: device,
                 mode: isTest ? .test : .dictation, source: source, buttonTicket: recordingTrigger?.buttonTicket), timeout: available)
             guard sessionID == current, activity == .starting, !Task.isCancelled else {
-                Task { try? await connection.discardRecording(created.id) }; return
+                Task { await connection.discardRecordingRetrying(created.id) }; return
             }
             activeGenerationID = created.id; activeClient = connection
             guard created.capture?.source == source else { throw ServerClientError.invalidResponse }
@@ -1696,7 +1696,7 @@ final class SottoDuoController: ObservableObject {
             // The server is reachable again, so settle any earlier uncertain admission.
             reconcileAdmissions()
             guard sessionID == current, activity == .starting, !Task.isCancelled else {
-                Task { try? await connection.discardRecording(created.id) }; return
+                Task { await connection.discardRecordingRetrying(created.id) }; return
             }
             activeGenerationID = created.id; activeClient = connection
             let spool = try RecordingSpool(directory: recordingRoot.appendingPathComponent(created.id.uuidString),
@@ -1938,7 +1938,7 @@ final class SottoDuoController: ObservableObject {
             } catch {
                 pending.recording?.cancel(); pending.destination?.cancel()
                 if let transport = pending.transport { await transport.cancel() }
-                if pending.spool == nil, pending.shouldCancelServer { Task { try? await connection.discardRecording(id) } }
+                if pending.spool == nil, pending.shouldCancelServer { Task { await connection.discardRecordingRetrying(id) } }
                 if Task.isCancelled || error is CancellationError { return }
                 if let recording = error as? AudioRecordingError, case .cancelled = recording { return }
                 // Saved local audio is never lost to a failure: recovery finishes it archive-only.
@@ -2417,7 +2417,7 @@ final class SottoDuoController: ObservableObject {
         let remote = pendingDictations.filter { $0.spool == nil }
         for pending in remote {
             pending.cancel()
-            if pending.shouldCancelServer { Task { try? await pending.client.discardRecording(pending.id) } }
+            if pending.shouldCancelServer { Task { await pending.client.discardRecordingRetrying(pending.id) } }
         }
         pendingDictations.removeAll { pending in remote.contains { $0 === pending } }
         if isCapturing {
