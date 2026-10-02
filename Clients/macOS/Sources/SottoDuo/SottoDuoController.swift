@@ -123,6 +123,11 @@ final class SottoDuoController: ObservableObject {
         }
     }
     @Published private(set) var loginItemError: String?
+    @Published var muteOutputWhileRecording = false {
+        didSet {
+            if !applyingConfiguration { configuration.update { $0.muteOutputWhileRecording = muteOutputWhileRecording } }
+        }
+    }
     @Published var statusMessage = "Connecting to server…"
     @Published private(set) var serverHealth: ServerHealth?
     @Published private(set) var serverStatusMessage = "Connecting…"
@@ -169,6 +174,7 @@ final class SottoDuoController: ObservableObject {
     private let recorder = AudioRecorder()
     private let audioDevices = AudioDeviceStore()
     private let hotkey = HotkeyMonitor()
+    private let outputMuter = SystemOutputMuter()
     private let djiMicButton = DJIMicButtonMonitor()
     private var djiSuspensions: Set<String> = []
     private var remoteButtons: RemoteButtonDestination?
@@ -262,13 +268,16 @@ final class SottoDuoController: ObservableObject {
     }
 
     private func applyConfiguration(_ settings: SottoDuoConfiguration) {
-        guard !isBusy, !isShuttingDown else { return }
+        guard !isShuttingDown else { return }
         applyingConfiguration = true
+        defer { applyingConfiguration = false }
+        // This preference only affects the next take, so accept edits while busy.
+        if muteOutputWhileRecording != settings.muteOutputWhileRecording { muteOutputWhileRecording = settings.muteOutputWhileRecording }
+        guard !isBusy else { return }
         if let key = HoldKey(rawValue: settings.holdKey), shortcut != key { shortcut = key }
         if let mode = HotkeyActivationMode(rawValue: settings.activationMode), activationMode != mode { activationMode = mode }
         if launchAtLogin != settings.launchAtLogin { launchAtLogin = settings.launchAtLogin }
         if djiMicButtonEnabled != settings.djiMicButtonEnabled { djiMicButtonEnabled = settings.djiMicButtonEnabled }
-        applyingConfiguration = false
     }
 
     private func client() throws -> ServerClient {
@@ -751,6 +760,7 @@ final class SottoDuoController: ObservableObject {
         destinationTask?.cancel(); destinationTask = nil
         stopRecordingTimer()
         recorder.cancel()
+        outputMuter.restore()
         recorder.onChunk = nil
         insertionDestination = nil
         recordingListHint = nil
@@ -793,6 +803,8 @@ final class SottoDuoController: ObservableObject {
         onHUDVisibility?(false)
         if activity == .success { activity = .idle }
     }
+
+    var pendingOutputRestore: Task<Void, Never>? { outputMuter.pendingRestore }
 
     func shutdown() {
         guard !isShuttingDown else { return }
@@ -906,6 +918,7 @@ final class SottoDuoController: ObservableObject {
         activity = .starting
         statusMessage = "Connecting recording…"
         onHUDVisibility?(true)
+        if muteOutputWhileRecording { outputMuter.mute() }
         if !isTest {
             let capture = TextInserter.beginDestinationCapture()
             destinationTask = capture
@@ -1065,6 +1078,7 @@ final class SottoDuoController: ObservableObject {
         // latch behind, matching the failure and cancel paths.
         hotkey.clearLatchedTake()
         recorder.stopAcceptingAudio()
+        if remoteCapture == nil { outputMuter.restore() }
         guard activity == .recording else { cancelDictation(); return }
         let releasedAt = ProcessInfo.processInfo.systemUptime
         destinationTask?.finish()
@@ -1114,7 +1128,11 @@ final class SottoDuoController: ObservableObject {
                 guard sessionID == current, !Task.isCancelled else { return }
                 var result: GenerationRecord
                 if let capture {
-                    result = try await capture.stop(continuationID: continuationID)
+                    result = try await capture.stop(continuationID: continuationID) { [weak self] in
+                        guard let self, sessionID == current else { return }
+                        outputMuter.restore()
+                    }
+                    guard sessionID == current, !Task.isCancelled else { return }
                     serverSealed = true
                 } else {
                     guard var finish else { throw ServerClientError.invalidResponse }

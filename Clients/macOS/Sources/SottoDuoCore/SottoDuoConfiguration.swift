@@ -8,22 +8,25 @@ public struct SottoDuoConfiguration: Codable, Equatable, Sendable {
     public var activationMode: String
     public var launchAtLogin: Bool
     public var djiMicButtonEnabled: Bool
+    public var muteOutputWhileRecording: Bool
     public var microphones: MicrophonePreferences
 
     public static let `default` = SottoDuoConfiguration()
 
-    public init(holdKey: String = "rightOption", activationMode: String = "hold", launchAtLogin: Bool = false, djiMicButtonEnabled: Bool = false,
+    public init(holdKey: String = "rightOption", activationMode: String = "hold", launchAtLogin: Bool = false,
+                djiMicButtonEnabled: Bool = false, muteOutputWhileRecording: Bool = false,
                 microphones: MicrophonePreferences = MicrophonePreferences()) {
         schemaVersion = 1
         self.holdKey = holdKey
         self.activationMode = activationMode
         self.launchAtLogin = launchAtLogin
         self.djiMicButtonEnabled = djiMicButtonEnabled
+        self.muteOutputWhileRecording = muteOutputWhileRecording
         self.microphones = microphones
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, holdKey, activationMode, launchAtLogin, djiMicButtonEnabled, microphones
+        case schemaVersion, holdKey, activationMode, launchAtLogin, djiMicButtonEnabled, muteOutputWhileRecording, microphones
     }
 
     public init(from decoder: Decoder) throws {
@@ -44,6 +47,7 @@ public struct SottoDuoConfiguration: Codable, Equatable, Sendable {
                   activationMode: activationMode,
                   launchAtLogin: try values.value(Bool.self, for: .launchAtLogin, default: false),
                   djiMicButtonEnabled: try values.value(Bool.self, for: .djiMicButtonEnabled, default: false),
+                  muteOutputWhileRecording: try values.value(Bool.self, for: .muteOutputWhileRecording, default: false),
                   microphones: values.contains(.microphones)
                     ? try values.decode(StrictMicrophones.self, forKey: .microphones).preferences
                     : MicrophonePreferences())

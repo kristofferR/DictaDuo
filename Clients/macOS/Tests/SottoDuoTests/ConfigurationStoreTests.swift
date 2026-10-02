@@ -5,6 +5,28 @@ import XCTest
 @testable import SottoDuo
 
 final class ConfigurationStoreTests: XCTestCase {
+    func testExternalMutePreferenceAppliesWhileBusyWithoutReSaving() async throws {
+        try await withStore { store, file in
+            await store.start()
+            store.stopWatching()
+            let controller = SottoDuoController(configuration: store, startServices: false)
+            defer { controller.shutdown() }
+
+            for activity in [DictationActivity.starting, .recording, .transcribing, .delivering] {
+                controller.activity = activity
+                var edited = store.configuration
+                edited.muteOutputWhileRecording.toggle()
+                try Self.write(edited, to: file.url, atomically: true)
+                await store.reload()
+
+                XCTAssertEqual(controller.muteOutputWhileRecording, edited.muteOutputWhileRecording)
+                XCTAssertEqual(store.pendingWriteCount, 0, "Applying an external edit must not queue another save")
+                controller.cancelDictation()
+                XCTAssertEqual(controller.muteOutputWhileRecording, edited.muteOutputWhileRecording)
+            }
+        }
+    }
+
     func testFirstStartCreatesDefaultPreferences() async throws {
         try await withStore { store, file in
             XCTAssertEqual(store.configuration, .default)

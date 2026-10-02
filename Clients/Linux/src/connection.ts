@@ -190,6 +190,7 @@ export class ConnectionSettings {
       device: { id: current?.device.id ?? this.deviceID, name: checked.name },
       buttonEnabled: current?.buttonEnabled ?? false,
       activationMode: current?.activationMode ?? "hold",
+      muteOutputWhileRecording: current?.muteOutputWhileRecording ?? false,
       sources:
         current?.server === checked.server && current.sources.hostID === hostID
           ? current.sources

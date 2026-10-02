@@ -9,6 +9,7 @@ export interface Config {
   buttonEnabled: boolean;
   /** Hold the key to dictate, or double tap it to toggle recording. */
   activationMode: "hold" | "doubleTap";
+  muteOutputWhileRecording: boolean;
   server: string;
   tokenFile: string;
   device: { id: string; name: string };
@@ -65,6 +66,7 @@ export function parseConfig(value: unknown): Config {
   return {
     buttonEnabled: value.buttonEnabled === true,
     activationMode: value.activationMode === "doubleTap" ? "doubleTap" : "hold",
+    muteOutputWhileRecording: value.muteOutputWhileRecording === true,
     server: endpoint(value.server),
     tokenFile: value.tokenFile,
     device: validateBody("DeviceIdentity", value.device),
