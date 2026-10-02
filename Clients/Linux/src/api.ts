@@ -6,6 +6,7 @@ export type Recording = components["schemas"]["RecordingSnapshot"];
 export type RecordingDetail = components["schemas"]["RecordingDetail"];
 export type Device = components["schemas"]["DeviceIdentity"];
 export type CaptureMode = components["schemas"]["StartCaptureRequest"]["mode"];
+export type ButtonTarget = components["schemas"]["ButtonTarget"];
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -16,10 +17,12 @@ export class APIError extends Error {
   ) {
     super(`Server request failed (${status}, ${code}).`);
   }
+  /** The next input may still work: this one is missing, failed, unshared or busy. */
   get allowsFallback() {
     return (
-      this.status === 503 &&
-      ["source_unavailable", "capture_failed", "capture_timeout"].includes(this.code)
+      (this.status === 503 &&
+        ["source_unavailable", "capture_failed", "capture_timeout"].includes(this.code)) ||
+      (this.status === 409 && this.code === "capture_busy")
     );
   }
 }
@@ -48,6 +51,7 @@ export class API {
         "X-SottoDuo-Capture": "capture-v1",
         "X-SottoDuo-Recognition": "streaming-v1",
         "X-SottoDuo-Recognition-Engine": "engine-v1",
+        "X-SottoDuo-Microphone-Sharing": "sharing-v1",
         ...(owner ? { "X-SottoDuo-Capture-Owner": owner } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -146,7 +150,21 @@ export class API {
     );
   }
   async sources() {
-    return validateBody("AudioSourceList", await this.request("/v1/audio-sources")).sources;
+    return validateBody("AudioSourceList", await this.request("/v1/audio-sources"));
+  }
+  /** Only a client on the computer hosting the source may change its sharing. */
+  async setSharing(source: SourceID, shared: boolean) {
+    return validateBody(
+      "AudioSourceList",
+      await this.request("/v1/audio-sources/sharing", "PUT", { source, shared }),
+    );
+  }
+  /** Stored on the server and shared by every computer. */
+  async setButtonTarget(target: ButtonTarget) {
+    return validateBody(
+      "ButtonDestinationState",
+      await this.request("/v1/button-destinations/target", "PUT", target),
+    );
   }
   /** Admits a durable recording session fed by a server-hosted microphone. */
   async start(
@@ -210,6 +228,7 @@ export class API {
         Authorization: `Bearer ${this.token}`,
         Accept: "application/x-ndjson",
         "X-SottoDuo-Recognition-Engine": "engine-v1",
+        "X-SottoDuo-Microphone-Sharing": "sharing-v1",
       },
     });
     if (!response.ok || !response.body) {

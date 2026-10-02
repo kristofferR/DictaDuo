@@ -63,6 +63,8 @@ type Phase =
 type Activity = {
   phase: Phase;
   source?: string;
+  /** The computer sharing the microphone, when it is not this one. */
+  host?: string;
   startedAt?: number;
   trigger?: "shortcut" | "pairing" | "test";
   /** Epoch milliseconds until which a cancelled take can still be inserted. */
@@ -489,10 +491,7 @@ export class Controller {
           const closed =
             error instanceof APIError && error.status === 409 && error.code === "capture_closed";
           if (closed && !take.released)
-            this.interrupt(
-              take,
-              "The remote microphone stopped. Any recorded audio is saved in history.",
-            );
+            this.interrupt(take, "The microphone stopped. Any recorded audio is saved in history.");
           else if (!take.sealed && !closed) throw error;
         }
       }
@@ -516,14 +515,23 @@ export class Controller {
     if (!(await this.desktop.unlocked(take.startedAt)))
       throw new Error("Desktop is locked or unavailable.");
     // The microphone opens only once playback is silenced.
-    const [sources, defaultID] = await Promise.all([
+    const [{ sources, sharingHost }, defaultID] = await Promise.all([
       this.api.sources(),
       this.desktop.defaultInput(this.preferences.hostID),
       take.muting,
     ]);
     const options = take.button
       ? sources.filter((source) => sourceKey(source.identity) === sourceKey(take.button!.source))
-      : candidates(sources, this.preferences, defaultID);
+      : candidates(sources, this.preferences, defaultID, this.device.id);
+    // One take at a time per server: another computer's take holds every microphone.
+    const holder = sources.find(
+      (source) => source.recordingFor && source.recordingFor.id !== this.device.id,
+    )?.recordingFor;
+    if (!options.length && holder) {
+      const host = sharingHost?.local === false ? sharingHost.name : "This computer";
+      this.setState(take, `${host} is busy with ${holder.name}. Try again when it is free.`);
+      return;
+    }
     for (const source of options.slice(0, 2)) {
       if (!this.live(take)) return;
       if (take.released) {
@@ -556,7 +564,11 @@ export class Controller {
           throw new Error("Invalid capture admission.");
         // This client keeps no cross-take continuation; release the server's context hold.
         void this.api.context(record.id, take.owner).catch(() => {});
-        take.activity = { ...take.activity, source: source.name };
+        take.activity = {
+          ...take.activity,
+          source: source.name,
+          host: sharingHost && !sharingHost.local ? sharingHost.name : undefined,
+        };
         take.feedback.begin();
         if (this.api.events) {
           void this.api
@@ -571,7 +583,7 @@ export class Controller {
               if (update.capture.state === "stopped" && update.captureState !== "discarded")
                 this.interrupt(
                   take,
-                  `${update.error ?? "The remote microphone stopped."} The recording is saved in history.`,
+                  `${update.error ?? "The microphone stopped."} The recording is saved in history.`,
                 );
               else if (
                 update.capture.state === "recording" &&

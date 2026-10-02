@@ -223,13 +223,13 @@ export class ClientRuntime {
       switch (action) {
         case "arm":
           if (!buttons.enabled)
-            return "Enable pairing-button dictation in SottoDuo → This computer first.";
+            return "Let the DJI button type here in SottoDuo → Microphone first.";
           await buttons.select();
-          return "DJI pairing button destination selected: this computer.";
+          return "The DJI button now types into this computer.";
         case "disarm":
-          if (!buttons.enabled) return "Pairing-button dictation is disabled on this computer.";
+          if (!buttons.enabled) return "The DJI button is not allowed to type here.";
           await buttons.disarm();
-          return "This computer is no longer selected.";
+          return "The DJI button no longer types into this computer.";
         case "button-status":
           return JSON.stringify({ ...buttons.state, enabled: buttons.enabled });
         case "start":

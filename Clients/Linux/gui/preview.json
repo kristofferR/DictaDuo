@@ -37,6 +37,32 @@
     "muteOutputWhileRecording": false,
     "button": {
       "available": true,
+      "selected": {
+        "id": "00000000-0000-4000-8000-000000000002",
+        "device": {
+          "id": "macbook",
+          "name": "MacBook"
+        }
+      },
+      "destinations": [
+        {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "device": {
+            "id": "preview",
+            "name": "Omarchy"
+          }
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000002",
+          "device": {
+            "id": "macbook",
+            "name": "MacBook"
+          }
+        }
+      ],
+      "buttonTarget": {
+        "mode": "lastDictated"
+      },
       "selectedHere": false
     },
     "buttonSettingsSupported": true,
@@ -159,7 +185,8 @@
         },
         "name": "DJI Mic Mini",
         "transport": "usb",
-        "eligible": true
+        "eligible": true,
+        "shared": true
       },
       {
         "identity": {
@@ -168,13 +195,18 @@
         },
         "name": "AirPods Pro 3",
         "transport": "bluetooth",
-        "eligible": true
+        "eligible": true,
+        "shared": false
       }
     ],
     "next": {
       "name": "DJI Mic Mini"
     },
-    "reason": "The first microphone in the selected priority list is ready."
+    "reason": "The first microphone in the selected priority list is ready.",
+    "sharingHost": {
+      "name": "omarchy",
+      "local": true
+    }
   },
   "preferences": {
     "revision": 1,
@@ -290,13 +322,42 @@
   },
   "receiver": {
     "available": true,
-    "selected": null,
+    "selected": {
+      "id": "00000000-0000-4000-8000-000000000002",
+      "device": {
+        "id": "macbook",
+        "name": "MacBook"
+      }
+    },
     "source": {
       "name": "DJI Mic Mini",
       "present": true,
       "link": "connected",
       "capture": "available",
       "audioHealth": "unknown"
+    },
+    "destinations": [
+      {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "device": {
+          "id": "preview",
+          "name": "Omarchy"
+        }
+      },
+      {
+        "id": "00000000-0000-4000-8000-000000000002",
+        "device": {
+          "id": "macbook",
+          "name": "MacBook"
+        }
+      }
+    ],
+    "buttonTarget": {
+      "mode": "lastDictated"
+    },
+    "sharingHost": {
+      "name": "omarchy",
+      "local": true
     }
   },
   "shortcuts": {

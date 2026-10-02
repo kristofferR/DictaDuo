@@ -3,7 +3,8 @@ import { HistoryTools } from "./history.ts";
 import { legacySourceEdit, microphoneSnapshot } from "./microphones.ts";
 import { ClientNotice } from "./errors.ts";
 import { readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
-import { API } from "./api.ts";
+import { validateBody } from "../../../Server/src/validation.ts";
+import { API, APIError } from "./api.ts";
 import { configPath, parseConfig, type Config } from "./config.ts";
 import type { Controller, Desktop } from "./controller.ts";
 import type { ButtonDestinationClient } from "./buttons.ts";
@@ -68,6 +69,8 @@ export function createGUIHandler(
           ? {
               selected: buttons.state.selected,
               available: buttons.state.available,
+              destinations: buttons.state.destinations,
+              buttonTarget: buttons.state.buttonTarget ?? null,
               selectedHere: buttons.selectedHere,
             }
           : null,
@@ -106,18 +109,6 @@ export function createGUIHandler(
       case "cancel":
         await controller.cancel();
         return {};
-      case "arm":
-        if (!buttons?.enabled)
-          throw new ClientNotice("Enable pairing-button dictation on this computer first.");
-        await buttons.select();
-        return {};
-      case "disarm":
-        if (controller.busy)
-          throw new ClientNotice("Finish dictation before changing its destination.");
-        if (!buttons?.selectedHere)
-          throw new ClientNotice("This computer is not the selected destination.");
-        await buttons.disarm();
-        return {};
       case "saveActivationMode":
         if (request.mode !== "hold" && request.mode !== "doubleTap")
           throw new ClientNotice("Choose hold or double tap.");
@@ -134,18 +125,18 @@ export function createGUIHandler(
         return { enabled: request.enabled };
       case "saveButton": {
         if (!buttons)
-          throw new ClientNotice("Update the background client to change pairing-button settings.");
+          throw new ClientNotice("Update the background client to change DJI button settings.");
         if (typeof request.enabled !== "boolean")
-          throw new ClientNotice("Invalid pairing-button setting.");
+          throw new ClientNotice("Invalid DJI button setting.");
         if (controller.busy)
-          throw new ClientNotice("Finish dictation before changing pairing-button settings.");
+          throw new ClientNotice("Finish dictation before changing DJI button settings.");
         saveConfig(parseConfig({ ...config, buttonEnabled: request.enabled }));
         await buttons.setEnabled(request.enabled);
         return { enabled: buttons.enabled };
       }
       case "receiver": {
         // Discovery refreshes receiver status; checking never registers or selects a destination.
-        const sources = await api.sources();
+        const { sources, sharingHost } = await api.sources();
         const state = await api.buttonStatus();
         const identity = state.source;
         const source = identity
@@ -154,24 +145,50 @@ export function createGUIHandler(
         return {
           available: state.available,
           selected: state.selected ?? null,
+          destinations: state.destinations,
+          buttonTarget: state.buttonTarget ?? null,
           source: source ?? null,
+          // Other computers only see the receiver's source details when it is shared.
+          reported: identity !== undefined,
+          sharingHost: sharingHost ?? null,
           checkedAt: new Date().toISOString(),
         };
       }
+      case "setButtonTarget":
+        return api.setButtonTarget(validateBody("ButtonTarget", request.target));
+      case "setSharing":
+        if (typeof request.shared !== "boolean")
+          throw new ClientNotice("Invalid microphone sharing setting.");
+        try {
+          return await api.setSharing(
+            validateBody("AudioSourceIdentity", request.source),
+            request.shared,
+          );
+        } catch (error) {
+          if (error instanceof APIError && error.code === "source_not_found")
+            throw new ClientNotice("This microphone is no longer connected.");
+          if (error instanceof APIError && error.code === "sharing_local_only")
+            throw new ClientNotice(
+              "Sharing is set on the computer the microphone is plugged into.",
+            );
+          throw error;
+        }
       case "connection":
         return api.health();
       case "sources": {
-        const [sources, defaultID] = await Promise.all([
+        const [{ sources, sharingHost }, defaultID] = await Promise.all([
           api.sources(),
           desktop.defaultInput(config.sources.hostID),
         ]);
+        const device = config.device.id;
         return {
           items: sources.map((source) => ({
             ...source,
-            eligible: eligible(source),
-            unavailableReason: unavailableReason(source),
+            eligible: eligible(source, device),
+            unavailableReason: unavailableReason(source, device),
           })),
-          ...selectionExplanation(sources, config.sources, defaultID),
+          sharingHost: sharingHost ?? null,
+          ...selectionExplanation(sources, config.sources, defaultID, device),
         };
       }
       case "history":
@@ -205,7 +222,7 @@ export function createGUIHandler(
           request.value.hostID !== config.sources.hostID
         )
           throw new ClientNotice(
-            "Microphone lists belong to this server and capture host. Reload saved settings.",
+            "Microphone lists belong to this server and microphone computer. Reload saved settings.",
           );
         const next = parseConfig({ ...config, sources: request.value });
         saveConfig(next);

@@ -63,7 +63,7 @@ Group {
                 root.tested = false;
                 root.dirty = false;
                 root.editing = false;
-                root.message = "Connection saved. To use the pairing button here, select this computer again below.";
+                root.message = "Connection saved. Dictate here once to point the DJI button back at this computer.";
                 root.clearSecret();
                 bridge.request("snapshot");
                 root.ui.refresh();
@@ -245,9 +245,9 @@ Group {
             objectName: "connectionHostID"
             Layout.fillWidth: true
             visible: root.tested && root.hosts.length === 0
-            placeholderText: "Capture host ID from the server setup"
+            placeholderText: "Microphone computer ID from the server setup"
             placeholderTextColor: root.ui.c.muted
-            Accessible.name: "Capture host ID"
+            Accessible.name: "Microphone computer ID"
             maximumLength: 200
             enabled: !root.pending
         }
@@ -255,13 +255,13 @@ Group {
             ui: root.ui
             Layout.fillWidth: true
             visible: root.tested && root.hosts.length === 0
-            text: "The server has no microphone sources yet. Enter its capture host ID, or configure server audio and test again."
+            text: "The server has no microphone sources yet. Enter its microphone computer ID, or configure server audio and test again."
             color: root.ui.c.muted
         }
         SLabel {
             ui: root.ui
             Layout.fillWidth: true
-            text: "Changing server or microphone computer resets your microphone choices. Saving ends pairing-button selection on this computer; it never starts recording."
+            text: "Changing server or microphone computer resets your microphone choices. Saving stops the DJI button typing here until you dictate again; it never starts recording."
             color: root.ui.c.muted
         }
         RowLayout {

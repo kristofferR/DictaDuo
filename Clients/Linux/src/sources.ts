@@ -8,17 +8,19 @@ export interface SourcePreferences {
   fixed?: SourceID;
 }
 export const sourceKey = (source: SourceID) => JSON.stringify([source.hostID, source.id]);
-export function eligible(source: Source, now = Date.now()): boolean {
-  return unavailableReason(source, now) === null;
+/** `device` is this client's device ID; sources recording for another device are busy. */
+export function eligible(source: Source, device?: string, now = Date.now()): boolean {
+  return unavailableReason(source, device, now) === null;
 }
 /** Same-host inputs are registered once by the server; never open a second local capture. */
 export function candidates(
   sources: Source[],
   preferences: SourcePreferences,
   defaultID?: SourceID,
+  device?: string,
   now = Date.now(),
 ): Source[] {
-  const available = sources.filter((source) => eligible(source, now));
+  const available = sources.filter((source) => eligible(source, device, now));
   const local = available
     .filter((source) => source.identity.hostID === preferences.hostID)
     .sort((a, b) => sourceKey(a.identity).localeCompare(sourceKey(b.identity)));
@@ -44,8 +46,15 @@ export function candidates(
   );
 }
 
-export function unavailableReason(source: Source | undefined, now = Date.now()): string | null {
+export function unavailableReason(
+  source: Source | undefined,
+  device?: string,
+  now = Date.now(),
+): string | null {
   if (!source) return "Not currently reported by the server";
+  // The server records one take at a time: another computer's take holds every source.
+  if (source.recordingFor && source.recordingFor.id !== device)
+    return `Busy · ${source.recordingFor.name} is dictating`;
   const age = now - Date.parse(source.observedAt);
   if (!(age >= 0 && age <= 3500)) return "Status is out of date";
   if (!source.present) return "Disconnected";
@@ -59,9 +68,10 @@ export function selectionExplanation(
   sources: Source[],
   preferences: SourcePreferences,
   defaultID?: SourceID,
+  device?: string,
   now = Date.now(),
 ) {
-  const next = candidates(sources, preferences, defaultID, now)[0] ?? null;
+  const next = candidates(sources, preferences, defaultID, device, now)[0] ?? null;
   if (!next)
     return {
       next,
@@ -71,19 +81,19 @@ export function selectionExplanation(
   const fallback =
     defaultID && sourceKey(next.identity) === sourceKey(defaultID)
       ? "the system default microphone"
-      : `an available microphone on ${preferences.hostID}`;
+      : "another ready microphone";
   if (preferences.mode === "fixed") {
     if (preferences.fixed && sourceKey(next.identity) === sourceKey(preferences.fixed))
       return {
         next,
-        reason: "Using the fixed input. Host fallback remains available if capture cannot start.",
+        reason: "Using the fixed input. Another ready microphone is used if it cannot start.",
       };
     const fixed = sources.find(
       (source) => preferences.fixed && sourceKey(source.identity) === sourceKey(preferences.fixed),
     );
     return {
       next,
-      reason: `Fixed input unavailable: ${unavailableReason(fixed, now)}. Using ${fallback}.`,
+      reason: `Fixed input unavailable: ${unavailableReason(fixed, device, now)}. Using ${fallback}.`,
     };
   }
   if (preferences.mode === "systemDefault") {

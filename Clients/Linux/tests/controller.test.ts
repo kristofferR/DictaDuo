@@ -273,24 +273,63 @@ test("output stays muted from activation until the microphone is sealed, only wh
   expect(events.every((event) => event !== "mute:processing")).toBe(true);
 });
 
-test("definitive startup rejection permits one fallback with fresh owner and request ID", async () => {
+test.each([
+  [503, "source_unavailable"],
+  [409, "capture_busy"],
+] as const)(
+  "definitive startup rejection (%i %s) permits one fallback with fresh owner and request ID",
+  async (status, code) => {
+    const f = await fixture();
+    const start = f.api.start.bind(f.api);
+    const requests: { id: string; owner: string }[] = [];
+    f.api.start = async (...args) => {
+      requests.push({ id: args[0], owner: args[4] });
+      if (requests.length === 1) throw new APIError(status, code);
+      return start(...args);
+    };
+    f.controller.start();
+    await until(() => f.controller.state.startsWith("recording"));
+    f.controller.stop();
+    await f.controller.settled();
+    expect(requests.length).toBe(2);
+    expect(requests[0]!.owner).not.toBe(requests[1]!.owner);
+    expect(requests[0]!.id).not.toBe(requests[1]!.id);
+    expect(f.starts).toEqual(["built-in"]);
+    expect(f.deliveries()).toBe(1);
+  },
+);
+test("a source busy for another computer is skipped, and a shared mic names its computer", async () => {
   const f = await fixture();
-  const start = f.api.start.bind(f.api);
-  const requests: { id: string; owner: string }[] = [];
-  f.api.start = async (...args) => {
-    requests.push({ id: args[0], owner: args[4] });
-    if (requests.length === 1) throw new APIError(503, "source_unavailable");
-    return start(...args);
-  };
+  const sources = f.api.sources.bind(f.api);
+  f.api.sources = async () => ({
+    sharingHost: { name: "omarchy", local: false },
+    sources: (await sources()).sources.map((source) =>
+      source.identity.id === "dji"
+        ? { ...source, recordingFor: { id: "mac", name: "MacBook" } }
+        : source,
+    ),
+  });
   f.controller.start();
   await until(() => f.controller.state.startsWith("recording"));
+  expect(f.controller.activity).toMatchObject({ source: "built-in", host: "omarchy" });
   f.controller.stop();
   await f.controller.settled();
-  expect(requests.length).toBe(2);
-  expect(requests[0]!.owner).not.toBe(requests[1]!.owner);
-  expect(requests[0]!.id).not.toBe(requests[1]!.id);
   expect(f.starts).toEqual(["built-in"]);
-  expect(f.deliveries()).toBe(1);
+});
+test("while another computer's take holds the server, a take says who is using it", async () => {
+  const f = await fixture();
+  const sources = f.api.sources.bind(f.api);
+  f.api.sources = async () => ({
+    sharingHost: { name: "omarchy", local: false },
+    sources: (await sources()).sources.map((source) => ({
+      ...source,
+      recordingFor: { id: "mac", name: "MacBook" },
+    })),
+  });
+  f.controller.start();
+  await f.controller.settled();
+  expect(f.controller.state).toBe("omarchy is busy with MacBook. Try again when it is free.");
+  expect(f.starts).toEqual([]);
 });
 test("uncertain admission never opens a fallback microphone", async () => {
   const f = await fixture();

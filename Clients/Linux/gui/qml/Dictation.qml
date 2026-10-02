@@ -68,7 +68,7 @@ ColumnLayout {
         }
         SLabel {
             ui: root.ui
-            text: root.ui.activity.source || root.ui.sources.next?.name || "Checking input…"
+            text: root.ui.activity.source ? root.ui.activity.source + (root.ui.activity.host ? " on " + root.ui.activity.host : "") : root.ui.sources.next?.name || "Checking input…"
             Layout.fillWidth: true
         }
         SLabel {

@@ -81,7 +81,7 @@ test("named lists persist atomically, reject stale/active/locked edits and retai
   };
   const config = base();
   const api = new API(config.server, "private-token");
-  api.sources = async () => [source(airpods)];
+  api.sources = async () => ({ sources: [source(airpods)] });
   const controller = new Controller(api, desktop, config.device, config.sources);
   const gui = createGUIHandler(
     api,

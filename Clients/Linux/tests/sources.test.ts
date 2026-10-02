@@ -1,5 +1,11 @@
 import { expect, test } from "bun:test";
-import { candidates, eligible, type Source, type SourcePreferences } from "../src/sources.ts";
+import {
+  candidates,
+  eligible,
+  unavailableReason,
+  type Source,
+  type SourcePreferences,
+} from "../src/sources.ts";
 const source = (id: string, hostID = "desktop"): Source => ({
   identity: { hostID, id },
   name: id,
@@ -30,6 +36,18 @@ test("priority uses one registered DJI, then the desktop default, without import
   expect(
     candidates([builtIn], { ...preferences, mode: "fixed", fixed: dji.identity }, builtIn.identity),
   ).toEqual([builtIn]);
+});
+test("a source recording for another computer is busy; one recording for this computer is not", () => {
+  const dji = source("DJI"),
+    builtIn = source("built-in");
+  const busy = { ...dji, recordingFor: { id: "mac", name: "MacBook" } };
+  expect(candidates([busy, builtIn], preferences, builtIn.identity, "linux")).toEqual([builtIn]);
+  expect(unavailableReason(busy, "linux")).toBe("Busy · MacBook is dictating");
+  const ours = { ...dji, recordingFor: { id: "linux", name: "Omarchy" } };
+  expect(candidates([ours, builtIn], preferences, builtIn.identity, "linux")).toEqual([
+    ours,
+    builtIn,
+  ]);
 });
 test("stale, future, disconnected, unknown, muted, and degraded inputs cannot be selected", () => {
   const valid = source("DJI");

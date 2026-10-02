@@ -96,7 +96,7 @@ test("GUI requests are versioned and scoped; source preferences persist without 
   const requests: string[] = [];
   api.sources = async () => {
     requests.push("sources");
-    return [];
+    return { sources: [] };
   };
   api.buttonStatus = async () => {
     requests.push("status");
@@ -105,6 +105,14 @@ test("GUI requests are versioned and scoped; source preferences persist without 
   api.buttonRequest = async (path, _owner, _body, method) => {
     requests.push(`${method ?? "POST"} ${path}`);
     return { available: false, destinations: [] };
+  };
+  api.setButtonTarget = async (target) => {
+    requests.push(`target ${target.mode}`);
+    return { available: false, destinations: [], buttonTarget: target };
+  };
+  api.setSharing = async (source, shared) => {
+    requests.push(`share ${source.id} ${shared}`);
+    return { sources: [] };
   };
   const buttons = new ButtonDestinationClient(
     api,
@@ -140,13 +148,21 @@ test("GUI requests are versioned and scoped; source preferences persist without 
       buttonEnabled: true,
     });
     await buttons.tick();
-    await expect(gui({ version: 1, action: "arm" })).rejects.toThrow("unavailable");
-    buttons.state = {
-      available: true,
-      destinations: [],
-      selected: { id: "another-registration", device: { id: "mac", name: "MacBook" } },
-    };
-    await expect(gui({ version: 1, action: "disarm" })).rejects.toThrow("not the selected");
+    // The DJI button's target is server state; the GUI only forwards valid targets.
+    await expect(
+      gui({ version: 1, action: "setButtonTarget", target: { mode: "everywhere" } }),
+    ).rejects.toThrow();
+    await gui({ version: 1, action: "setButtonTarget", target: { mode: "off" } });
+    await expect(
+      gui({ version: 1, action: "setSharing", source: { hostID: "desktop" }, shared: true }),
+    ).rejects.toThrow();
+    await gui({
+      version: 1,
+      action: "setSharing",
+      source: { hostID: "desktop", id: "dji" },
+      shared: true,
+    });
+    expect(requests.slice(-2)).toEqual(["target off", "share dji true"]);
     expect(requests.some((r) => r.startsWith("DELETE"))).toBe(false);
     await gui({ version: 1, action: "saveButton", enabled: false });
     expect(buttons.enabled).toBe(false);

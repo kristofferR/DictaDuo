@@ -123,7 +123,9 @@ export class ConnectionSettings {
         throw new ClientNotice(
           "This server uses an incompatible API version. Update SottoDuo on both computers.",
         );
-      hosts = [...new Set((await api.sources()).map((source) => source.identity.hostID))].sort();
+      hosts = [
+        ...new Set((await api.sources()).sources.map((source) => source.identity.hostID)),
+      ].sort();
       const savedHost = this.config?.server === server ? this.config.sources.hostID : undefined;
       if (savedHost && !hosts.includes(savedHost)) hosts.push(savedHost);
       hosts.sort();
@@ -175,7 +177,7 @@ export class ConnectionSettings {
       (checked.hosts.length > 0 && !checked.hosts.includes(hostID))
     )
       throw new ClientNotice(
-        "Choose the computer that provides your microphones. If none are listed, enter its configured capture host ID.",
+        "Choose the computer that provides your microphones. If none are listed, enter its microphone computer ID.",
       );
     return { checked, hostID };
   }

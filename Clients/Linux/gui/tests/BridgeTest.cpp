@@ -243,18 +243,21 @@ private slots:
       QCOMPARE(sidebar->property("color").value<QColor>(), QColor("#fb923c"));
     }
   }
-  void djiSettingsGuardDestinationAndRetainSaveErrors() {
+  void djiSettingsChooseTargetAndRetainSaveErrors() {
     QTemporaryDir directory;
     qputenv("XDG_RUNTIME_DIR", directory.path().toUtf8());
     QVERIFY(QDir().mkpath(directory.path() + "/sottoduo-client"));
     QLocalServer server;
     QVERIFY(server.listen(directory.path() + "/sottoduo-client/control.sock"));
+    QJsonObject targetRequest;
     connect(&server, &QLocalServer::newConnection, &server, [&] {
       auto *socket = server.nextPendingConnection();
-      connect(socket, &QLocalSocket::readyRead, socket, [socket] {
+      connect(socket, &QLocalSocket::readyRead, socket, [&, socket] {
         if (!socket->canReadLine())
           return;
-        socket->readLine();
+        const auto request = QJsonDocument::fromJson(socket->readLine()).object();
+        if (request["action"] == "setButtonTarget")
+          targetRequest = request;
         socket->write("{\"ok\":true,\"data\":{\"version\":1}}\n");
       });
     });
@@ -270,7 +273,12 @@ private slots:
       import QtQml
       QtObject {
         property var snapshot: ({ buttonEnabled: true, buttonSettingsSupported: true,
-          button: { available: true, selectedHere: false } })
+          device: { id: "linux", name: "Omarchy" },
+          button: { available: true, selectedHere: false,
+            selected: { id: "b", device: { id: "mac", name: "MacBook" } },
+            destinations: [{ id: "a", device: { id: "linux", name: "Omarchy" } },
+                           { id: "b", device: { id: "mac", name: "MacBook" } }],
+            buttonTarget: { mode: "lastDictated" } } })
         property bool busy: false
         property var c: bridge.colors
       }
@@ -284,30 +292,44 @@ private slots:
     QScopedPointer<QObject> settings(component.createWithInitialProperties(
         {{"ui", QVariant::fromValue(ui.data())}}));
     QVERIFY2(settings, qPrintable(component.errorString()));
-    auto *select = settings->findChild<QQuickItem *>("djiSelectButton");
-    auto *deselect = settings->findChild<QQuickItem *>("djiDeselectButton");
+    auto *picker = settings->findChild<QQuickItem *>("djiTargetPicker");
     auto *receiving = settings->findChild<QQuickItem *>("djiEnabledSwitch");
-    QVERIFY(select && deselect && receiving);
-    QVERIFY(select->isEnabled());
-    QVERIFY(!deselect->isEnabled());
-    QVERIFY(receiving->isEnabled());
+    QVERIFY(picker && receiving);
+    // Last dictated, this computer, MacBook, nowhere.
+    QCOMPARE(picker->property("count").toInt(), 4);
+    QCOMPARE(picker->property("currentIndex").toInt(), 0);
+    QCOMPARE(settings->property("rightNow").toString(),
+             "Right now: MacBook, where you last dictated");
+    QVERIFY(picker->isEnabled() && receiving->isEnabled());
     ui->setProperty("busy", true);
-    QVERIFY(!select->isEnabled());
-    QVERIFY(!deselect->isEnabled());
     QVERIFY(!receiving->isEnabled());
     ui->setProperty("busy", false);
+
+    // A pinned computer that is not connected stays listed as offline.
     auto state = ui->property("snapshot").value<QJSValue>().toVariant().toMap();
-    state["button"] = QVariantMap{{"available", false}, {"selectedHere", true}};
+    auto button = state["button"].toMap();
+    button["buttonTarget"] = QVariantMap{
+        {"mode", "device"}, {"device", QVariantMap{{"id", "studio"}, {"name", "Studio"}}}};
+    state["button"] = button;
     ui->setProperty("snapshot", state);
-    QVERIFY(!select->isEnabled());
-    QVERIFY(deselect->isEnabled());
-    state["buttonEnabled"] = false;
-    ui->setProperty("snapshot", state);
-    QVERIFY(!deselect->isEnabled());
-    emit bridge.failed("saveButton", "Cannot save settings");
-    emit bridge.reply("receiver", QVariantMap{{"available", true}});
+    QCOMPARE(picker->property("count").toInt(), 5);
+    QCOMPARE(picker->property("currentIndex").toInt(), 3);
+    QCOMPARE(picker->property("displayText").toString(), "Always Studio (offline)");
+    QCOMPARE(settings->property("rightNow").toString(), "Right now: MacBook");
+
+    QVERIFY(QMetaObject::invokeMethod(settings.data(), "chooseTarget", Q_ARG(QVariant, 4)));
+    QTRY_COMPARE(targetRequest["target"].toObject()["mode"].toString(), QString("off"));
+    QTRY_VERIFY(!settings->property("targeting").toBool());
+    // The offline entry leaves the list once the target is "Nowhere".
+    QCOMPARE(picker->property("count").toInt(), 4);
+    QCOMPARE(picker->property("currentIndex").toInt(), 3);
+
+    emit bridge.failed("setButtonTarget", "Cannot change the button");
     auto *error = settings->findChild<QQuickItem *>("djiSettingsError");
     QVERIFY(error);
+    QCOMPARE(error->property("text").toString(), "Cannot change the button");
+    QCOMPARE(picker->property("currentIndex").toInt(), 3);
+    emit bridge.failed("saveButton", "Cannot save settings");
     QCOMPARE(error->property("text").toString(), "Cannot save settings");
     QCOMPARE(warnings.count(), 0);
   }
@@ -335,6 +357,8 @@ private slots:
     }
     const QString djiCapture = qEnvironmentVariable("SOTTODUO_GUI_DJI_CAPTURE");
     if (!djiCapture.isEmpty()) {
+      QVERIFY(window->setProperty("page", 2));
+      QTest::qWait(50);
       auto *dji = window->findChild<QQuickItem *>("djiSettings");
       QVERIFY(dji);
       for (auto *parent = dji->parentItem(); parent;
@@ -348,6 +372,8 @@ private slots:
       }
       QTest::qWait(50);
       QVERIFY(window->grabWindow().save(djiCapture));
+      QVERIFY(window->setProperty("page", 4));
+      QTest::qWait(50);
     }
     auto *login = window->findChild<QQuickItem *>("launchAtLoginSwitch");
     QVERIFY(login);
@@ -564,6 +590,21 @@ private slots:
           return;
         const auto request = QJsonDocument::fromJson(socket->readLine()).object();
         const auto action = request["action"].toString();
+        if (action == "setSharing") {
+          auto reported = sample["sources"].toObject();
+          auto items = reported["items"].toArray();
+          for (int i = 0; i < items.size(); ++i) {
+            auto item = items[i].toObject();
+            if (item["identity"] == request["source"])
+              item["shared"] = request["shared"];
+            items[i] = item;
+          }
+          reported["items"] = items;
+          sample["sources"] = reported;
+          socket->write(QJsonDocument(QJsonObject{{"ok", true}, {"data", QJsonObject{{"sources", items}}}})
+                            .toJson(QJsonDocument::Compact) + '\n');
+          return;
+        }
         if (action == "saveMicrophones") {
           if (failNextSave) {
             failNextSave = false;
@@ -603,6 +644,34 @@ private slots:
     auto *create = window->findChild<QQuickItem *>("newMicrophoneProfile");
     QVERIFY(page && mode && picker && create);
     QTRY_COMPARE(mode->property("count").toInt(), 4);
+    // This computer shares its mics; each switch follows the server's answer.
+    auto findVisual = [&](const QString &name) -> QQuickItem * {
+      QList<QQuickItem *> pending{window->contentItem()};
+      while (!pending.isEmpty()) {
+        auto *item = pending.takeLast();
+        if (item->objectName() == name)
+          return item;
+        for (auto *child : item->childItems())
+          pending.append(child);
+      }
+      return nullptr;
+    };
+    auto *note = window->findChild<QQuickItem *>("microphoneSharingNote");
+    auto *shareDji = findVisual("shareMicrophone0");
+    auto *shareAirPods = findVisual("shareMicrophone1");
+    QVERIFY(note && note->isVisible());
+    QVERIFY(shareDji && shareAirPods);
+    QVERIFY(shareDji->property("checked").toBool());
+    QVERIFY(!shareAirPods->property("checked").toBool());
+    QVERIFY(QMetaObject::invokeMethod(shareAirPods, "toggle"));
+    QVERIFY(QMetaObject::invokeMethod(shareAirPods, "clicked"));
+    QVERIFY(!page->property("sharingKey").toString().isEmpty());
+    QVERIFY(shareAirPods->property("checked").toBool());
+    QTRY_VERIFY(page->property("sharingKey").toString().isEmpty());
+    // Refreshed inputs recreate the rows.
+    shareAirPods = findVisual("shareMicrophone1");
+    QVERIFY(shareAirPods && shareAirPods->property("checked").toBool());
+    QVERIFY(sample["sources"].toObject()["items"].toArray()[1].toObject()["shared"].toBool());
     const QString capture = qEnvironmentVariable("SOTTODUO_GUI_MICROPHONE_CAPTURE");
     if (!capture.isEmpty()) {
       auto *content = page->property("contentItem").value<QQuickItem *>();

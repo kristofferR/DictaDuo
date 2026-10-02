@@ -21,6 +21,20 @@ ScrollView {
     property string submittedDraft: ""
     property string message: ""
     property var seenInputs: []
+    // The one sharing change in flight, shown until the server confirms it.
+    property string sharingKey: ""
+    property bool sharingValue: false
+    readonly property var sharingHost: ui.sources.sharingHost || null
+    readonly property string deviceID: ui.snapshot.device ? ui.snapshot.device.id || "" : ""
+    readonly property string fallbackPlace: !sharingHost ? "" : sharingHost.local ? "this computer" : sharingHost.name
+    readonly property string sharingNote: {
+        if (!sharingHost)
+            return "";
+        if (sharingHost.local)
+            return "Your other computers can use mics you share here. Each take still belongs to the computer that started it.";
+        const count = ui.sources.items.length;
+        return sharingHost.name + " shares " + count + (count === 1 ? " mic" : " mics") + " with this computer. Add one to your list to dictate with it here. Sharing is set on " + sharingHost.name + ".";
+    }
     readonly property bool scopeChanged: !!ui.snapshot.microphones && (draft.server !== ui.snapshot.microphones.value.server || draft.hostID !== ui.snapshot.microphones.value.hostID)
     readonly property bool editable: bridge.connected && !bridge.preview && !ui.busy && !ui.snapshot.connectionChanging && !conflicted && !!revision && !scopeChanged
     readonly property var activeProfile: draft.profiles.find(p => p.id === draft.activeProfileID) || ({
@@ -154,9 +168,45 @@ ScrollView {
         const saved = seenInputs.concat(draft.knownInputs || []).find(s => key(s.identity) === key(id));
         return live ? live.name : saved ? saved.name : id.id;
     }
+    function liveSource(id) {
+        return ui.sources.items.find(s => key(s.identity) === key(id));
+    }
+    function transportLabel(transport) {
+        return ({
+                usb: "USB",
+                bluetooth: "Bluetooth",
+                builtIn: "Built-in"
+            })[transport] || "Other";
+    }
+    function sourceDetail(source) {
+        if (!sharingHost)
+            return transportLabel(source.transport);
+        if (!sharingHost.local)
+            return "Shared from " + sharingHost.name;
+        return transportLabel(source.transport) + " · " + (source.shared ? "shared" : "only this computer");
+    }
+    function sourceStatus(source) {
+        if (!source)
+            return "Not connected";
+        if (source.recordingFor)
+            return source.recordingFor.id === deviceID ? "Recording for this computer" : "Busy · " + source.recordingFor.name + " is dictating";
+        return source.eligible ? "Ready" : source.unavailableReason || "Not connected";
+    }
     function detailFor(id) {
-        const live = ui.sources.items.find(s => key(s.identity) === key(id));
-        return id.hostID + " · " + (live ? live.eligible ? "Available" : live.unavailableReason || "Unavailable or not ready" : "Not currently reported");
+        const live = liveSource(id);
+        return live ? sourceDetail(live) : "Not connected";
+    }
+    function shared(source) {
+        return sharingKey === key(source.identity) ? sharingValue : !!source.shared;
+    }
+    function setSharing(source, value) {
+        sharingKey = key(source.identity);
+        sharingValue = value;
+        message = "";
+        bridge.request("setSharing", {
+            source: source.identity,
+            shared: value
+        });
     }
     function editName(create) {
         profileDialog.creating = create;
@@ -195,6 +245,20 @@ ScrollView {
     Connections {
         target: bridge
         function onReply(action, data) {
+            if (action === "setSharing") {
+                // Apply the confirmed sharing now; the next refresh brings the rest.
+                const items = root.ui.sources.items.map(item => {
+                    const updated = data.sources.find(s => root.key(s.identity) === root.key(item.identity));
+                    return updated ? Object.assign({}, item, {
+                        shared: updated.shared
+                    }) : item;
+                });
+                root.ui.sources = Object.assign({}, root.ui.sources, {
+                    items: items
+                });
+                root.sharingKey = "";
+                root.ui.refreshSources();
+            }
             if (action === "saveMicrophones" && root.pending) {
                 if (root.scopeChanged) {
                     root.loadSaved();
@@ -216,6 +280,10 @@ ScrollView {
             }
         }
         function onFailed(action, message) {
+            if (action === "setSharing") {
+                root.sharingKey = "";
+                root.message = message;
+            }
             if (action === "saveMicrophones" && root.pending) {
                 root.pending = false;
                 if (root.scopeChanged) {
@@ -275,6 +343,22 @@ ScrollView {
             text: "Choose where your voice comes from."
             color: root.ui.c.muted
         }
+        Rectangle {
+            objectName: "microphoneSharingNote"
+            visible: !!root.sharingHost
+            Layout.fillWidth: true
+            implicitHeight: sharingNoteText.implicitHeight + 24
+            radius: 10
+            color: root.ui.c.tint
+            SLabel {
+                id: sharingNoteText
+                ui: root.ui
+                anchors.fill: parent
+                anchors.margins: 12
+                font.pixelSize: 14
+                text: root.sharingNote
+            }
+        }
         Group {
             ui: root.ui
             Setting {
@@ -312,7 +396,7 @@ ScrollView {
                 ui: root.ui
                 visible: root.draft.mode === "fixed"
                 title: root.draft.fixed ? root.nameFor(root.draft.fixed) : "Choose a fixed input below"
-                detail: root.draft.fixed ? root.detailFor(root.draft.fixed) + ". Host fallback is used if this input cannot start." : "Fixed input keeps host fallback available."
+                detail: root.draft.fixed ? root.detailFor(root.draft.fixed) + " · " + root.sourceStatus(root.liveSource(root.draft.fixed)) + ". If it can't start, SottoDuo uses another ready mic." : "If the fixed input can't start, SottoDuo uses another ready mic."
             }
         }
         Group {
@@ -394,6 +478,13 @@ ScrollView {
                         ui: root.ui
                         title: (priorityRow.index + 1) + ". " + root.nameFor(priorityRow.identity)
                         detail: root.detailFor(priorityRow.identity)
+                        SLabel {
+                            ui: root.ui
+                            text: root.sourceStatus(root.liveSource(priorityRow.identity))
+                            color: root.ui.c.muted
+                            font.pixelSize: 13
+                            Layout.maximumWidth: 200
+                        }
                         Rectangle {
                             id: reorderHandle
                             objectName: "microphoneReorderHandle" + priorityRow.index
@@ -509,7 +600,14 @@ ScrollView {
                     required property var modelData
                     ui: root.ui
                     title: modelData.name
-                    detail: modelData.identity.hostID + " · " + (modelData.eligible ? "Available · " + modelData.transport : modelData.unavailableReason || "Unavailable or not ready")
+                    detail: root.sourceDetail(modelData)
+                    SLabel {
+                        ui: root.ui
+                        text: root.sourceStatus(modelData)
+                        color: root.ui.c.muted
+                        font.pixelSize: 13
+                        Layout.maximumWidth: 200
+                    }
                     SButton {
                         ui: root.ui
                         text: "+"
@@ -530,7 +628,7 @@ ScrollView {
         }
         SLabel {
             ui: root.ui
-            text: "Drag a handle to reorder. Disconnected microphones keep their place. After this list, SottoDuo uses an available microphone on the capture computer."
+            text: "Drag a handle to reorder. Disconnected microphones keep their place. If none in the list is ready, SottoDuo uses any other ready mic" + (root.fallbackPlace ? " on " + root.fallbackPlace + ", which records one take at a time" : "") + "."
             color: root.ui.c.muted
             font.pixelSize: 13
             Layout.fillWidth: true
@@ -555,6 +653,41 @@ ScrollView {
             objectName: "microphonePageTestButton"
             ui: root.ui
             Layout.fillWidth: true
+        }
+        Group {
+            ui: root.ui
+            objectName: "microphoneSharing"
+            title: "Share with my other computers"
+            visible: !!root.sharingHost && root.sharingHost.local
+            Repeater {
+                model: root.ui.sources.items
+                Setting {
+                    required property var modelData
+                    required property int index
+                    ui: root.ui
+                    title: modelData.name
+                    detail: root.shared(modelData) ? "Shared" : "Only this computer"
+                    Switch {
+                        objectName: "shareMicrophone" + index
+                        Accessible.name: "Share " + modelData.name + " with my other computers"
+                        checked: root.shared(modelData)
+                        enabled: bridge.connected && !bridge.preview && !root.sharingKey && !root.ui.snapshot.connectionChanging
+                        onClicked: {
+                            root.setSharing(modelData, checked);
+                            checked = Qt.binding(() => root.shared(modelData));
+                        }
+                    }
+                }
+            }
+            Setting {
+                ui: root.ui
+                visible: root.ui.sources.items.length === 0
+                title: "No mics connected"
+                detail: "Mics plugged into this computer appear here."
+            }
+        }
+        DjiSettings {
+            ui: root.ui
         }
     }
     Dialog {
