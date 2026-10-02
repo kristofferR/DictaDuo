@@ -1,5 +1,6 @@
 import type { RecognitionState, ServerPreferences } from "../api.ts";
 import type { InferenceBackend } from "./native-inference.ts";
+import { InferenceError } from "./inference-error.ts";
 import {
   startSonioxStream,
   type SonioxConfiguration,
@@ -85,13 +86,21 @@ export class RecognitionSession {
     }
     if (this.mode === "cloud") throw new Error(this.error ?? "Soniox is unavailable.");
     // Replay the entire sealed recording. Never join cloud tokens to a local suffix.
-    const speech = await this.local.transcribe(
-      path,
-      this.settings.language,
-      this.terms,
-      progress,
-      signal,
-    );
+    const transcribe = () =>
+      this.local.transcribe(path, this.settings.language, this.terms, progress, signal);
+    // The sealed audio is still on disk, so a transient engine failure gets one
+    // more attempt before the recording is reported as failed. A timeout already
+    // spent the whole speech budget; a second one would outlive the client's
+    // event stream, so it fails immediately.
+    const speech = await transcribe().catch((error: unknown) => {
+      this.checkCancellation(signal);
+      if (
+        error instanceof InferenceError &&
+        (error.code === "cancelled" || error.code === "timeout")
+      )
+        throw error;
+      return transcribe();
+    });
     return {
       ...speech,
       modelID: "whisper-large-v3-turbo",

@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -640,6 +640,39 @@ function track(f: Awaited<ReturnType<typeof fixture>>) {
   };
   return { started, delivered };
 }
+test("a slow automatic Whisper retry still delivers within the processing deadline", async () => {
+  const held = Promise.withResolvers<void>();
+  let attempts = 0;
+  class RetryInference extends FakeInference {
+    override async transcribe(...args: Parameters<FakeInference["transcribe"]>) {
+      if (attempts++ === 0) {
+        await held.promise;
+        throw new Error("Speech inference timed out.");
+      }
+      return super.transcribe(...args);
+    }
+  }
+  const f = await fixture(new RetryInference());
+  const stop = f.api.stop.bind(f.api);
+  const clock = spyOn(Date, "now");
+  cleanup.push(async () => clock.mockRestore());
+  f.api.stop = async (...args) => {
+    const record = await stop(...args);
+    // Start the controller's budget ten minutes ago, without simulating sleep
+    // for the separate lock/suspend watchdog.
+    clock.mockReturnValueOnce(Date.now() - 600_000);
+    return record;
+  };
+  await record(f);
+  f.controller.stop();
+  await until(() => f.controller.activity.phase === "processing");
+  held.resolve();
+  await f.controller.settled();
+  expect(attempts).toBe(2);
+  expect(f.deliveries()).toBe(1);
+  expect(f.controller.result?.delivery).toBe("inserted");
+});
+
 async function record(f: Awaited<ReturnType<typeof fixture>>) {
   await until(() => f.controller.start());
   await until(() => f.controller.state.startsWith("recording"));
@@ -915,6 +948,75 @@ test("a cancel targets an earlier take that took over the overlay during slow cl
   await f.controller.settled();
 });
 
+test("a cancelled recording is kept in history and inserted only after undo", async () => {
+  const f = await fixture();
+  const ids = track(f);
+  const receipts: string[] = [];
+  const delivery = f.api.delivery.bind(f.api);
+  f.api.delivery = async (...args) => {
+    receipts.push(args[2]);
+    return delivery(...args);
+  };
+  await record(f);
+  await Bun.sleep(300);
+  await f.controller.cancel();
+  expect(f.controller.activity.undoUntil).toBeGreaterThan(Date.now());
+  // The same cancel arriving twice must not close the window it just opened.
+  await f.controller.cancel();
+  expect(f.controller.activity.undoUntil).toBeDefined();
+  expect(f.controller.start()).toBe(true);
+  expect(f.controller.activity.undoUntil).toBeUndefined();
+  await f.controller.settled();
+  expect(f.deliveries()).toBe(1);
+  expect(receipts).toEqual(["inserted"]);
+  expect((await f.api.get(ids.started[0]!)).status).toBe("completed");
+
+  await record(f);
+  await Bun.sleep(300);
+  await f.controller.cancel();
+  await Bun.sleep(350);
+  await f.controller.cancel();
+  await f.controller.settled();
+  expect(f.deliveries()).toBe(1);
+  expect(receipts).toEqual(["inserted", "cancelled"]);
+  expect(f.controller.activity.kept).toBe(true);
+  expect((await f.api.get(ids.started[1]!)).delivery?.status).toBe("cancelled");
+});
+
+test("toggle inserts a cancelled take that is still sealing", async () => {
+  const f = await fixture();
+  const stop = f.api.stop.bind(f.api);
+  let release = () => {};
+  const sealing = new Promise<void>((resolve) => (release = resolve));
+  f.api.stop = async (...args) => {
+    await sealing;
+    return stop(...args);
+  };
+  try {
+    await record(f);
+    await Bun.sleep(300);
+    await f.controller.cancel();
+    f.controller.toggle();
+    expect(f.controller.activity.undoUntil).toBeUndefined();
+    release();
+    await f.controller.settled();
+    expect(f.deliveries()).toBe(1);
+  } finally {
+    release();
+  }
+});
+
+test("a short cancelled recording is discarded without an undo window", async () => {
+  const f = await fixture();
+  const ids = track(f);
+  await record(f);
+  await f.controller.cancel();
+  expect(f.controller.activity.undoUntil).toBeUndefined();
+  await f.controller.settled();
+  expect(f.deliveries()).toBe(0);
+  expect((await f.api.get(ids.started[0]!)).status).toBe("cancelled");
+});
+
 test("a repeated cancel during slow cleanup keeps the earlier processing take", async () => {
   const held = heldInference();
   const f = await fixture(held.inference);
@@ -961,7 +1063,10 @@ test("cancelling the newest take keeps an earlier take's result", async () => {
     held.release();
   }
   await f.controller.settled();
-  expect(ids.delivered).toEqual([ids.started[0]!]);
+  // The cancelled take is kept in history with a cancelled receipt, never inserted.
+  expect(f.deliveries()).toBe(1);
+  expect(ids.delivered).toEqual([ids.started[0]!, ids.started[1]!]);
+  expect((await f.api.get(ids.started[1]!)).delivery?.status).toBe("cancelled");
 });
 
 test("a cancel after a newer take starts targets that take, not an earlier cleanup", async () => {

@@ -4,6 +4,39 @@ import { candidates, sourceKey, type SourceID, type SourcePreferences } from "./
 import { RecordingFeedback } from "./feedback.ts";
 import type { OutputMuter } from "./output.ts";
 const recordingLimitMS = 174000;
+/** The server rejects shorter recordings, so they are discarded outright. */
+const minimumTakeMS = 250;
+const undoWindowMS = 4000;
+/**
+ * Decides whether a finished take is inserted. A cancelled take waits here until
+ * the user undoes the cancellation or its undo window closes.
+ */
+class DeliveryGate {
+  state: "deliver" | "pending" | "discard";
+  private consumed = false;
+  private waiter?: (deliver: boolean) => void;
+  constructor(pending = false) {
+    this.state = pending ? "pending" : "deliver";
+  }
+  /** Re-open the decision for a take still processing; false once inserting began. */
+  hold() {
+    if (this.consumed || this.state !== "deliver") return false;
+    this.state = "pending";
+    return true;
+  }
+  decide(deliver: boolean) {
+    if (this.state !== "pending") return;
+    this.state = deliver ? "deliver" : "discard";
+    this.waiter?.(deliver);
+    this.waiter = undefined;
+  }
+  /** Waits for a pending decision. Called once, just before inserting. */
+  consume(): Promise<boolean> {
+    this.consumed = true;
+    if (this.state !== "pending") return Promise.resolve(this.state === "deliver");
+    return new Promise((resolve) => (this.waiter = resolve));
+  }
+}
 export interface Destination {
   /** Returns "held", without attempting, if `held` is true when the insertion is sent. */
   deliver(
@@ -33,6 +66,10 @@ type Activity = {
   source?: string;
   startedAt?: number;
   trigger?: "shortcut" | "pairing" | "test";
+  /** Epoch milliseconds until which a cancelled take can still be inserted. */
+  undoUntil?: number;
+  /** A cancelled take that was saved to history without inserting. */
+  kept?: boolean;
 };
 type Take = {
   owner: string;
@@ -42,6 +79,8 @@ type Take = {
   released: boolean;
   cancelled: boolean;
   startedAt: number;
+  recordingAt?: number;
+  gate: DeliveryGate;
   sealed: boolean;
   sealMayHaveSucceeded: boolean;
   button?: { ticket: string; source: SourceID };
@@ -79,6 +118,10 @@ export class Controller {
   private processing: Take[] = [];
   private tasks = new Set<Promise<void>>();
   private deliveryTail: Promise<void> = Promise.resolve();
+  private undoTake?: Take;
+  private undoUntil?: number;
+  private undoOpenedAt = 0;
+  private undoTimer?: ReturnType<typeof setTimeout>;
   /** The shown take's cancellation, until its server cleanup finishes. */
   private cancelling?: { take: Take; cleanup: Promise<void> };
   /** The take whose state the overlay shows. */
@@ -87,8 +130,12 @@ export class Controller {
   captureAllowed: () => boolean = () => true;
   output?: Output;
   muteOutput = false;
-  /** Client deadline once a take leaves the server queue. */
-  processingTimeoutMS = 360_000;
+  /**
+   * Client deadline once a take leaves the server queue: two speech attempts
+   * (120 s loading + 180 s each), cloud fallback, and proofreading (30 s
+   * loading + 18 s), with margin for polling and storage.
+   */
+  processingTimeoutMS = 720_000;
   /** Returns per-take context that is handed back to onComplete for that take. */
   onStart?: (ticket?: string) => unknown;
   onComplete?: (
@@ -118,7 +165,14 @@ export class Controller {
     private preferences: SourcePreferences,
   ) {}
   start(button?: Take["button"], preview = false): boolean {
+    // The dictation key doubles as the undo shortcut while the window is open.
+    if (!button && !preview && this.undoTake) {
+      this.undo();
+      return true;
+    }
     if (this.take || !this.captureAllowed()) return false;
+    // Starting a new take settles an open undo window: the cancelled take is kept.
+    this.closeUndo();
     this.result = undefined;
     // Later cancels target this take, not an earlier one still cleaning up.
     this.cancelling = undefined;
@@ -129,6 +183,7 @@ export class Controller {
       released: false,
       cancelled: false,
       startedAt,
+      gate: new DeliveryGate(),
       sealed: false,
       sealMayHaveSucceeded: false,
       button,
@@ -171,6 +226,7 @@ export class Controller {
         clearInterval(take.watchdog);
         // A failed or cancelled take still frees its slot for later deliveries.
         take.delivered();
+        if (this.undoTake === take) this.clearUndo();
         if (this.take === take) this.take = undefined;
         this.processing = this.processing.filter((other) => other !== take);
         const next = this.foreground;
@@ -212,21 +268,83 @@ export class Controller {
     await Promise.all(takes.map((take) => this.cancelOne(take)));
   }
   toggle(): void {
-    if (this.take) this.stop();
+    // A cancelled take may still be sealing; the press is its undo, not a stop.
+    if (this.take && !this.undoTake) this.stop();
     else this.start();
   }
-  /** Cancels the take the overlay shows; earlier takes keep processing. */
+  /**
+   * Cancels the take the overlay shows; earlier takes keep processing. A take with
+   * usable audio is still transcribed into history, and for a few seconds the
+   * dictation key or `sottoduo undo` inserts it after all. A second cancel closes
+   * that window early.
+   */
   async cancel(): Promise<void> {
+    if (this.undoTake) {
+      // One cancel can arrive through two paths; only a later one closes the window.
+      if (Date.now() - this.undoOpenedAt > 300) this.closeUndo();
+      return;
+    }
     // The overlay shows the cancelled take until its cleanup finishes, so a repeat
     // joins that cancellation, unless a new take started or another take is shown.
     if (this.cancelling && this.displayed === this.cancelling.take) return this.cancelling.cleanup;
     const take = this.foreground;
-    if (take) await this.cancelOne(take);
-    else {
+    if (!take) {
       // Earlier takes' results stay recoverable while another take is cancelled.
       this.result = undefined;
-      this.announce("cancelled", "cancelled");
+      return this.announce("cancelled", "cancelled");
     }
+    if (
+      take === this.take &&
+      take.activity.phase === "recording" &&
+      take.recordingAt !== undefined &&
+      Date.now() - take.recordingAt >= minimumTakeMS
+    ) {
+      take.gate = new DeliveryGate(true);
+      take.released = true;
+      this.openUndo(take);
+      return;
+    }
+    if (take !== this.take && take.gate.state === "discard") return;
+    if (take !== this.take && take.gate.hold()) {
+      this.openUndo(take);
+      return;
+    }
+    await this.cancelOne(take);
+  }
+  /** Inserts a cancelled take after all, as though it had ended normally. */
+  undo() {
+    const take = this.undoTake;
+    if (!take) return;
+    this.clearUndo();
+    take.gate.decide(true);
+    if (take === this.foreground) this.announce("processing", "processing", take.activity);
+  }
+  private openUndo(take: Take) {
+    this.clearUndo();
+    this.undoTake = take;
+    this.undoOpenedAt = Date.now();
+    this.undoUntil = this.undoOpenedAt + undoWindowMS;
+    this.undoTimer = setTimeout(() => this.closeUndo(), undoWindowMS);
+    this.announce(
+      "Not pasted. Press the dictation key to paste.",
+      take.activity.phase,
+      take.activity,
+    );
+  }
+  private clearUndo() {
+    clearTimeout(this.undoTimer);
+    this.undoTake = undefined;
+    this.undoUntil = undefined;
+    this.activity = { ...this.activity, undoUntil: undefined };
+  }
+  /** Keeps the cancelled take in history only. */
+  private closeUndo() {
+    const take = this.undoTake;
+    if (!take) return;
+    this.clearUndo();
+    take.gate.decide(false);
+    if (take === this.foreground)
+      this.announce("Saving to history", take.activity.phase, take.activity);
   }
   /** Cancels every take, or only those not yet delivering. */
   async cancelAll(includeDelivery = true): Promise<void> {
@@ -256,7 +374,7 @@ export class Controller {
     return !take.cancelled && (this.take === take || this.processing.includes(take));
   }
   private announce(state: string, phase: Phase, activity: Activity = this.activity) {
-    this.activity = { ...activity, phase };
+    this.activity = { ...activity, phase, undoUntil: this.undoUntil };
     this.state = state;
     this.desktop.notify(state);
   }
@@ -276,6 +394,7 @@ export class Controller {
       this.desktop.notify(`Earlier dictation: ${state}`);
   }
   private async cancelOne(take: Take) {
+    if (this.undoTake === take) this.clearUndo();
     const shown = take === this.foreground;
     if (!shown) return this.cancelTake(take);
     this.setState(take, "cancelled", "cancelled");
@@ -297,6 +416,7 @@ export class Controller {
   }
   private async cancelTake(take: Take) {
     take.cancelled = true;
+    take.gate.decide(false);
     take.activity = { ...take.activity, phase: "cancelled" };
     take.feedbackAbort.abort();
     take.feedback.finish(take.atLimit);
@@ -417,6 +537,7 @@ export class Controller {
                 take.feedback.unavailable();
             });
         }
+        take.recordingAt = Date.now();
         this.setState(take, `recording · ${source.name}`, "recording");
         break;
       } catch (error) {
@@ -470,6 +591,16 @@ export class Controller {
     if (record.status !== "completed") throw new Error("Transcription did not complete.");
     // Deliver after every earlier take, and never while a newer take is held.
     await take.turn;
+    if (!this.live(take)) return;
+    // Decide only now, so a take still queued behind another can be cancelled with undo.
+    if (!(await take.gate.consume())) {
+      // Cancelled and not undone: the transcript stays in history only.
+      if (!this.live(take)) return;
+      take.activity = { ...take.activity, kept: true };
+      this.setState(take, "Saved to history", "cancelled");
+      await this.api.delivery(take.id, take.owner, "cancelled").catch(() => {});
+      return;
+    }
     let delivery: Awaited<ReturnType<Destination["deliver"]>>;
     do {
       do {

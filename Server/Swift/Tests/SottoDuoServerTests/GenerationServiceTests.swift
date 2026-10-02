@@ -316,7 +316,11 @@ final class GenerationServiceTests: XCTestCase {
             let token = String(repeating: "t", count: 32)
             let app = Application(router: SottoDuoHTTPServer.makeRouter(service: service, token: token))
             try await app.test(.router) { client in
-                try await client.execute(uri: "/v1/health", method: .get) { response in XCTAssertEqual(response.status, .ok) }
+                try await client.execute(uri: "/v1/health", method: .get) { response in
+                    XCTAssertEqual(response.status, .ok)
+                    let health = try SottoDuoAPI.decodeWire(ServerHealth.self, from: Data(response.body.readableBytesView))
+                    XCTAssertNotEqual(health.generationRetry, true)
+                }
                 try await client.execute(uri: "/v1/preferences", method: .get) { response in
                     XCTAssertEqual(response.status, .unauthorized)
                     let error = try SottoDuoAPI.decoder().decode(APIErrorResponse.self, from: Data(response.body.readableBytesView))

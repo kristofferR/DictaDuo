@@ -9,6 +9,7 @@ export type Command =
   | "stop"
   | "toggle"
   | "cancel"
+  | "undo"
   | "status"
   | "result"
   | "copy"
@@ -20,6 +21,7 @@ export const commands: readonly string[] = [
   "stop",
   "toggle",
   "cancel",
+  "undo",
   "status",
   "result",
   "copy",

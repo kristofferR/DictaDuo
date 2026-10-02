@@ -255,6 +255,22 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/generations/{id}/retry": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post: operations["retryGeneration"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v1/generations/{id}/delivery": {
     parameters: {
       query?: never;
@@ -504,6 +520,8 @@ export interface components {
       serverVersion: string;
       isDev: boolean;
       ready: boolean;
+      /** @description Whether failed or cancelled generations with sealed audio can be retried. Request this field with X-SottoDuo-Generation-Retry: retry-v1. An omitted value means unsupported. */
+      generationRetry?: boolean;
       speech: components["schemas"]["ModelRuntimeInfo"];
       proofreading: components["schemas"]["ModelRuntimeInfo"];
       message?: string;
@@ -1308,6 +1326,32 @@ export interface operations {
     responses: {
       /** @description Success */
       200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GenerationRecord"];
+        };
+      };
+      default: components["responses"]["APIError"];
+    };
+  };
+  retryGeneration: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Opt in to remote capture source/state fields; omit for the legacy generation shape. */
+        "X-SottoDuo-Capture"?: components["parameters"]["CaptureView"];
+      };
+      path: {
+        id: components["schemas"]["UUID"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Accepted */
+      202: {
         headers: {
           [name: string]: unknown;
         };

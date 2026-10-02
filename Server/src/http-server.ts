@@ -64,6 +64,11 @@ const encodeFor = (request: FastifyRequest) => {
   return (value: unknown) =>
     JSON.stringify(value, (key, item) => {
       if (
+        key === "generationRetry" &&
+        request.headers["x-sottoduo-generation-retry"] !== "retry-v1"
+      )
+        return undefined;
+      if (
         (key === "recognitionMode" || key === "recognition") &&
         request.headers["x-sottoduo-recognition"] !== "streaming-v1"
       )
@@ -289,6 +294,10 @@ export function createHTTPServer(
     await service.authorizeCapture(identifier(request.params.id), captureOwner(request));
     return service.cancel(identifier(request.params.id));
   });
+  // Retrying needs no capture owner: only finished, failed or cancelled takes qualify.
+  app.post<{ Params: IDParams }>("/v1/generations/:id/retry", async (request, reply) =>
+    reply.code(202).send(await service.retry(identifier(request.params.id))),
+  );
   app.post<{ Params: IDParams }>("/v1/generations/:id/delivery", async (request) => {
     await service.authorizeCapture(identifier(request.params.id), captureOwner(request));
     return service.recordDelivery(

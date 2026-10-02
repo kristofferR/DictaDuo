@@ -119,6 +119,14 @@ describe("Fastify API contract", () => {
   test("authentication, Host/Origin policy and errors expose no internal diagnostics", async () => {
     const { app } = await fixture("x".repeat(32));
     expect((await app.inject("/v1/health")).statusCode).toBe(200);
+    expect(
+      validateBody("ServerHealth", (await app.inject("/v1/health")).json()).generationRetry,
+    ).toBeUndefined();
+    const retryHealth = await app.inject({
+      url: "/v1/health",
+      headers: { "x-sottoduo-generation-retry": "retry-v1" },
+    });
+    expect(validateBody("ServerHealth", retryHealth.json()).generationRetry).toBe(true);
     const rejected = await app.inject("/v1/preferences");
     expect(rejected.statusCode).toBe(401);
     expect(validateBody("APIErrorResponse", rejected.json())).toEqual({

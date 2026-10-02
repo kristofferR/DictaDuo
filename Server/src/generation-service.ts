@@ -53,6 +53,7 @@ import { evaluateCorrectionInWorker } from "./domain/correction-runtime.ts";
 import { maxInputCharacters, modelHints, processingRecord } from "./domain/correction.ts";
 
 const MAX_METADATA_BYTES = 1_048_576;
+const CONTINUATION_INPUT = "continuation-input.json";
 const MAX_PREFERENCES_BYTES = 262_144;
 const MAX_CHUNK_BYTES = 1_048_576;
 const terminal = (record: GenerationRecord) =>
@@ -320,6 +321,7 @@ export class GenerationService {
       if (!state.speechLoaded) this.beginWarmup();
       return {
         apiVersion: 2,
+        generationRetry: true,
         serverVersion: "0.1.0",
         isDev: this.configuration.development,
         ready,
@@ -770,9 +772,90 @@ export class GenerationService {
         throw new ServiceError(500, "audio_storage_failed", record.error);
       }
       this.uploads.delete(id);
+      // Private to the server: lets a retry format lists exactly as this run did.
+      if (previous)
+        await atomicPrivateWrite(
+          join(this.directory(id), CONTINUATION_INPUT),
+          JSON.stringify(previous),
+        ).catch(() => {});
       this.enqueueProcessing(id, previous);
       return copy(record);
     });
+  }
+  /**
+   * Sealed audio outlives a failed or cancelled run, so the same recording can be
+   * transcribed again without re-uploading. Retries use local Whisper: a live
+   * Soniox stream cannot be replayed.
+   */
+  async retry(id: string) {
+    const state = await this.inference.readiness(false);
+    return this.mutate(async () => {
+      if (this.stopping)
+        throw new ServiceError(503, "server_stopping", "The server is shutting down.");
+      const record = this.getInternal(id);
+      if (record.importedSource || !record.inferenceAudio)
+        throw new ServiceError(
+          409,
+          "not_retryable",
+          "This recording has no saved audio to transcribe again.",
+        );
+      if (record.status !== "failed" && record.status !== "cancelled")
+        throw new ServiceError(
+          409,
+          "not_retryable",
+          "Only failed or cancelled recordings can be transcribed again.",
+        );
+      if (!state.available) {
+        this.beginWarmup();
+        throw new ServiceError(503, "server_unavailable", state.message);
+      }
+      // Keep the saved audio and metadata, but drop the previous run's output.
+      for (const key of [
+        "error",
+        "detectedLanguage",
+        "recognitionHints",
+        "speech",
+        "formattingRejectionReason",
+        "consumedListControls",
+        "textProcessing",
+        "proofreadingHints",
+        "proofreading",
+        "continuation",
+      ] as const)
+        delete record[key];
+      record.rawText = record.finalText = record.insertionText = record.previewText = "";
+      const session = new RecognitionSession(
+        this.inference,
+        { ...record.settings.preferences, recognitionMode: "local" },
+        recognitionVocabularyTerms(
+          record.settings.preferences.dictionary,
+          record.settings.preferences.vocabulary,
+        ),
+        undefined,
+        record.id,
+        () => {},
+      );
+      this.recognition.get(record.id)?.cancel();
+      this.recognition.set(record.id, session);
+      record.recognition = { ...session.state };
+      record.status = "queued";
+      record.progress = 0;
+      record.updatedAt = now();
+      await this.save(record);
+      this.enqueueProcessing(record.id, await this.savedContinuation(record.id));
+      return copy(record);
+    });
+  }
+  private async savedContinuation(id: string): Promise<DictationContinuation | undefined> {
+    try {
+      const data = await readRegularFile(
+        join(this.directory(id), CONTINUATION_INPUT),
+        MAX_METADATA_BYTES,
+      );
+      return JSON.parse(data.toString("utf8")) as DictationContinuation;
+    } catch {
+      return undefined;
+    }
   }
   get(id: string) {
     return this.mutate(() => this.getInternal(id));
@@ -1143,7 +1226,9 @@ export class GenerationService {
       })
       .catch(() => {})
       .finally(() => {
-        this.processingControllers.delete(id);
+        // A retry can queue the same recording again before this run unwinds.
+        if (this.processingControllers.get(id) === controller)
+          this.processingControllers.delete(id);
         this.beginWarmup();
       });
   }
@@ -1152,6 +1237,8 @@ export class GenerationService {
     previous: DictationContinuation | undefined,
     signal: AbortSignal,
   ) {
+    // A retry replaces the session; this run must only clean up its own.
+    const recognition = this.recognition.get(id);
     try {
       let record = await this.mutate(async () => {
         const record = this.getInternal(id);
@@ -1163,7 +1250,6 @@ export class GenerationService {
       });
       if (!record) return;
       const settings = record.settings.preferences;
-      const recognition = this.recognition.get(id);
       if (!recognition) throw new Error("Recognition session is unavailable.");
       const speech = await recognition.transcribe(
         join(this.directory(id), "inference.wav"),
@@ -1244,22 +1330,21 @@ export class GenerationService {
     } catch (error) {
       await this.mutate(async () => {
         const record = this.records.get(id);
-        if (!record || terminal(record)) return;
+        // Aborts come from cancelRecord, which already saved the cancellation.
+        // A retry may have queued the record again since, so leave it alone.
+        if (!record || terminal(record) || signal.aborted) return;
         const failed = copy(record);
         if (failed.recognition) delete failed.recognition.partialText;
-        failed.status = signal.aborted ? "cancelled" : "failed";
-        failed.error = signal.aborted
-          ? "Recording cancelled."
-          : error instanceof Error
-            ? error.message
-            : "Processing failed.";
+        failed.status = "failed";
+        failed.error = error instanceof Error ? error.message : "Processing failed.";
         failed.updatedAt = now();
         delete failed.progress;
         await this.save(failed).catch(() => this.publish(failed));
       });
     } finally {
       await this.mutate(() => {
-        this.recognition.get(id)?.cancel();
+        if (this.recognition.get(id) !== recognition) return;
+        recognition?.cancel();
         this.recognition.delete(id);
         this.endedInference.delete(id);
       });

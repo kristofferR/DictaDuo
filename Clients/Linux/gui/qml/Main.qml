@@ -136,8 +136,10 @@ ApplicationWindow {
             return "Delivering text…";
         if (phase === "failed")
             return "Dictation interrupted";
+        if (activity.undoUntil)
+            return "Not pasted";
         if (phase === "cancelled")
-            return "Dictation cancelled";
+            return activity.kept ? "Saved to history" : "Dictation cancelled";
         if (phase === "completed")
             return result && result.delivery === "inserted" ? "Inserted at your cursor" : result && result.delivery === "uncertain" ? "Check your text field" : "Text ready to copy";
         return triggerVerb + " to dictate.";
