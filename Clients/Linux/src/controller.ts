@@ -29,6 +29,12 @@ const notices = {
     "Dictation cancelled",
     "Lost the connection to the server. Try again when it's back.",
   ],
+  // Unsealed takes are discarded, so these never promise saved audio.
+  startup: ["Couldn't start dictation", "The microphone or server wasn't ready. Try again."],
+  discarded: [
+    "Recording stopped",
+    "Something went wrong while recording, so the take was not saved. Try again.",
+  ],
 } as const satisfies Record<string, Notice>;
 /**
  * Decides whether a finished take is inserted. A cancelled take waits here until
@@ -180,6 +186,10 @@ export class Controller {
   get busy() {
     return this.take !== undefined || this.processing.length > 0;
   }
+  /** A new take can start once the previous one is sealed, while it still processes. */
+  get canStartTake() {
+    return this.take === undefined && this.captureAllowed();
+  }
   updatePreferences(preferences: SourcePreferences) {
     if (this.busy) throw new Error("Finish dictation before changing microphones.");
     this.preferences = preferences;
@@ -250,7 +260,11 @@ export class Controller {
             "Capture failed. Any completed result remains in shared history.",
             "failed",
             // Once sealing began, the audio is on the server and only processing failed.
-            take.sealMayHaveSucceeded ? notices.transcription : notices.microphone,
+            take.sealMayHaveSucceeded
+              ? notices.transcription
+              : take.recordingAt === undefined
+                ? notices.startup
+                : notices.discarded,
           );
         await this.cancelTake(take);
       })
@@ -677,6 +691,7 @@ export class Controller {
     take.sealMayHaveSucceeded = true;
     const stopped = await this.api.stop(take.id, take.owner);
     this.verify(stopped, take);
+    this.noteRecognition(take, stopped);
     if (stopped.capture?.state !== "sealed") throw new Error("Capture was not sealed.");
     take.sealed = true;
     // The microphone has stopped; processing runs with the output restored.
@@ -719,6 +734,8 @@ export class Controller {
       try {
         detail = await this.api.recording(take.id);
         failingSince = undefined;
+        // The live stream is optional; polled snapshots also carry a fallback.
+        this.noteRecognition(take, detail.snapshot);
       } catch (error) {
         // The sealed take is durable on the server, so ride out a brief outage.
         if (error instanceof APIError && error.status < 500) throw error;

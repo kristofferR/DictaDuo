@@ -394,6 +394,33 @@ test("a server falling back to local recognition marks the take as cloud unavail
   await f.controller.settled();
   expect(f.notices).toEqual([]);
 });
+test("a fallback reported only by polling still marks the take", async () => {
+  const f = await fixture();
+  f.api.events = async () => {
+    throw new Error("Live stream unavailable");
+  };
+  const stop = f.api.stop.bind(f.api);
+  let fallback = false;
+  f.api.stop = async (...args) => {
+    const snapshot = await stop(...args);
+    fallback = true;
+    return { ...snapshot, recognition: { provider: "whisper", fallbackReason: "Soniox is down." } };
+  };
+  f.controller.start();
+  await until(() => f.controller.activity.phase === "recording");
+  f.controller.stop();
+  await until(() => fallback && f.controller.activity.cloudUnavailable === true);
+  await f.controller.settled();
+});
+test("a take that fails before recording does not promise saved audio", async () => {
+  const f = await fixture();
+  f.api.sources = async () => {
+    throw new Error("Server unavailable");
+  };
+  f.controller.start();
+  await f.controller.settled();
+  expect(f.notices.map((notice) => notice.title)).toEqual(["Couldn't start dictation"]);
+});
 test("uncertain admission never opens a fallback microphone", async () => {
   const f = await fixture();
   let calls = 0;
@@ -1375,7 +1402,7 @@ test("a foreground capture or admission failure restores the earlier take's acti
       };
     try {
       await until(() => f.controller.start());
-      await until(() => f.notices.some((notice) => notice.title === "Recording stopped"));
+      await until(() => f.notices.some((notice) => notice.title === "Couldn't start dictation"));
       await until(() => f.controller.state === "processing");
       expect(f.controller.busy).toBe(true);
       expect(f.controller.activity).toEqual({ ...activity, phase: "processing" });

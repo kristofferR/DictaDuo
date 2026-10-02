@@ -95,7 +95,7 @@ ColumnLayout {
             ui: root.ui
             primary: true
             text: "Start dictation"
-            visible: !root.ui.busy
+            visible: root.ui.canStartTake
             enabled: root.ui.canStart
             onClicked: bridge.request("start")
         }

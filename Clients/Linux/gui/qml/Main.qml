@@ -76,6 +76,8 @@ ApplicationWindow {
         return Math.floor(value / 60) + ":" + String(value % 60).padStart(2, "0");
     }
     property bool busy: snapshot.busy || false
+    // Earlier takes may still process; only a capturing take blocks the next one.
+    readonly property bool canStartTake: snapshot.canStartTake === undefined ? !busy : snapshot.canStartTake
     onBusyChanged: {
         if (!busy && bridge.connected && !snapshot.setupRequired)
             bridge.request("connection");
