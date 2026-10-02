@@ -126,6 +126,7 @@ struct ServerPreferencesPage: View {
     @State private var draft = ServerPreferences()
     @State private var base: PreferencesSnapshot?
     @State private var expandedLists = Set<String>()
+    @State private var listPendingRemoval: String?
 
     private var dirty: Bool { base.map { draft != $0.preferences } ?? false }
     private var changedRemotely: Bool {
@@ -288,6 +289,9 @@ struct ServerPreferencesPage: View {
     }
 
     @ViewBuilder private var dictionaryEditor: some View {
+        Text("\(draft.dictionary.lists.reduce(0) { $0 + $1.entries.count }) of 500 words · up to 32 lists")
+            .font(.caption)
+            .foregroundStyle(SottoDuoPalette.muted)
         ForEach($draft.dictionary.lists) { $list in
             DisclosureGroup(isExpanded: Binding(
                 get: { expandedLists.contains(list.id) },
@@ -298,13 +302,15 @@ struct ServerPreferencesPage: View {
                     HStack(alignment: .top, spacing: 10) {
                         VStack(alignment: .leading, spacing: 8) {
                             TextField("Preferred spelling", text: $entry.term)
-                            TextField("Words or phrases to replace, separated by commas", text: Binding(
-                                get: { entry.aliases.joined(separator: ", ") },
+                            TextField("Replacement phrases, one per line (up to 8)", text: Binding(
+                                get: { entry.aliases.joined(separator: "\n") },
                                 set: { value in
-                                    entry.aliases = value.isEmpty ? [] : value.components(separatedBy: ",")
+                                    // One phrase per line, so a phrase may contain a comma.
+                                    entry.aliases = value.isEmpty ? [] : value.components(separatedBy: .newlines)
                                         .map { $0.trimmingCharacters(in: .whitespaces) }
                                 }
-                            ))
+                            ), axis: .vertical)
+                            .lineLimit(1...8)
                             .font(.caption)
                             .help("Use narrow phrases: preferred ‘auth middleware’, replace ‘off middleware’. Replacing ‘off’ alone also changes ordinary uses of that word.")
                         }
@@ -329,9 +335,7 @@ struct ServerPreferencesPage: View {
                 HStack {
                     Button("Add word") { list.entries.append(DictionaryEntry(term: "")) }
                     Spacer()
-                    Button("Remove list", role: .destructive) {
-                        draft.dictionary.lists.removeAll { $0.id == list.id }
-                    }
+                    Button("Remove list", role: .destructive) { listPendingRemoval = list.id }
                 }
                 .padding(.top, 8)
             } label: {
@@ -346,6 +350,17 @@ struct ServerPreferencesPage: View {
             let list = DictionaryList(name: "New list")
             draft.dictionary.lists.append(list)
             expandedLists.insert(list.id)
+        }
+        .confirmationDialog(
+            "Remove “\(draft.dictionary.lists.first { $0.id == listPendingRemoval }?.name ?? "list")”?",
+            isPresented: Binding(get: { listPendingRemoval != nil }, set: { if !$0 { listPendingRemoval = nil } })
+        ) {
+            Button("Remove list", role: .destructive) {
+                draft.dictionary.lists.removeAll { $0.id == listPendingRemoval }
+                listPendingRemoval = nil
+            }
+        } message: {
+            Text("Its words are removed when you save. Discard changes brings them back before then.")
         }
     }
 

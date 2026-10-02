@@ -445,8 +445,39 @@ final class SottoDuoController: ObservableObject {
         }
     }
 
+    /// Checks the address, token and API version before replacing a working connection.
     func saveConnection(endpoint: String, token: String, deviceName: String) {
         guard !isBusy, wisprFlowImportTask == nil else { return }
+        guard serverClientFactory == nil, let probe = try? ServerClient(endpoint: endpoint, token: token) else {
+            applyConnection(endpoint: endpoint, token: token, deviceName: deviceName)
+            return
+        }
+        serverStatusMessage = "Checking connection…"
+        Task { [weak self] in
+            do {
+                let health = try await probe.health()
+                guard let self else { return }
+                guard health.apiVersion == SottoDuoAPI.version else {
+                    errorMessage = health.apiVersion > SottoDuoAPI.version
+                        ? "The server is newer than this app. Update SottoDuo on this Mac."
+                        : "The server is older than this app. Update SottoDuo on the server."
+                    refreshServer()
+                    return
+                }
+                applyConnection(endpoint: endpoint, token: token, deviceName: deviceName)
+            } catch {
+                guard let self else { return }
+                if case ServerClientError.rejected(let status, _) = error, [401, 403].contains(status) {
+                    errorMessage = "The server rejected this access token. Check it and try again."
+                } else {
+                    errorMessage = "Couldn't reach a SottoDuo server at that address. Check it and that the server is running."
+                }
+                refreshServer()
+            }
+        }
+    }
+
+    private func applyConnection(endpoint: String, token: String, deviceName: String) {
         guard preferences.save(endpoint: endpoint, token: token, deviceName: deviceName) else {
             errorMessage = preferences.errorMessage
             return
