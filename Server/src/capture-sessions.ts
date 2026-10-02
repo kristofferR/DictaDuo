@@ -129,9 +129,8 @@ export class CaptureSessions {
       .sources.map((source) => ({
         ...source,
         shared: this.sharing.isShared(source.identity),
-        ...(active && sameSource(active.source, source.identity)
-          ? { recordingFor: structuredClone(active.device) }
-          : {}),
+        // The provider records one take at a time, so a take holds every source.
+        ...(active ? { recordingFor: structuredClone(active.device) } : {}),
       }))
       .filter((source) => local || source.shared);
     return { sources, sharingHost: { name: hostname().slice(0, 128) || "server", local } };

@@ -1440,6 +1440,8 @@ components:
           description: "Other computers may record from this source."
         recordingFor:
           "$ref": "#/components/schemas/DeviceIdentity"
+          description: "The device whose take this computer is recording. One take holds every
+            source until it ends."
       required: [identity, name, transport, present, link, capture, audioHealth, observedAt]
     AudioSourceList:
       type: "object"

@@ -767,11 +767,9 @@ test("other computers only see and record shared microphones; sharing changes on
   expect((await share()).statusCode).toBe(200);
   const recording = await start("100.64.0.9");
   expect(recording.statusCode).toBe(201);
-  // Every computer sees which device the shared microphone is recording for.
-  const busy = (await list("100.64.0.9")).sources.find(
-    (source: { identity: { id: string } }) => source.identity.id === "desk-mic",
-  );
-  expect(busy.recordingFor).toEqual(f.request.device);
+  // One take holds every source, and every computer sees which device it is for.
+  const busy = await list("100.64.0.9");
+  for (const source of busy.sources) expect(source.recordingFor).toEqual(f.request.device);
 
   // The choice is saved for the next server start.
   const saved = JSON.parse(await readFile(join(f.directory, "microphone-sharing.json"), "utf8"));

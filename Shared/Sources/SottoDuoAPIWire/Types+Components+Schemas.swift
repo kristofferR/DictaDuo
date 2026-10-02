@@ -1106,6 +1106,8 @@ extension Components {
             ///
             /// - Remark: Generated from `#/components/schemas/AudioSource/shared`.
             public var shared: Swift.Bool?
+            /// The device whose take this computer is recording. One take holds every source until it ends.
+            ///
             /// - Remark: Generated from `#/components/schemas/AudioSource/recordingFor`.
             public var recordingFor: Components.Schemas.DeviceIdentity?
             /// Creates a new `AudioSource`.
@@ -1121,7 +1123,7 @@ extension Components {
             ///   - observedAt:
             ///   - reason:
             ///   - shared: Other computers may record from this source.
-            ///   - recordingFor:
+            ///   - recordingFor: The device whose take this computer is recording. One take holds every source until it ends.
             public init(
                 identity: Components.Schemas.AudioSourceIdentity,
                 name: Swift.String,

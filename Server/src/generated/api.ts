@@ -828,6 +828,7 @@ export interface components {
       reason?: string;
       /** @description Other computers may record from this source. */
       shared?: boolean;
+      /** @description The device whose take this computer is recording. One take holds every source until it ends. */
       recordingFor?: components["schemas"]["DeviceIdentity"];
     };
     AudioSourceList: {
