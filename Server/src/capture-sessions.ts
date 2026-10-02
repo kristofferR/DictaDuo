@@ -10,6 +10,8 @@ import type { ButtonDestinations } from "./button-destinations.ts";
 import type { RecordingSnapshot } from "./recording-contract.ts";
 import { ServiceError } from "./errors.ts";
 import { validateBody } from "./validation.ts";
+import { MicrophoneSharing } from "./microphone-sharing.ts";
+import { hostname } from "node:os";
 
 type Source = components["schemas"]["AudioSource"];
 type StartRequest = components["schemas"]["StartCaptureRequest"];
@@ -81,6 +83,7 @@ export interface CaptureProvider {
 interface Session {
   id: string;
   source: StartRequest["source"];
+  device: StartRequest["device"];
   controller: AbortController;
   leaseUntil: number;
   startedAt: number;
@@ -113,11 +116,43 @@ export class CaptureSessions {
     private readonly store: CaptureStore,
     private readonly buttons: ButtonDestinations,
     private readonly provider?: CaptureProvider,
+    readonly sharing = new MicrophoneSharing(),
   ) {}
+
+  /**
+   * What a client may see. Other computers only see shared sources; a client on
+   * this computer sees every source and which ones are shared.
+   */
+  sourcesFor(local: boolean): components["schemas"]["AudioSourceList"] {
+    const active = this.active;
+    const sources = this.sources()
+      .sources.map((source) => ({
+        ...source,
+        shared: this.sharing.isShared(source.identity),
+        ...(active && sameSource(active.source, source.identity)
+          ? { recordingFor: structuredClone(active.device) }
+          : {}),
+      }))
+      .filter((source) => local || source.shared);
+    return { sources, sharingHost: { name: hostname().slice(0, 128) || "server", local } };
+  }
+  async setSharing(source: StartRequest["source"], shared: boolean, local: boolean) {
+    if (!local)
+      throw new ServiceError(
+        403,
+        "sharing_local_only",
+        "Change microphone sharing on the computer the microphone is plugged into.",
+      );
+    if (!this.sources().sources.some((item) => sameSource(item.identity, source)))
+      throw new ServiceError(404, "source_not_found", "This microphone is not connected.");
+    await this.sharing.set(source, shared);
+    return this.sourcesFor(local);
+  }
 
   sources(): components["schemas"]["AudioSourceList"] {
     const snapshot = structuredClone(this.provider?.sources() ?? []);
     validateBody("AudioSourceList", { sources: snapshot });
+    this.sharing.observe(snapshot.map((source) => source.identity));
     const identities = new Set<string>();
     for (const source of snapshot) {
       const identity = JSON.stringify([source.identity.hostID, source.identity.id]);
@@ -144,7 +179,8 @@ export class CaptureSessions {
       source.audioHealth !== "degraded"
     );
   }
-  start(request: StartRequest, owner?: string): Promise<RecordingSnapshot> {
+  /** `local` requests come from this computer and may use unshared sources. */
+  start(request: StartRequest, owner?: string, local = true): Promise<RecordingSnapshot> {
     if (!owner || !/^[0-9a-f]{64}$/.test(owner))
       return Promise.reject(
         new ServiceError(
@@ -194,6 +230,13 @@ export class CaptureSessions {
           "source_unavailable",
           "The selected microphone is not available. Resolve another input before recording.",
         );
+      // Same code as an unavailable source, so clients fall back to their next input.
+      if (!existing && !local && !this.sharing.isShared(request.source))
+        throw new ServiceError(
+          503,
+          "source_unavailable",
+          "This microphone is not shared with other computers.",
+        );
       const record = await this.store.createCapture(request, owner);
       if (button?.signal.aborted) {
         await this.store.discard(record.id);
@@ -205,6 +248,7 @@ export class CaptureSessions {
       const session: Session = {
         id: record.id,
         source: structuredClone(request.source),
+        device: structuredClone(request.device),
         controller: new AbortController(),
         leaseUntil: Date.now() + captureLimits.leaseMS,
         startedAt: Date.now(),

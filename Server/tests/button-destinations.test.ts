@@ -2,9 +2,12 @@ import { afterEach, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { ButtonDestinations } from "../src/button-destinations.ts";
 import type { GenerationService } from "../src/generation-service.ts";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 const brokers: ButtonDestinations[] = [];
 afterEach(() => brokers.splice(0).forEach((b) => b.shutdown()));
-function fixture() {
+function fixture(targetFile?: string) {
   let now = Date.now();
   let connected = true;
   const source = { hostID: "desktop", id: "dji" };
@@ -29,7 +32,7 @@ function fixture() {
       throw new Error("No completed generation");
     },
   };
-  const broker = new ButtonDestinations(service, () => now);
+  const broker = new ButtonDestinations(service, () => now, targetFile);
   brokers.push(broker);
   const a = randomUUID().toUpperCase(),
     b = randomUUID().toUpperCase(),
@@ -154,4 +157,40 @@ test("a second tap during preparation cancels instead of opening a delayed recor
   expect(claim.signal.aborted).toBe(true);
   expect(f.broker.state(f.a).command?.action).toBe("cancel");
   expect(f.broker.state().selected).toBeUndefined();
+});
+
+test("a pinned computer stays selected, dictating elsewhere does not move it, and it survives restarts", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sottoduo-button-target-"));
+  try {
+    const file = join(directory, "button-target.json");
+    const f = fixture(file);
+    expect(f.broker.state().buttonTarget).toEqual({ mode: "lastDictated" });
+    f.broker.setTarget({ mode: "device", device: { id: "linux", name: "Linux" } });
+    await Bun.sleep(20);
+    expect(f.broker.state().selected?.id).toBe(f.b);
+    // A shortcut take on the Mac would select it in lastDictated mode.
+    await f.broker.select(f.a, {}, f.owner);
+    expect(f.broker.state().selected?.id).toBe(f.b);
+    f.broker.press("epoch", 1);
+    expect(f.broker.state(f.b).command?.action).toBe("start");
+
+    // The same target applies after a restart, once the pinned computer registers again.
+    const restarted = fixture(file);
+    expect(restarted.broker.state().buttonTarget).toEqual({
+      mode: "device",
+      device: { id: "linux", name: "Linux" },
+    });
+    expect(restarted.broker.state().selected?.id).toBe(restarted.b);
+
+    restarted.broker.setTarget({ mode: "off" });
+    expect(restarted.broker.state().selected).toBeUndefined();
+    await restarted.broker.select(restarted.a, {}, restarted.owner);
+    restarted.advance(501);
+    restarted.broker.press("epoch", 1);
+    expect(restarted.broker.state(restarted.a).command).toBeUndefined();
+    expect(restarted.broker.state(restarted.b).command).toBeUndefined();
+    expect(() => restarted.broker.setTarget({ mode: "device" })).toThrow();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

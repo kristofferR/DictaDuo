@@ -95,6 +95,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/v1/audio-sources/sharing": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** @description Shares or stops sharing one source with other computers. Only a client on the computer that hosts the sources may change this. */
+    put: operations["setAudioSourceSharing"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/v1/button-destinations/target": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** @description Chooses where the DJI button types. Stored on the server and shared by every destination. */
+    put: operations["setButtonTarget"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/v2/captures": {
     parameters: {
       query?: never;
@@ -756,6 +790,13 @@ export interface components {
       source?: components["schemas"]["AudioSourceIdentity"];
       available: boolean;
       command?: components["schemas"]["ButtonCommand"];
+      buttonTarget?: components["schemas"]["ButtonTarget"];
+    };
+    /** @description lastDictated follows the computer of the latest successful shortcut dictation; device always types into one computer; off ignores the button. */
+    ButtonTarget: {
+      /** @enum {string} */
+      mode: "lastDictated" | "device" | "off";
+      device?: components["schemas"]["DeviceIdentity"];
     };
     HeartbeatButtonDestination: {
       acknowledgement?: components["schemas"]["UUID"];
@@ -785,9 +826,23 @@ export interface components {
       /** Format: date-time */
       observedAt: string;
       reason?: string;
+      /** @description Other computers may record from this source. */
+      shared?: boolean;
+      recordingFor?: components["schemas"]["DeviceIdentity"];
     };
     AudioSourceList: {
       sources: components["schemas"]["AudioSource"][];
+      sharingHost?: components["schemas"]["SharingHost"];
+    };
+    /** @description The computer whose sources are listed. */
+    SharingHost: {
+      name: string;
+      /** @description The request came from that computer, so it may change sharing. */
+      local: boolean;
+    };
+    AudioSourceSharing: {
+      source: components["schemas"]["AudioSourceIdentity"];
+      shared: boolean;
     };
     RemoteCapture: {
       continuationID?: components["schemas"]["UUID"];
@@ -1296,13 +1351,63 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Bounded snapshot; discovery never starts audio or connects Bluetooth. */
+      /** @description Bounded snapshot; discovery never starts audio or connects Bluetooth. Other computers only see shared sources. */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
           "application/json": components["schemas"]["AudioSourceList"];
+        };
+      };
+      default: components["responses"]["APIError"];
+    };
+  };
+  setAudioSourceSharing: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AudioSourceSharing"];
+      };
+    };
+    responses: {
+      /** @description Updated snapshot. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AudioSourceList"];
+        };
+      };
+      default: components["responses"]["APIError"];
+    };
+  };
+  setButtonTarget: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ButtonTarget"];
+      };
+    };
+    responses: {
+      /** @description Live button-destination state. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ButtonDestinationState"];
         };
       };
       default: components["responses"]["APIError"];

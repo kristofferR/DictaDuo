@@ -12,6 +12,7 @@ import {
 import { ServiceError } from "./errors.ts";
 import type { GenerationService } from "./generation-service.ts";
 import { validateBody } from "./validation.ts";
+import { isLocal } from "./request-origin.ts";
 import type { RecordingService } from "./recording-service.ts";
 import { registerRecordingRoutes } from "./recording-routes.ts";
 
@@ -73,6 +74,14 @@ const encodeFor = (request: FastifyRequest) => {
       if (
         (key === "recognitionEngine" || key === "recognitionEngines") &&
         request.headers["x-sottoduo-recognition-engine"] !== "engine-v1"
+      )
+        return undefined;
+      if (
+        (key === "shared" ||
+          key === "recordingFor" ||
+          key === "sharingHost" ||
+          key === "buttonTarget") &&
+        request.headers["x-sottoduo-microphone-sharing"] !== "sharing-v1"
       )
         return undefined;
       if (
@@ -177,12 +186,19 @@ export function createHTTPServer(
   if (recordings) registerRecordingRoutes(app, recordings, service.captures);
 
   app.get("/v1/health", () => service.health());
-  app.get("/v1/audio-sources", () => service.captures.sources());
+  app.get("/v1/audio-sources", (request) => service.captures.sourcesFor(isLocal(request)));
+  app.put("/v1/audio-sources/sharing", (request) => {
+    const body = validateBody("AudioSourceSharing", request.body);
+    return service.captures.setSharing(body.source, body.shared, isLocal(request));
+  });
   const destinationOwner = (request: FastifyRequest) => {
     const value = request.headers["x-sottoduo-destination-owner"];
     return typeof value === "string" ? value : undefined;
   };
   app.get("/v1/button-destinations", () => service.buttons.state());
+  app.put("/v1/button-destinations/target", (request) =>
+    service.buttons.setTarget(validateBody("ButtonTarget", request.body)),
+  );
   app.post("/v1/button-destinations", (request) =>
     service.buttons.register(
       validateBody("RegisterButtonDestination", request.body),

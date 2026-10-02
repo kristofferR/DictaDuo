@@ -1,4 +1,6 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { atomicPrivateWrite } from "./storage.ts";
 import { ServiceError } from "./errors.ts";
 import type { GenerationService } from "./generation-service.ts";
 import type { components } from "./generated/api.ts";
@@ -6,6 +8,7 @@ type Schema = components["schemas"];
 type Destination = Schema["ButtonDestination"];
 type Command = Schema["ButtonCommand"];
 type Identity = Schema["AudioSourceIdentity"];
+type Target = Schema["ButtonTarget"];
 type Registration = { destination: Destination; hash: Buffer; until: number; command?: Command };
 export const buttonLimits = {
   leaseMS: 5000,
@@ -48,12 +51,45 @@ export class ButtonDestinations {
   private lastPress = -Infinity;
   private timer: ReturnType<typeof setInterval>;
   private closed = false;
+  private target: Target = { mode: "lastDictated" };
+  private targetWrites: Promise<void> = Promise.resolve();
   constructor(
     private service: Pick<GenerationService, "captures" | "resolveResult">,
     private now = Date.now,
+    private readonly targetFile?: string,
   ) {
+    this.target = targetFile ? loadTarget(targetFile) : this.target;
     this.timer = setInterval(() => this.expire(), 250);
     this.timer.unref();
+  }
+  /** Where the button types. Shared by every destination and kept across restarts. */
+  setTarget(target: Target) {
+    if (target.mode === "device" && !target.device)
+      throw new ServiceError(400, "invalid_button_target", "Choose a computer for the button.");
+    this.target =
+      target.mode === "device"
+        ? { mode: "device", device: structuredClone(target.device!) }
+        : { mode: target.mode };
+    if (target.mode !== "lastDictated") this.disarm();
+    const file = this.targetFile;
+    if (file) {
+      const data = JSON.stringify(this.target);
+      this.targetWrites = this.targetWrites
+        .then(() => atomicPrivateWrite(file, data))
+        .catch(() => {});
+    }
+    return this.state();
+  }
+  /** A pinned computer is selected whenever it is connected; "off" never selects. */
+  private applyTarget() {
+    if (this.target.mode === "lastDictated" || this.route) return;
+    const pinned =
+      this.target.mode === "device"
+        ? [...this.registrations.values()].find(
+            (registration) => registration.destination.device.id === this.target.device?.id,
+          )
+        : undefined;
+    this.selected = pinned && this.eligible() ? pinned.destination.id : undefined;
   }
   input(source: Identity | undefined, epoch?: string) {
     if (this.closed) return;
@@ -91,6 +127,7 @@ export class ButtonDestinations {
     for (const [id, registration] of this.registrations)
       if (registration.until <= now) this.remove(id);
     if (this.selected && !this.eligible()) this.disarm();
+    this.applyTarget();
     if (
       this.route &&
       ((this.route.phase === "preparing" && this.route.deadline <= now) ||
@@ -150,6 +187,8 @@ export class ButtonDestinations {
   }
   async select(id: string, request: Schema["SelectButtonDestination"], owner?: string) {
     let registration = this.authorize(id, owner);
+    // A pinned or disabled button is not moved by dictating somewhere.
+    if (this.target.mode !== "lastDictated") return this.state(id);
     if (this.route || !this.eligible()) throw unavailable();
     if (request.generationID) {
       const record = await this.service.resolveResult(request.generationID);
@@ -291,6 +330,7 @@ export class ButtonDestinations {
       source: this.source ? structuredClone(this.source) : undefined,
       available: this.eligible(),
       command: id ? structuredClone(this.registrations.get(id.toUpperCase())?.command) : undefined,
+      buttonTarget: structuredClone(this.target),
     };
   }
   shutdown() {
@@ -301,4 +341,18 @@ export class ButtonDestinations {
     this.source = undefined;
     this.inputEpoch = undefined;
   }
+}
+
+function loadTarget(file: string): Target {
+  try {
+    const value = JSON.parse(readFileSync(file, "utf8")) as Partial<Target>;
+    if (
+      value.mode === "device" &&
+      typeof value.device?.id === "string" &&
+      typeof value.device.name === "string"
+    )
+      return { mode: "device", device: { id: value.device.id, name: value.device.name } };
+    if (value.mode === "off") return { mode: "off" };
+  } catch {}
+  return { mode: "lastDictated" };
 }

@@ -24,8 +24,11 @@ class FakeCapture implements CaptureProvider {
   originalFrames = 48_000;
   /** Write one second before stop, like a live microphone, so failures have audio. */
   writeAtStart = false;
+  /** Sources plugged in after the first discovery. */
+  later: components["schemas"]["AudioSource"][] = [];
   sources(): components["schemas"]["AudioSource"][] {
     return [
+      ...this.later,
       {
         identity: { hostID: "host-stable", id: "usb-dji-stable" },
         name: "DJI",
@@ -685,4 +688,95 @@ test("the destination's continuation is fixed before processing, or the hold exp
     async () => (await f.recordings.get(first.id)).processingState === "completed",
     5_000,
   );
+});
+
+test("other computers only see and record shared microphones; sharing changes only locally", async () => {
+  const f = await fixture();
+  const sharing = { "x-sottoduo-microphone-sharing": "sharing-v1" };
+  const list = (remoteAddress?: string, headers: Record<string, string> = sharing) =>
+    f.app
+      .inject({
+        method: "GET",
+        url: "/v1/audio-sources",
+        headers: { ...f.headers, ...headers },
+        ...(remoteAddress ? { remoteAddress } : {}),
+      })
+      .then((response) => response.json());
+  // Sources present when sharing first runs stay shared, as before the setting existed.
+  const first = await list();
+  expect(first.sharingHost.local).toBe(true);
+  expect(first.sources.map((source: { shared: boolean }) => source.shared)).toEqual([true]);
+  f.provider.later = [
+    {
+      identity: { hostID: "host-stable", id: "desk-mic" },
+      name: "Desk",
+      transport: "usb",
+      present: true,
+      link: "notApplicable",
+      capture: "available",
+      audioHealth: "unknown",
+      observedAt: new Date().toISOString(),
+    },
+  ];
+  const local = await list();
+  expect(
+    local.sources.map((source: { identity: { id: string }; shared: boolean }) => [
+      source.identity.id,
+      source.shared,
+    ]),
+  ).toEqual([
+    ["desk-mic", false],
+    ["usb-dji-stable", true],
+  ]);
+  const remote = await list("100.64.0.9");
+  expect(remote.sharingHost.local).toBe(false);
+  expect(remote.sources.map((source: { identity: { id: string } }) => source.identity.id)).toEqual([
+    "usb-dji-stable",
+  ]);
+  // Older clients get no new fields, and still only shared sources.
+  const legacy = await list("100.64.0.9", {});
+  expect(legacy.sharingHost).toBeUndefined();
+  expect(legacy.sources).toHaveLength(1);
+  expect(legacy.sources[0].shared).toBeUndefined();
+
+  const start = (remoteAddress?: string) =>
+    f.app.inject({
+      method: "POST",
+      url: "/v2/captures",
+      headers: { ...f.headers, "x-sottoduo-capture-owner": randomBytes(32).toString("hex") },
+      payload: {
+        ...f.request,
+        requestID: randomUUID(),
+        source: { hostID: "host-stable", id: "desk-mic" },
+      },
+      ...(remoteAddress ? { remoteAddress } : {}),
+    });
+  const refused = await start("100.64.0.9");
+  expect(refused.statusCode).toBe(503);
+  expect(refused.json().code).toBe("source_unavailable");
+
+  const share = (remoteAddress?: string) =>
+    f.app.inject({
+      method: "PUT",
+      url: "/v1/audio-sources/sharing",
+      headers: { ...f.headers, ...sharing },
+      payload: { source: { hostID: "host-stable", id: "desk-mic" }, shared: true },
+      ...(remoteAddress ? { remoteAddress } : {}),
+    });
+  expect((await share("100.64.0.9")).statusCode).toBe(403);
+  expect((await share()).statusCode).toBe(200);
+  const recording = await start("100.64.0.9");
+  expect(recording.statusCode).toBe(201);
+  // Every computer sees which device the shared microphone is recording for.
+  const busy = (await list("100.64.0.9")).sources.find(
+    (source: { identity: { id: string } }) => source.identity.id === "desk-mic",
+  );
+  expect(busy.recordingFor).toEqual(f.request.device);
+
+  // The choice is saved for the next server start.
+  const saved = JSON.parse(await readFile(join(f.directory, "microphone-sharing.json"), "utf8"));
+  expect(saved.shared.map((source: { id: string }) => source.id).sort()).toEqual([
+    "desk-mic",
+    "usb-dji-stable",
+  ]);
 });
