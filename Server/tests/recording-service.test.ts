@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile, mkdir, open } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile, mkdir, open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -506,6 +506,20 @@ test("explicit discard deletes audio while keeping a restart-safe fenced tombsto
   expect((await service.get(snapshot.id)).captureState).toBe("discarded");
   await expect(service.resume(snapshot.id)).rejects.toMatchObject({ code: "recording_discarded" });
   expect((await service.history(100)).items).toHaveLength(0);
+});
+
+test("deleting a discarded archive does not hold up other recordings", async () => {
+  const context = await setup();
+  const snapshot = await context.service.resume((await context.service.create(request())).id);
+  const run = join(context.path, "sessions", snapshot.id, randomUUID().toUpperCase(), "inference");
+  await mkdir(run, { recursive: true });
+  for (let index = 0; index < 500; index++) await writeFile(join(run, `${index}.pcm`), "");
+  const order: string[] = [];
+  const discarding = context.service.discard(snapshot.id).then(() => order.push("discard"));
+  await context.service.findRequest(randomUUID(), "none").then(() => order.push("other"));
+  await discarding;
+  expect(order).toEqual(["other", "discard"]);
+  await expect(readdir(run)).rejects.toMatchObject({ code: "ENOENT" });
 });
 
 test("continuation is fixed before audio and final composition carries delivered list state", async () => {

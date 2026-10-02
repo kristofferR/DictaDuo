@@ -148,6 +148,7 @@ export class RecordingService {
   private readonly chunks = new Map<string, ChunkPosition[]>();
   private readonly subscribers = new Map<string, Set<(snapshot: RecordingSnapshot) => void>>();
   private queue: Promise<unknown> = Promise.resolve();
+  private pruning = new Map<string, Promise<void>>();
   private worker?: Promise<void>;
   private wakeRequested = false;
   private stopping = false;
@@ -1118,8 +1119,8 @@ export class RecordingService {
       return copy(manifest.snapshot);
     });
   }
-  discard(id: string) {
-    return this.mutate(async () => {
+  async discard(id: string) {
+    const snapshot = await this.mutate(async () => {
       this.assertRunning();
       const manifest = copy(this.lookup(id));
       if (manifest.snapshot.captureState !== "discarded") {
@@ -1139,9 +1140,12 @@ export class RecordingService {
       this.jobs.get(manifest.snapshot.id)?.abort();
       this.live?.close(manifest.snapshot.id);
       this.onDiscard?.(manifest.snapshot.id);
-      await this.pruneDiscarded(manifest.snapshot.id);
       return copy(manifest.snapshot);
     });
+    // The committed tombstone fences the session, so deleting a long archive's
+    // chunks need not hold up other recordings' appends and leases.
+    await this.prune(snapshot.id);
+    return snapshot;
   }
   findRequest(requestID: string, deviceID: string) {
     return this.mutate(() => {
@@ -1320,6 +1324,13 @@ export class RecordingService {
     });
   }
 
+  /** One deletion per session at a time; startup prunes any that were interrupted. */
+  private prune(id: string) {
+    const running =
+      this.pruning.get(id) ?? this.pruneDiscarded(id).finally(() => this.pruning.delete(id));
+    this.pruning.set(id, running);
+    return running;
+  }
   private async pruneDiscarded(id: string) {
     await requireRegularDirectory(this.directory(id));
     for (const name of await readdir(this.directory(id))) {
