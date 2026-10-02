@@ -275,7 +275,8 @@ export class GenerationService {
       if (!terminal(record)) {
         if (record.capture) record.capture.state = "stopped";
         record.status = "failed";
-        record.error = "Server restarted before this generation completed.";
+        record.error =
+          "The server restarted before this finished. Transcribe it again from History.";
         await this.restorePreviousOutput(record);
         if (record.recognition) delete record.recognition.partialText;
         record.updatedAt = now();
@@ -364,10 +365,10 @@ export class GenerationService {
         : ready
           ? "Server ready."
           : this.preferences.preferences.recognitionMode === "cloud" && !this.configuration.soniox
-            ? "Soniox API key is not configured."
+            ? "Cloud transcription needs a Soniox API key on the server. Add one, or choose Local."
             : this.warming
               ? "Loading server models…"
-              : "Server models are unavailable.";
+              : "The server's speech models are unavailable. Check the server log.";
       if (!state.speechLoaded) this.beginWarmup();
       return {
         apiVersion: API_VERSION,
@@ -393,7 +394,7 @@ export class GenerationService {
           message: this.preferences.preferences.textCorrectionEnabled
             ? state.proofLoaded
               ? undefined
-              : "Unavailable; deterministic text is preserved."
+              : "Unavailable. Text is kept as transcribed."
             : "Disabled",
         },
         message,

@@ -105,7 +105,7 @@ public actor GenerationService {
             guard record.id == id, record.schemaVersion == 1 else { throw ServiceError(500, "invalid_archive", "A generation has invalid metadata.") }
             if !record.status.isTerminal {
                 record.status = .failed
-                record.error = "Server restarted before this generation completed."
+                record.error = "The server restarted before this finished. Transcribe it again from History."
                 record.updatedAt = Date()
                 record.progress = nil
                 for name in ["inference.raw", "original.raw", "inference.wav.partial", "original.wav.partial"] {
@@ -157,14 +157,14 @@ public actor GenerationService {
         let cloudOnly = preferences.preferences.recognitionMode == .cloud
         let ready = !cloudOnly && state.available && state.speechLoaded && writable
         let message = !writable ? "Server storage is unavailable or full." : (activeID != nil ? "Server is handling a recording." :
-            (ready ? "Server ready." : (warming ? "Loading server models…" : "Server models are unavailable.")))
+            (ready ? "Server ready." : (warming ? "Loading server models…" : "The server's speech models are unavailable. Check the server log.")))
         if !state.speechLoaded, !warming, activeID == nil { beginWarmup() }
         // This server only implements the v1 routes, not the v2 recording sessions of API version 3.
         return ServerHealth(apiVersion: 2, isDev: configuration.development, ready: ready && activeID == nil,
             speech: ModelRuntimeInfo(modelID: "whisper-large-v3-turbo", backend: Self.speechBackend, ready: state.speechLoaded),
             proofreading: ModelRuntimeInfo(modelID: "Qwen3-4B-Instruct-2507", backend: Self.proofBackend,
                                            ready: state.proofLoaded, message: preferences.preferences.textCorrectionEnabled ?
-                                               (state.proofLoaded ? nil : "Unavailable; deterministic text is preserved.") : "Disabled"),
+                                               (state.proofLoaded ? nil : "Unavailable. Text is kept as transcribed.") : "Disabled"),
             message: cloudOnly ? "Cloud recognition requires the TypeScript server. Choose Automatic or Local only." : message)
     }
 

@@ -224,7 +224,7 @@ test("restart recovers unfinished metadata and removes partial audio", async () 
     );
   resources.push({ service: recovered, path });
   expect((await recovered.get(record.id)).status).toBe("failed");
-  expect((await recovered.get(record.id)).error).toContain("Server restarted");
+  expect((await recovered.get(record.id)).error).toContain("server restarted");
   await expect(
     readFile(join(path, "generations", record.id, "inference.raw")),
   ).rejects.toMatchObject({ code: "ENOENT" });
