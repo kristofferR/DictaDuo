@@ -488,6 +488,24 @@ test("source retention requires matching endpoints and original runs export sepa
   }
 });
 
+test("admission checks readiness again when preferences change during the check", async () => {
+  const { service, hooks } = await setup();
+  const base = await hooks.getPreferences();
+  let current = base;
+  hooks.getPreferences = async () => structuredClone(current);
+  const checked: number[] = [];
+  Object.assign(hooks, {
+    admit: async () => {
+      checked.push(current.revision);
+      // A concurrent update selects new settings while the first check runs.
+      if (checked.length === 1) current = { ...base, revision: base.revision + 1 };
+    },
+  });
+  const snapshot = await service.create(request());
+  expect(checked).toEqual([base.revision, base.revision + 1]);
+  expect(snapshot.settings.revision).toBe(base.revision + 1);
+});
+
 test("explicit discard deletes audio while keeping a restart-safe fenced tombstone", async () => {
   const context = await setup();
   const snapshot = await context.service.resume((await context.service.create(request())).id);

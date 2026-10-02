@@ -551,9 +551,16 @@ export class RecordingService {
           snapshot.device.id === request.device.id,
       );
       if (existing) return copy(existing.snapshot);
-      await this.hooks.admit?.();
+      // Readiness must cover the settings this session freezes; preferences
+      // that change during the check are checked again.
+      let settings = await this.hooks.getPreferences();
+      for (;;) {
+        await this.hooks.admit?.();
+        const current = await this.hooks.getPreferences();
+        if (current.revision === settings.revision) break;
+        settings = current;
+      }
       await requireDiskSpace(this.configuration.dataDirectory);
-      const settings = await this.hooks.getPreferences();
       const id = uuid();
       await ensureDirectory(this.directory(id));
       await this.syncDirectory(this.root);
