@@ -85,12 +85,14 @@ final class SottoDuoAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         configuration?.stopWatching()
         controller?.shutdown()
-        guard startupTask != nil || (configuration?.pendingWriteCount ?? 0) > 0 else { return .terminateNow }
+        let outputRestore = controller?.pendingOutputRestore
+        guard startupTask != nil || (configuration?.pendingWriteCount ?? 0) > 0 || outputRestore != nil else { return .terminateNow }
         startupTask?.cancel()
         Task {
             await startupTask?.value
             configuration?.stopWatching()
             await configuration?.flush()
+            await outputRestore?.value
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

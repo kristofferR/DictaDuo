@@ -76,7 +76,7 @@ final class RemoteCaptureSession {
         onUpdate(record)
     }
 
-    func stop(continuationID: UUID?) async throws -> GenerationRecord {
+    func stop(continuationID: UUID?, onSealed: () -> Void = {}) async throws -> GenerationRecord {
         stopping = true
         sealMayHaveSucceeded = true
         let record = try await connection.stopCapture(id, continuationID: continuationID)
@@ -85,6 +85,7 @@ final class RemoteCaptureSession {
             throw ServerClientError.invalidResponse
         }
         markSealed()
+        onSealed()
         if record.status.isTerminal {
             eventTask?.cancel(); eventTask = nil
             return record

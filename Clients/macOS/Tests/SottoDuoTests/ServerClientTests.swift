@@ -42,6 +42,34 @@ final class ServerClientTests: XCTestCase {
     }
 
     @MainActor
+    func testRemoteSealCallbackRunsBeforeWaitingForTranscription() async throws {
+        let fixture = HTTPFixture()
+        defer { fixture.session.invalidateAndCancel() }
+        let connection = try ServerClient(endpoint: fixture.endpoint, token: "", session: fixture.session).owningCapture()
+        let source = AudioSourceIdentity(hostID: "desk", id: "dji")
+        var record = GenerationRecord(requestID: UUID(), device: .init(id: "mac", name: "Mac"), settings: .init())
+        record.capture = .init(source: source, state: .recording)
+        let capture = try RemoteCaptureSession(record: record, connection: connection,
+                                              requestedAt: ProcessInfo.processInfo.systemUptime)
+        record.capture?.state = .sealed
+        record.status = .queued
+        let response = try SottoDuoAPI.encoder().encode(record)
+        fixture.respond = { _ in (200, response) }
+        var notified = false
+        do {
+            _ = try await capture.stop(continuationID: nil) {
+                XCTAssertTrue(capture.isSealed)
+                notified = true
+            }
+            XCTFail("No event monitor was started to provide the transcription result")
+        } catch ServerClientError.disconnected {
+            // Acknowledging the seal must not wait for a terminal event.
+            XCTAssertTrue(notified)
+        }
+        capture.cancelMonitoring()
+    }
+
+    @MainActor
     func testInterruptedRemoteStopIsNotCancelledAsUnsealed() async throws {
         let fixture = HTTPFixture()
         defer { fixture.session.invalidateAndCancel() }
@@ -57,11 +85,13 @@ final class ServerClientTests: XCTestCase {
             XCTAssertTrue(request.url?.path.hasSuffix("/capture/stop") == true)
             throw URLError(.networkConnectionLost)
         }
+        var notified = false
         do {
-            _ = try await capture.stop(continuationID: nil)
+            _ = try await capture.stop(continuationID: nil) { notified = true }
             XCTFail("Expected the interrupted stop response to fail")
         } catch is URLError {}
         XCTAssertFalse(capture.isSealed)
+        XCTAssertFalse(notified, "An interrupted response does not confirm the microphone is sealed")
         XCTAssertFalse(capture.shouldCancelServer)
         capture.cancelMonitoring()
     }

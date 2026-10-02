@@ -7,21 +7,23 @@ public struct SottoDuoConfiguration: Codable, Equatable, Sendable {
     public var holdKey: String
     public var launchAtLogin: Bool
     public var djiMicButtonEnabled: Bool
+    public var muteOutputWhileRecording: Bool
     public var microphones: MicrophonePreferences
 
     public static let `default` = SottoDuoConfiguration()
 
     public init(holdKey: String = "rightOption", launchAtLogin: Bool = false, djiMicButtonEnabled: Bool = false,
-                microphones: MicrophonePreferences = MicrophonePreferences()) {
+                muteOutputWhileRecording: Bool = false, microphones: MicrophonePreferences = MicrophonePreferences()) {
         schemaVersion = 1
         self.holdKey = holdKey
         self.launchAtLogin = launchAtLogin
         self.djiMicButtonEnabled = djiMicButtonEnabled
+        self.muteOutputWhileRecording = muteOutputWhileRecording
         self.microphones = microphones
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, holdKey, launchAtLogin, djiMicButtonEnabled, microphones
+        case schemaVersion, holdKey, launchAtLogin, djiMicButtonEnabled, muteOutputWhileRecording, microphones
     }
 
     public init(from decoder: Decoder) throws {
@@ -37,6 +39,7 @@ public struct SottoDuoConfiguration: Codable, Equatable, Sendable {
         self.init(holdKey: holdKey,
                   launchAtLogin: try values.value(Bool.self, for: .launchAtLogin, default: false),
                   djiMicButtonEnabled: try values.value(Bool.self, for: .djiMicButtonEnabled, default: false),
+                  muteOutputWhileRecording: try values.value(Bool.self, for: .muteOutputWhileRecording, default: false),
                   microphones: values.contains(.microphones)
                     ? try values.decode(StrictMicrophones.self, forKey: .microphones).preferences
                     : MicrophonePreferences())

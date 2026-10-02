@@ -60,6 +60,7 @@ export function createGUIHandler(
         sources: config.sources,
         microphones: microphoneSnapshot(config.sources),
         buttonEnabled: config.buttonEnabled,
+        muteOutputWhileRecording: config.muteOutputWhileRecording,
         shortcut: shortcuts?.snapshot() ?? null,
         buttonSettingsSupported: buttons !== undefined,
         button: buttons?.state
@@ -116,6 +117,13 @@ export function createGUIHandler(
           throw new ClientNotice("This computer is not the selected destination.");
         await buttons.disarm();
         return {};
+      case "saveMuteOutput":
+        if (typeof request.enabled !== "boolean")
+          throw new ClientNotice("Invalid output muting setting.");
+        // Only affects the next take, so it can change while one is running.
+        saveConfig(parseConfig({ ...config, muteOutputWhileRecording: request.enabled }));
+        controller.muteOutput = request.enabled;
+        return { enabled: request.enabled };
       case "saveButton": {
         if (!buttons)
           throw new ClientNotice("Update the background client to change pairing-button settings.");

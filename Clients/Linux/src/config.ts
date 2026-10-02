@@ -7,6 +7,7 @@ import { profileFields, type ConfiguredSources } from "./microphones.ts";
 import type { SourcePreferences } from "./sources.ts";
 export interface Config {
   buttonEnabled: boolean;
+  muteOutputWhileRecording: boolean;
   server: string;
   tokenFile: string;
   device: { id: string; name: string };
@@ -62,6 +63,7 @@ export function parseConfig(value: unknown): Config {
   if (s.mode === "fixed" && !fixed) throw new Error("Fixed selection needs a source identity.");
   return {
     buttonEnabled: value.buttonEnabled === true,
+    muteOutputWhileRecording: value.muteOutputWhileRecording === true,
     server: endpoint(value.server),
     tokenFile: value.tokenFile,
     device: validateBody("DeviceIdentity", value.device),

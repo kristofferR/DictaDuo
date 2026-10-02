@@ -32,9 +32,18 @@ final class ConfigurationFileTests: XCTestCase {
             #"{"schemaVersion":2}"#, #"{"schemaVersion":true}"#, #"{"holdKey":"function"}"#,
             #"{"launchAtLogin":"true"}"#, #"{"launchAtLogin":null}"#,
             #"{"djiMicButtonEnabled":"true"}"#, #"{"djiMicButtonEnabled":null}"#,
+            #"{"muteOutputWhileRecording":"true"}"#, #"{"muteOutputWhileRecording":null}"#,
         ] {
             XCTAssertThrowsError(try decoder.decode(SottoDuoConfiguration.self, from: Data(json.utf8)), json)
         }
+    }
+
+    func testMuteOutputWhileRecordingIsOptInAndRoundTrips() throws {
+        XCTAssertFalse(SottoDuoConfiguration.default.muteOutputWhileRecording)
+        let decoded = try JSONDecoder().decode(SottoDuoConfiguration.self, from: Data(#"{"muteOutputWhileRecording":true}"#.utf8))
+        XCTAssertTrue(decoded.muteOutputWhileRecording)
+        let roundTripped = try JSONDecoder().decode(SottoDuoConfiguration.self, from: JSONEncoder().encode(decoded))
+        XCTAssertEqual(roundTripped, decoded)
     }
 
     func testStrictMicrophoneValidationDoesNotSilentlyDiscardBadManualEdits() throws {
