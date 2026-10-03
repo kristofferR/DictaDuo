@@ -35,9 +35,10 @@ test("a failed discovery write is retried on a later discovery", async () => {
   try {
     const folder = join(directory, "data");
     const sharing = new MicrophoneSharing(join(folder, "microphone-sharing.json"));
-    // The data folder is missing, so the first write fails.
+    // The data folder is missing, so the first write fails, and so does the final drain.
     sharing.observe([{ hostID: "desktop", id: "dji" }]);
     await sharing.settled();
+    await expect(sharing.settled()).rejects.toThrow();
     await mkdir(folder);
     sharing.observe([{ hostID: "desktop", id: "dji" }]);
     await sharing.settled();

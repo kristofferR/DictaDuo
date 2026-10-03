@@ -536,6 +536,8 @@ export class CaptureSessions {
     await this.admission;
     if (this.active) await this.fail(this.active, "The capture host is shutting down.");
     // A first discovery after upgrading records which microphones stay shared.
-    await this.sharing.settled();
+    await this.sharing.settled().catch((error: unknown) => {
+      console.error("Microphone sharing could not be saved; review it after restarting.", error);
+    });
   }
 }

@@ -65,7 +65,14 @@ export class MicrophoneSharing {
 
   /** Waits for pending writes, so tests and shutdown see the saved state. */
   settled() {
-    if (this.dirty) this.persist();
+    // A last attempt for a failed discovery write reports its failure.
+    if (this.dirty) {
+      this.dirty = false;
+      return this.enqueue(() => this.save(this.known, this.shared)).catch((error: unknown) => {
+        this.dirty = true;
+        throw error;
+      });
+    }
     return this.writes;
   }
 
