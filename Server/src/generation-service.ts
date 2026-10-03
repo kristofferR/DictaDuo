@@ -902,7 +902,8 @@ export class GenerationService {
       }
       // Keep the saved audio and metadata, but drop the previous run's output.
       // A transcript it replaces stays recoverable until the retry succeeds.
-      if (record.rawText)
+      // A completed take is backed up even when it recognized no speech.
+      if (record.rawText || record.status === "completed")
         await atomicPrivateWrite(
           join(this.directory(record.id), PREVIOUS_OUTPUT),
           JSON.stringify(Object.fromEntries(outputKeys.map((key) => [key, record[key]]))),

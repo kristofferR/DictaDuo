@@ -1640,9 +1640,10 @@ export class RecordingService {
           manifest.snapshot.previewText = result.finalText.slice(-4096);
           delete manifest.snapshot.error;
           await this.commit(manifest);
-          // A retry's backups go only once the new result is committed.
+          // A retry's backups go only once the new result is committed; a
+          // leftover copy is cleaned up at the next start.
           for (const name of [PREVIOUS_RESULT, PREVIOUS_MANIFEST])
-            await rm(join(this.directory(id), name), { force: true });
+            await rm(join(this.directory(id), name), { force: true }).catch(() => {});
           for (const stream of manifest.snapshot.streams)
             this.chunks.delete(this.streamKey(id, stream.runID, stream.kind));
         });

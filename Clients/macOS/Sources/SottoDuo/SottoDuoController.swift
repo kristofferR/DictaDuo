@@ -472,6 +472,12 @@ final class SottoDuoController: ObservableObject {
                 // Health needs no token, so check it against an authenticated endpoint.
                 _ = try await probe.preferences()
                 guard !Task.isCancelled else { return }
+                // Work may have started on the current server while the check ran.
+                guard !isBusy, wisprFlowImportTask == nil else {
+                    errorMessage = "Finish dictation or the import before changing the connection."
+                    refreshServer()
+                    return
+                }
                 applyConnection(endpoint: endpoint, token: token, deviceName: deviceName)
             } catch {
                 guard let self, !Task.isCancelled else { return }
