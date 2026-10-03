@@ -600,6 +600,10 @@ final class SottoDuoController: ObservableObject {
                 recordingHistoryPosition = merged.sessions
             }
             hasMoreHistory = historyPosition != .end || recordingHistoryPosition != .end
+            // A selected take whose detail was invalidated above loads it again.
+            if let selected = selectedGenerationDetailID, generationDetails[selected] == nil {
+                loadGenerationDetail(selected)
+            }
         } catch is CancellationError {
         } catch let error as URLError where error.code == .cancelled {
             // A newer refresh superseded this one.
