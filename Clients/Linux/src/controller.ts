@@ -35,6 +35,11 @@ const notices = {
     "Recording stopped",
     "Something went wrong while recording, so the take was not saved. Try again.",
   ],
+  safety: [
+    "Dictation cancelled",
+    "The screen locked or the computer slept, so the take was not saved.",
+  ],
+  undo: ["Not pasted", "Press the dictation key within 4 seconds to paste it."],
 } as const satisfies Record<string, Notice>;
 /**
  * Decides whether a finished take is inserted. A cancelled take waits here until
@@ -385,6 +390,8 @@ export class Controller {
       take.activity.phase,
       take.activity,
     );
+    // Daemon-only setups have nothing else to offer the undo.
+    if (!this.feedbackVisible()) this.desktop.notify(...notices.undo);
   }
   private clearUndo() {
     clearTimeout(this.undoTimer);
@@ -401,13 +408,17 @@ export class Controller {
     if (take === this.foreground)
       this.announce("Saving to history", take.activity.phase, take.activity);
   }
-  /** Cancels every take, or only those not yet delivering. */
-  async cancelAll(includeDelivery = true): Promise<void> {
+  /**
+   * Cancels every take, or only those not yet delivering. `safety` is an automatic
+   * cancellation (lock, suspend, lost session monitor), which is reported.
+   */
+  async cancelAll(includeDelivery = true, safety = false): Promise<void> {
     const takes = [this.take, ...this.processing].filter(
       (take): take is Take =>
         take !== undefined &&
         (includeDelivery || !["delivering", "completed"].includes(take.activity.phase)),
     );
+    if (safety && takes.some((take) => !take.preview)) this.desktop.notify(...notices.safety);
     // Revoke every destination synchronously before waiting for server cleanup.
     await Promise.all(takes.map((take) => this.cancelOne(take)));
   }
@@ -529,6 +540,7 @@ export class Controller {
       if (!this.live(take)) return;
       if (["delivering", "completed"].includes(take.activity.phase)) return;
       if (slept || !unlocked) {
+        if (!take.preview) this.desktop.notify(...notices.safety);
         await this.cancelOne(take);
         return;
       }

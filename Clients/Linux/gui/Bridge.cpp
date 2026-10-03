@@ -52,7 +52,9 @@ Bridge::Bridge(bool preview, QObject *parent)
     m_snapshot = m_fixture.value("snapshot").toMap();
     m_connected = true;
   } else {
-    connect(&m_poll, &QTimer::timeout, this, [this] { request("snapshot"); });
+    connect(&m_poll, &QTimer::timeout, this, [this] {
+      request("snapshot", {{"feedbackVisible", m_feedbackVisible}});
+    });
     m_poll.start(500);
     request("snapshot");
   }

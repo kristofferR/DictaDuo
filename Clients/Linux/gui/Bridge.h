@@ -20,6 +20,8 @@ class Bridge : public QObject {
   Q_PROPERTY(QVariantMap colors READ colors NOTIFY themeChanged)
   Q_PROPERTY(QString themeNote READ themeNote NOTIFY themeChanged)
   Q_PROPERTY(QObject *desktop READ desktop CONSTANT)
+  // Whether the HUD or the Dictation page currently shows take progress.
+  Q_PROPERTY(bool feedbackVisible MEMBER m_feedbackVisible)
 public:
   explicit Bridge(bool preview, QObject *parent = nullptr);
   QVariantMap snapshot() const { return m_snapshot; }
@@ -58,6 +60,7 @@ private:
   bool m_preview = false;
   DesktopIntegration m_desktop;
   bool m_connected = false;
+  bool m_feedbackVisible = false;
   bool m_connectionChecked = false;
   bool m_hasConnected = false;
   QString m_theme;

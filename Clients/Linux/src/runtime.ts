@@ -75,11 +75,12 @@ export class ClientRuntime {
     this.shortcuts?.check.end();
     void this.current?.buttons.disarm().catch(() => {});
     // A take already delivering keeps its single insertion attempt.
-    void this.current?.controller.cancelAll(false).catch(() => {});
+    void this.current?.controller.cancelAll(false, true).catch(() => {});
   }
   gui(request: unknown): Promise<unknown> {
-    // The GUI polls its snapshot, so a recent request means progress is on screen.
-    this.guiSeenAt = Date.now();
+    // The GUI polls its snapshot and says whether take progress is on screen.
+    if (request && typeof request === "object" && "feedbackVisible" in request && request.feedbackVisible === true)
+      this.guiSeenAt = Date.now();
     if (
       request &&
       typeof request === "object" &&

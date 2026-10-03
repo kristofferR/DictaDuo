@@ -432,6 +432,20 @@ test("without a GUI, the start of recording is announced", async () => {
   f.controller.stop();
   await f.controller.settled();
 });
+test("without a GUI, the undo window and safety cancellations are announced", async () => {
+  const f = await fixture();
+  await record(f);
+  f.controller.feedbackVisible = () => false;
+  await Bun.sleep(300);
+  await f.controller.cancel();
+  expect(f.notices.map((notice) => notice.title)).toEqual(["Not pasted"]);
+  f.controller.closeUndo();
+  await f.controller.settled();
+  await record(f);
+  await f.controller.cancelAll(false, true);
+  await f.controller.settled();
+  expect(f.notices.map((notice) => notice.title)).toEqual(["Not pasted", "Recording", "Dictation cancelled"]);
+});
 test("uncertain admission never opens a fallback microphone", async () => {
   const f = await fixture();
   let calls = 0;

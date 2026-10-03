@@ -513,6 +513,12 @@ ApplicationWindow {
         }
     }
     Hud {
+        id: hud
         ui: app
+    }
+    Binding {
+        target: bridge
+        property: "feedbackVisible"
+        value: hud.visible || (app.visible && app.active && app.page === 0)
     }
 }
