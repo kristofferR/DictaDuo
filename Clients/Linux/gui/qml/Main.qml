@@ -57,10 +57,12 @@ ApplicationWindow {
     // Whether Start dictation can be offered, from the window or the tray.
     readonly property bool canStart: bridge.connected && serverReady && !snapshot.setupRequired && !shortcutBlocked && !microphoneTestActive
     // The window takes focus from the field being dictated into, so it steps aside first.
+    property bool windowStartPending: false
     function startFromWindow() {
         if (!canStart)
             return;
         app.hide();
+        windowStartPending = true;
         windowStart.restart();
     }
     Timer {
@@ -209,6 +211,8 @@ ApplicationWindow {
             app.wasConnected = bridge.connected;
         }
         function onReply(action, data) {
+            if (action === "start")
+                app.windowStartPending = false;
             if (action === "checkShortcut") {
                 app.shortcutCheckPending = false;
                 if (app.finishShortcutCheckAfterReply) {
@@ -249,6 +253,13 @@ ApplicationWindow {
                 app.notice = "Changes saved.";
         }
         function onFailed(action, message) {
+            // A window start that fails brings the window back, so its error is seen.
+            if (action === "start" && app.windowStartPending) {
+                app.windowStartPending = false;
+                app.show();
+                app.raise();
+                app.requestActivate();
+            }
             if (action === "test")
                 app.microphoneTestStarting = false;
             if (action === "checkShortcut") {
@@ -292,6 +303,13 @@ ApplicationWindow {
         running: app.visible && bridge.connected
         repeat: true
         onTriggered: app.refresh()
+    }
+    // The tray offers Start while hidden, so server readiness stays current there too.
+    Timer {
+        interval: 15000
+        running: !app.visible && bridge.connected
+        repeat: true
+        onTriggered: bridge.request("connection")
     }
     Timer {
         interval: 2000
