@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QColor>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -51,7 +52,9 @@ Bridge::Bridge(bool preview, QObject *parent)
     m_snapshot = m_fixture.value("snapshot").toMap();
     m_connected = true;
   } else {
-    connect(&m_poll, &QTimer::timeout, this, [this] { request("snapshot"); });
+    connect(&m_poll, &QTimer::timeout, this, [this] {
+      request("snapshot", {{"feedbackVisible", m_feedbackVisible}});
+    });
     m_poll.start(500);
     request("snapshot");
   }
@@ -316,4 +319,26 @@ void Bridge::previewPhase(const QString &phase) {
   activity["phase"] = phase;
   m_snapshot["activity"] = activity;
   emit snapshotChanged();
+}
+int Bridge::previewStateCount() const {
+  return m_preview ? m_fixture.value("states").toList().size() : 0;
+}
+/** Shows a named preview.json state over the sample snapshot and returns its
+ * name. A state's undoUntil counts milliseconds from now. */
+QString Bridge::applyPreviewState(int index) {
+  const auto states = m_fixture.value("states").toList();
+  if (!m_preview || index < 0 || index >= states.size())
+    return {};
+  const auto state = states.at(index).toMap();
+  m_snapshot = m_fixture.value("snapshot").toMap();
+  const auto overrides = state.value("snapshot").toMap();
+  for (auto it = overrides.cbegin(); it != overrides.cend(); ++it)
+    m_snapshot[it.key()] = it.value();
+  auto activity = m_snapshot.value("activity").toMap();
+  if (activity.contains("undoUntil"))
+    activity["undoUntil"] = double(QDateTime::currentMSecsSinceEpoch()) +
+                            activity.value("undoUntil").toDouble();
+  m_snapshot["activity"] = activity;
+  emit snapshotChanged();
+  return state.value("name").toString();
 }

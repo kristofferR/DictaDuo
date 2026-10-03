@@ -74,7 +74,7 @@ async function fixture(inference = new FakeInference()) {
   let deliveries = 0;
   let mode: "inserted" | "preview" | "uncertain" = "inserted";
   let deliveryGate: Promise<void> | undefined;
-  const notices: string[] = [];
+  const notices: { title: string; body?: string }[] = [];
   const desktop: Desktop = {
     unlocked: async () => unlocked,
     capture: async () => ({
@@ -86,8 +86,8 @@ async function fixture(inference = new FakeInference()) {
       },
     }),
     defaultInput: async () => ({ hostID: "desktop", id: "built-in" }),
-    notify: (value) => {
-      notices.push(value);
+    notify: (title, body) => {
+      notices.push({ title, body });
     },
   };
   const controller = new Controller(
@@ -96,6 +96,8 @@ async function fixture(inference = new FakeInference()) {
     { id: "desktop-client", name: "Omarchy" },
     { hostID: "desktop", mode: "automatic", priority: [{ hostID: "desktop", id: "dji" }] },
   );
+  // Most tests model a running GUI, which shows progress itself.
+  controller.feedbackVisible = () => true;
   cleanup.push(async () => {
     await controller.cancelAll();
     await controller.settled();
@@ -329,7 +331,124 @@ test("while another computer's take holds the server, a take says who is using i
   f.controller.start();
   await f.controller.settled();
   expect(f.controller.state).toBe("omarchy is busy with MacBook. Try again when it is free.");
+  expect(f.notices).toEqual([
+    {
+      title: "Microphone in use",
+      body: "MacBook is using the microphone on omarchy. Try again when it's free.",
+    },
+  ]);
   expect(f.starts).toEqual([]);
+});
+test("only outcomes that need attention notify; progress, a clean paste and a cancel do not", async () => {
+  const f = await fixture();
+  f.controller.start();
+  await until(() => f.controller.state.startsWith("recording"));
+  f.controller.stop();
+  await f.controller.settled();
+  f.controller.start();
+  await until(() => f.controller.state.startsWith("recording"));
+  await f.controller.cancel();
+  await f.controller.settled();
+  expect(f.notices).toEqual([]);
+  f.delivery("uncertain");
+  f.api.delivery = async () => {
+    throw new Error("Receipt offline");
+  };
+  const warn = spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    f.controller.start();
+    await until(() => f.controller.state.startsWith("recording"));
+    f.controller.stop();
+    await f.controller.settled();
+  } finally {
+    warn.mockRestore();
+  }
+  // The missing receipt is logged, not shown.
+  expect(f.notices).toEqual([
+    {
+      title: "Check the field",
+      body: "The paste couldn't be confirmed. If it's missing, copy it from the tray.",
+    },
+  ]);
+});
+test("a server falling back to local recognition marks the take as cloud unavailable", async () => {
+  const f = await fixture();
+  const events = f.api.events!.bind(f.api);
+  let fallback = false;
+  f.api.events = (id, signal, update) =>
+    events(id, signal, (snapshot) =>
+      update(
+        fallback
+          ? { ...snapshot, recognition: { provider: "whisper", fallbackReason: "Soniox is down." } }
+          : snapshot,
+      ),
+    );
+  f.controller.start();
+  await until(() => f.controller.activity.phase === "recording");
+  expect(f.controller.activity.cloudUnavailable).toBeFalsy();
+  fallback = true;
+  await until(() => {
+    f.level(0.5);
+    return f.controller.activity.cloudUnavailable === true;
+  });
+  expect(f.controller.activity.phase).toBe("recording");
+  f.controller.stop();
+  await f.controller.settled();
+  expect(f.notices).toEqual([]);
+});
+test("a fallback reported only by polling still marks the take", async () => {
+  const f = await fixture();
+  f.api.events = async () => {
+    throw new Error("Live stream unavailable");
+  };
+  const stop = f.api.stop.bind(f.api);
+  let fallback = false;
+  f.api.stop = async (...args) => {
+    const snapshot = await stop(...args);
+    fallback = true;
+    return { ...snapshot, recognition: { provider: "whisper", fallbackReason: "Soniox is down." } };
+  };
+  f.controller.start();
+  await until(() => f.controller.activity.phase === "recording");
+  f.controller.stop();
+  await until(() => fallback && f.controller.activity.cloudUnavailable === true);
+  await f.controller.settled();
+});
+test("a take that fails before recording does not promise saved audio", async () => {
+  const f = await fixture();
+  f.api.sources = async () => {
+    throw new Error("Server unavailable");
+  };
+  f.controller.start();
+  await f.controller.settled();
+  expect(f.notices.map((notice) => notice.title)).toEqual(["Couldn't start dictation"]);
+});
+test("without a GUI, the start of recording is announced", async () => {
+  const f = await fixture();
+  f.controller.feedbackVisible = () => false;
+  f.controller.start();
+  await until(() => f.controller.activity.phase === "recording");
+  expect(f.notices).toEqual([{ title: "Recording", body: "Speak now." }]);
+  f.controller.stop();
+  await f.controller.settled();
+});
+test("without a GUI, the undo window and safety cancellations are announced", async () => {
+  const f = await fixture();
+  await record(f);
+  f.controller.feedbackVisible = () => false;
+  await Bun.sleep(300);
+  await f.controller.cancel();
+  expect(f.notices.map((notice) => notice.title)).toEqual(["Not pasted"]);
+  f.controller.closeUndo();
+  await f.controller.settled();
+  await record(f);
+  await f.controller.cancelAll(false, true);
+  await f.controller.settled();
+  expect(f.notices.map((notice) => notice.title)).toEqual([
+    "Not pasted",
+    "Recording",
+    "Dictation cancelled",
+  ]);
 });
 test("uncertain admission never opens a fallback microphone", async () => {
   const f = await fixture();
@@ -417,6 +536,7 @@ test("a capture the server stops mid-take is kept in history, not discarded", as
   f.lose();
   await f.controller.settled();
   expect(f.controller.state).toContain("saved in history");
+  expect(f.notices.map((notice) => notice.title)).toEqual(["Recording stopped"]);
   expect(f.deliveries()).toBe(0);
   await until(async () => (await f.record(id)).status === "completed");
 });
@@ -466,6 +586,12 @@ test("recognition failing mid-take seals the capture instead of recording on", a
   f.controller.start();
   await f.controller.settled();
   expect(f.controller.state).toBe("Recognition failed.");
+  expect(f.notices).toEqual([
+    {
+      title: "Couldn't transcribe",
+      body: "The audio is saved. Open History to transcribe it again.",
+    },
+  ]);
   expect(f.deliveries()).toBe(0);
   expect((await f.record(stopped)).capture?.state).toBe("sealed");
 });
@@ -531,6 +657,9 @@ test("a lock during the delivery receipt preserves completed insertion", async (
   expect(f.deliveries()).toBe(1);
 });
 test("clipboard fallback and ambiguous insertion never retry delivery, even if receipt fails", async () => {
+  // A failed receipt is only logged.
+  const warn = spyOn(console, "warn").mockImplementation(() => {});
+  cleanup.push(async () => warn.mockRestore());
   for (const mode of ["preview", "uncertain"] as const) {
     const f = await fixture();
     f.delivery(mode);
@@ -662,7 +791,6 @@ test("button take pins DJI, ignores keyboard release, and reports a supported pr
   await f.controller.settled();
   expect(f.starts).toEqual(["dji"]);
   expect(f.deliveries()).toBe(1);
-  expect(f.notices.some((n) => n.includes("receipt could not"))).toBe(false);
   expect((await f.record(f.controller.result!.id)).delivery?.status).toBe("none");
 });
 
@@ -721,6 +849,24 @@ test("a shortcut take begun before disarm cannot reselect a replacement registra
   expect(f.service.buttons.state().selected).toBeUndefined();
 });
 
+test("Copy last keeps the latest real dictation across failed takes and microphone tests", async () => {
+  const f = await fixture();
+  await record(f);
+  f.controller.stop();
+  await f.controller.settled();
+  const dictated = f.controller.lastDictation;
+  expect(dictated?.delivery).toBe("inserted");
+  f.controller.start(undefined, true);
+  await until(() => f.controller.activity.phase === "recording");
+  f.controller.stop();
+  await f.controller.settled();
+  expect(f.controller.result?.delivery).toBe("preview");
+  await record(f);
+  await f.controller.cancelAll();
+  await f.controller.settled();
+  expect(f.controller.result).toBeUndefined();
+  expect(f.controller.lastDictation).toBe(dictated);
+});
 test("GUI microphone tests retain a preview without attempting desktop insertion or selecting a button destination", async () => {
   const f = await fixture();
   let selected = false;
@@ -1303,7 +1449,7 @@ test("a foreground capture or admission failure restores the earlier take's acti
       };
     try {
       await until(() => f.controller.start());
-      await until(() => f.notices.some((notice) => notice.startsWith("Capture failed")));
+      await until(() => f.notices.some((notice) => notice.title === "Couldn't start dictation"));
       await until(() => f.controller.state === "processing");
       expect(f.controller.busy).toBe(true);
       expect(f.controller.activity).toEqual({ ...activity, phase: "processing" });
@@ -1330,9 +1476,10 @@ test("an earlier preview notifies about recovery while the newer take owns the o
   );
   held.release();
   await f.controller.settled();
-  expect(f.notices).toContain(
-    "Earlier dictation: Text ready. Use sottoduo result or sottoduo copy.",
-  );
+  expect(f.notices).toContainEqual({
+    title: "Not pasted",
+    body: "Earlier dictation: Your text is ready. Copy it from the tray or SottoDuo.",
+  });
   expect(ids.delivered).toEqual(ids.started);
 });
 

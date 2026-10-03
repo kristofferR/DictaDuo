@@ -55,8 +55,10 @@ export function createGUIHandler(
         activity: controller.activity,
         feedback: controller.feedback.snapshot(),
         busy: controller.busy,
+        canStartTake: controller.canStartTake,
         message: controller.state,
         result: controller.result ?? null,
+        hasLastDictation: controller.lastDictation !== undefined,
         device: config.device,
         server: config.server,
         sources: config.sources,
@@ -85,6 +87,9 @@ export function createGUIHandler(
     if (!(await desktop.unlocked())) throw new ClientNotice("Unlock this computer first.");
     switch (request.action) {
       case "start":
+        // The window and tray start a new take; only the shortcut pastes a cancelled one.
+        // Settle the undo window only once a new take can actually start.
+        if (request.shortcut !== true && controller.canStartTake) controller.closeUndo();
         if (!controller.start())
           throw new ClientNotice("Finish dictation or the shortcut check first.");
         return {};
@@ -114,7 +119,7 @@ export function createGUIHandler(
         controller.undo();
         return {};
       case "copyLast": {
-        const result = controller.result;
+        const result = controller.lastDictation;
         if (!result) throw new ClientNotice("There is no dictation to copy yet.");
         await command(["wl-copy", "--type", "text/plain;charset=utf-8"], 1500, result.text);
         return {};

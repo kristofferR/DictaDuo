@@ -17,6 +17,7 @@ export class ClientRuntime {
   private changing = false;
   private mutations = 0;
   private generation = 0;
+  private guiSeenAt = 0;
   private shortcutQueue: Promise<unknown> = Promise.resolve();
   private readonly doubleTap = new DoubleTap();
   /** The take a pending tap was made during, so a pair cannot span one ending. */
@@ -40,6 +41,8 @@ export class ClientRuntime {
     controller = new Controller(api, this.desktop, config.device, config.sources),
   ) {
     controller.captureAllowed = () => !this.changing && !this.shortcuts?.blocked;
+    // The GUI polls every half second, so a closed GUI stops counting within moments.
+    controller.feedbackVisible = () => Date.now() - this.guiSeenAt < 1500;
     controller.output = this.output;
     controller.muteOutput = config.muteOutputWhileRecording;
     const buttons = new ButtonDestinationClient(
@@ -72,9 +75,17 @@ export class ClientRuntime {
     this.shortcuts?.check.end();
     void this.current?.buttons.disarm().catch(() => {});
     // A take already delivering keeps its single insertion attempt.
-    void this.current?.controller.cancelAll(false).catch(() => {});
+    void this.current?.controller.cancelAll(false, true).catch(() => {});
   }
   gui(request: unknown): Promise<unknown> {
+    // The GUI polls its snapshot and says whether take progress is on screen.
+    if (
+      request &&
+      typeof request === "object" &&
+      "feedbackVisible" in request &&
+      request.feedbackVisible === true
+    )
+      this.guiSeenAt = Date.now();
     if (
       request &&
       typeof request === "object" &&
@@ -110,6 +121,7 @@ export class ClientRuntime {
             activity: { phase: "idle" },
             busy: false,
             result: null,
+            hasLastDictation: false,
             message: "Set up your server connection in This computer.",
             server: this.settings.config?.server ?? "",
             device: this.settings.config?.device ?? { name: "This computer" },

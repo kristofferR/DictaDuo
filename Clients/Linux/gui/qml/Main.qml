@@ -52,11 +52,54 @@ ApplicationWindow {
     property bool microphoneTestStarting: false
     readonly property bool microphoneTestActive: microphoneTestStarting || (busy && activity.trigger === "test")
     property var feedback: snapshot.feedback || ({})
+    // The dictation shortcut, named on buttons, the overlay and the tray.
+    readonly property string dictationKey: (portalShortcuts.plasma ? portalShortcuts.trigger : shortcut.key) || ""
+    // Whether Start dictation can be offered, from the window or the tray.
+    readonly property bool canStart: bridge.connected && serverReady && !snapshot.setupRequired && !shortcutBlocked && !microphoneTestActive
+    // The window takes focus from the field being dictated into, so it steps aside first.
+    property bool windowStartPending: false
+    // The tray starts without showing the window; a failure brings it back.
+    function startFromTray() {
+        // An active window would be captured as the destination, so it steps aside too.
+        if (app.visible && app.active)
+            return startFromWindow();
+        windowStartPending = true;
+        bridge.request("start");
+    }
+    function startFromWindow() {
+        if (!canStart)
+            return;
+        app.hide();
+        windowStartPending = true;
+        windowStart.restart();
+    }
+    Timer {
+        id: windowStart
+        interval: 300
+        onTriggered: bridge.request("start")
+    }
+    readonly property string fallbackNote: activity.cloudUnavailable ? "Using local recognition (cloud unavailable)" : ""
+    // Whole seconds left to undo a cancel; steps once per second, no continuous repaint.
+    property int undoSeconds: 0
+    function updateUndo() {
+        undoSeconds = activity.undoUntil ? Math.max(0, Math.ceil((activity.undoUntil - Date.now()) / 1000)) : 0;
+    }
+    onActivityChanged: updateUndo()
+    Timer {
+        interval: 1000
+        repeat: true
+        running: app.activity.undoUntil > 0
+        onTriggered: app.updateUndo()
+    }
+    // One line for the tray menu, read when it opens or the snapshot changes.
+    readonly property string trayStatus: undoSeconds > 0 ? "Not pasted · saved to history" : activity.phase === "recording" ? "Listening · " + duration(feedback.elapsedSeconds) : busy ? messageFor(activity.phase) : connection
     function duration(seconds) {
         const value = Math.max(0, Math.floor(seconds || 0));
         return Math.floor(value / 60) + ":" + String(value % 60).padStart(2, "0");
     }
     property bool busy: snapshot.busy || false
+    // Earlier takes may still process; only a capturing take blocks the next one.
+    readonly property bool canStartTake: snapshot.canStartTake === undefined ? !busy : snapshot.canStartTake
     onBusyChanged: {
         if (!busy && bridge.connected && !snapshot.setupRequired)
             bridge.request("connection");
@@ -126,7 +169,7 @@ ApplicationWindow {
     }
     function messageFor(phase) {
         // A cancelled take keeps its recording or processing phase while it can be undone.
-        if (activity.undoUntil)
+        if (undoSeconds > 0)
             return "Not pasted";
         if (phase === "preparing")
             return "Starting microphone…";
@@ -176,6 +219,8 @@ ApplicationWindow {
             app.wasConnected = bridge.connected;
         }
         function onReply(action, data) {
+            if (action === "start")
+                app.windowStartPending = false;
             if (action === "checkShortcut") {
                 app.shortcutCheckPending = false;
                 if (app.finishShortcutCheckAfterReply) {
@@ -216,6 +261,14 @@ ApplicationWindow {
                 app.notice = "Changes saved.";
         }
         function onFailed(action, message) {
+            // A window start or a tray copy that fails brings the window back, so its error is seen.
+            if (action === "copyLast" || (action === "start" && app.windowStartPending)) {
+                if (action === "start")
+                    app.windowStartPending = false;
+                app.show();
+                app.raise();
+                app.requestActivate();
+            }
             if (action === "test")
                 app.microphoneTestStarting = false;
             if (action === "checkShortcut") {
@@ -259,6 +312,13 @@ ApplicationWindow {
         running: app.visible && bridge.connected
         repeat: true
         onTriggered: app.refresh()
+    }
+    // The tray offers Start while hidden, so server readiness stays current there too.
+    Timer {
+        interval: 15000
+        running: !app.visible && bridge.connected
+        repeat: true
+        onTriggered: bridge.request("connection")
     }
     Timer {
         interval: 2000
@@ -457,6 +517,12 @@ ApplicationWindow {
         }
     }
     Hud {
+        id: hud
         ui: app
+    }
+    Binding {
+        target: bridge
+        property: "feedbackVisible"
+        value: hud.visible || (app.visible && app.active && app.page === 0)
     }
 }

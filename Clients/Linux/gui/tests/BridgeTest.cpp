@@ -3,6 +3,7 @@
 #include <LayerShellQt/Shell>
 #include <QApplication>
 #include <QColor>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QJSValue>
@@ -51,6 +52,9 @@ private slots:
         property var activity: ({ phase: "idle", source: "No microphone in use" })
         property var feedback: ({})
         function duration(seconds) { return "0:00"; }
+        property int undoSeconds: 0
+        property string dictationKey: ""
+        property string fallbackNote: ""
         property var c: bridge.colors
         function messageFor(phase) { return "Dictation preview"; }
       }
@@ -461,7 +465,8 @@ private slots:
     QVariantMap state{{"busy", true},
                       {"activity", QVariantMap{{"phase", "recording"},
                                                {"trigger", "shortcut"},
-                                               {"source", "DJI Mic Mini"}}},
+                                               {"source", "DJI Mic Mini"},
+                                               {"cloudUnavailable", true}}},
                       {"feedback", feedback}};
     window->setProperty("snapshot", state);
     auto *clock = window->findChild<QQuickItem *>("recordingClock");
@@ -479,6 +484,10 @@ private slots:
     QVERIFY(hud);
     QVERIFY(hud->flags().testFlag(Qt::WindowDoesNotAcceptFocus));
     QVERIFY(hud->flags().testFlag(Qt::WindowTransparentForInput));
+    auto *subtitle = hud->findChild<QQuickItem *>("hudSubtitle");
+    QVERIFY(subtitle);
+    QCOMPARE(subtitle->property("text").toString(),
+             "2:25 · Using local recognition (cloud unavailable)");
     const QString hudCapture = qEnvironmentVariable("SOTTODUO_GUI_HUD_CAPTURE");
     if (!hudCapture.isEmpty()) {
       hud->show();
@@ -1182,6 +1191,73 @@ private slots:
     QVERIFY(!settings->property("pending").toBool());
     QCOMPARE(warnings.count(), 0);
   }
+  void takeActionsSitBesideTheHeadline() {
+    Bridge bridge(true);
+    QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty("bridge", &bridge);
+    engine.rootContext()->setContextProperty(
+        "portalShortcuts", QVariantMap{{"plasma", false}, {"supported", false}, {"trigger", ""}, {"message", ""}});
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings);
+    engine.load(QUrl::fromLocalFile(QString(SOTTODUO_QML_DIR) + "/Main.qml"));
+    QVERIFY(!engine.rootObjects().isEmpty());
+    auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+    QVERIFY(window);
+    auto item = [window](const char *name) {
+      return window->findChild<QQuickItem *>(name);
+    };
+    auto *start = item("startDictationButton");
+    auto *finish = item("finishDictationButton");
+    auto *cancel = item("cancelDictationButton");
+    auto *undo = item("undoDictationButton");
+    auto *headline = item("dictationHeadline");
+    auto *fallback = item("recognitionFallback");
+    QVERIFY(start && finish && cancel && undo && headline && fallback);
+    // Start waits for the server to report ready.
+    QTRY_VERIFY(start->isVisible() && start->isEnabled());
+    QVERIFY(!finish->isVisible() && !cancel->isVisible() && !undo->isVisible());
+    QSignalSpy failed(&bridge, &Bridge::failed);
+    QVERIFY(QMetaObject::invokeMethod(start, "clicked"));
+    QTRY_COMPARE(failed.count(), 1);
+    QCOMPARE(failed.first().at(0).toString(), "start");
+
+    QVariantMap activity{{"phase", "recording"},
+                         {"trigger", "shortcut"},
+                         {"cloudUnavailable", true}};
+    window->setProperty("snapshot",
+                        QVariantMap{{"busy", true}, {"activity", activity}});
+    QVERIFY(!start->isVisible());
+    QVERIFY(finish->isVisible() && cancel->isVisible());
+    QVERIFY(fallback->isVisible());
+    QCOMPARE(window->property("trayStatus").toString(), "Listening · 0:00");
+    QVERIFY(QMetaObject::invokeMethod(finish, "clicked"));
+    QTRY_COMPARE(failed.count(), 2);
+    QCOMPARE(failed.last().at(0).toString(), "stop");
+
+    // A pairing-button take ends on the button, so only Cancel is offered.
+    activity["trigger"] = "pairing";
+    window->setProperty("snapshot",
+                        QVariantMap{{"busy", true}, {"activity", activity}});
+    QVERIFY(!finish->isVisible() && cancel->isVisible());
+
+    activity["undoUntil"] = double(QDateTime::currentMSecsSinceEpoch()) + 3500;
+    window->setProperty("snapshot",
+                        QVariantMap{{"busy", true}, {"activity", activity}});
+    QCOMPARE(headline->property("text").toString(), "Not pasted");
+    QVERIFY(item("undoNote")->isVisible());
+    QVERIFY(undo->isVisible());
+    QVERIFY(!cancel->isVisible() && !fallback->isVisible());
+    QCOMPARE(undo->property("text").toString(), "Undo 4s");
+    QCOMPARE(window->property("trayStatus").toString(),
+             "Not pasted · saved to history");
+    // The countdown steps once per second and the button hides when it ends.
+    QTRY_COMPARE_WITH_TIMEOUT(undo->property("text").toString(),
+                              QString("Undo 3s"), 2000);
+    QVERIFY(QMetaObject::invokeMethod(undo, "clicked"));
+    QTRY_COMPARE(failed.count(), 3);
+    QCOMPARE(failed.last().at(0).toString(), "undo");
+    QTRY_VERIFY_WITH_TIMEOUT(!undo->isVisible(), 5000);
+    QCOMPARE(warnings.count(), 0);
+  }
   void activeMicrophoneTestCanFinishWhenServerIsBusy() {
     Bridge bridge(true);
     QQmlApplicationEngine engine;
@@ -1214,7 +1290,7 @@ private slots:
     QVERIFY(button->isEnabled());
     QCOMPARE(button->property("text").toString(), "Finish test");
     QSignalSpy failed(&bridge, &Bridge::failed);
-    // Showing Cancel changes the row layout; click its settled screen geometry.
+    // The button's text changed; click its settled screen geometry.
     QTest::qWait(50);
     const auto center =
         button->mapToScene(QPointF(button->width() / 2, button->height() / 2));

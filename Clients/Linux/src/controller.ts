@@ -6,6 +6,45 @@ import type { OutputMuter } from "./output.ts";
 /** The server rejects shorter recordings, so they are discarded outright. */
 const minimumTakeMS = 250;
 const undoWindowMS = 4000;
+type Notice = readonly [title: string, body: string];
+/**
+ * Desktop notifications are reserved for outcomes that need attention; progress,
+ * a clean paste and a cancel show in the overlay and window instead.
+ */
+const notices = {
+  uncertain: [
+    "Check the field",
+    "The paste couldn't be confirmed. If it's missing, copy it from the tray.",
+  ],
+  ready: ["Not pasted", "Your text is ready. Copy it from the tray or SottoDuo."],
+  transcription: [
+    "Couldn't transcribe",
+    "The audio is saved. Open History to transcribe it again.",
+  ],
+  microphone: [
+    "Recording stopped",
+    "The microphone stopped. Anything recorded is saved in History.",
+  ],
+  connection: [
+    "Dictation cancelled",
+    "Lost the connection to the server. Try again when it's back.",
+  ],
+  // Unsealed takes are discarded, so these never promise saved audio.
+  startup: ["Couldn't start dictation", "The microphone or server wasn't ready. Try again."],
+  discarded: [
+    "Recording stopped",
+    "Something went wrong while recording, so the take was not saved. Try again.",
+  ],
+  safety: [
+    "Dictation cancelled",
+    "The screen locked or the computer slept, so the take was not saved.",
+  ],
+  safetySaved: [
+    "Dictation cancelled",
+    "The screen locked or the computer slept, so nothing was pasted. The audio is saved in History.",
+  ],
+  undo: ["Not pasted", "Press the dictation key within 4 seconds to paste it."],
+} as const satisfies Record<string, Notice>;
 /**
  * Decides whether a finished take is inserted. A cancelled take waits here until
  * the user undoes the cancellation or its undo window closes.
@@ -49,7 +88,8 @@ export interface Desktop {
   unlocked(since?: number): Promise<boolean>;
   capture(): Promise<Destination>;
   defaultInput(hostID: string): Promise<SourceID | undefined>;
-  notify(message: string): void;
+  /** Shows one notification, replacing the previous one. */
+  notify(title: string, body?: string): void;
 }
 type Phase =
   | "idle"
@@ -71,6 +111,8 @@ type Activity = {
   undoUntil?: number;
   /** A cancelled take that was saved to history without inserting. */
   kept?: boolean;
+  /** The server fell back from cloud to local recognition for this take. */
+  cloudUnavailable?: boolean;
 };
 type Take = {
   owner: string;
@@ -85,7 +127,7 @@ type Take = {
   sealed: boolean;
   sealMayHaveSucceeded: boolean;
   /** Set when the server closed the capture itself; it keeps any recorded audio. */
-  interrupted?: string;
+  interrupted?: { state: string; notice: Notice };
   button?: { ticket: string; source: SourceID };
   completed?: boolean;
   preview: boolean;
@@ -130,6 +172,8 @@ export class Controller {
   private displayed?: Take;
   feedback = new RecordingFeedback();
   captureAllowed: () => boolean = () => true;
+  /** The GUI shows progress; without it, recording start is announced by notification. */
+  feedbackVisible: () => boolean = () => false;
   output?: Output;
   muteOutput = false;
   /** Background retries for a discard that failed transiently. */
@@ -153,12 +197,18 @@ export class Controller {
   get busy() {
     return this.take !== undefined || this.processing.length > 0;
   }
+  /** A new take can start once the previous one is sealed, while it still processes. */
+  get canStartTake() {
+    return this.take === undefined && this.captureAllowed();
+  }
   updatePreferences(preferences: SourcePreferences) {
     if (this.busy) throw new Error("Finish dictation before changing microphones.");
     this.preferences = preferences;
   }
   state = "idle";
   result?: Result;
+  /** The latest delivered dictation, kept across later takes; microphone tests excluded. */
+  lastDictation?: Result;
   constructor(
     private api: Pick<
       API,
@@ -218,7 +268,17 @@ export class Controller {
     const task: Promise<void> = this.run(take)
       .catch(async () => {
         if (!take.cancelled)
-          this.setState(take, "Capture failed. Any completed result remains in shared history.");
+          this.setState(
+            take,
+            "Capture failed. Any completed result remains in shared history.",
+            "failed",
+            // Once sealing began, the audio is on the server and only processing failed.
+            take.sealMayHaveSucceeded
+              ? notices.transcription
+              : take.recordingAt === undefined
+                ? notices.startup
+                : notices.discarded,
+          );
         await this.cancelTake(take);
       })
       .finally(() => {
@@ -336,6 +396,8 @@ export class Controller {
       take.activity.phase,
       take.activity,
     );
+    // Daemon-only setups have nothing else to offer the undo.
+    if (!this.feedbackVisible()) this.desktop.notify(...notices.undo);
   }
   private clearUndo() {
     clearTimeout(this.undoTimer);
@@ -344,7 +406,7 @@ export class Controller {
     this.activity = { ...this.activity, undoUntil: undefined };
   }
   /** Keeps the cancelled take in history only. */
-  private closeUndo() {
+  closeUndo() {
     const take = this.undoTake;
     if (!take) return;
     this.clearUndo();
@@ -352,15 +414,27 @@ export class Controller {
     if (take === this.foreground)
       this.announce("Saving to history", take.activity.phase, take.activity);
   }
-  /** Cancels every take, or only those not yet delivering. */
-  async cancelAll(includeDelivery = true): Promise<void> {
+  /**
+   * Cancels every take, or only those not yet delivering. `safety` is an automatic
+   * cancellation (lock, suspend, lost session monitor), which is reported.
+   */
+  async cancelAll(includeDelivery = true, safety = false): Promise<void> {
     const takes = [this.take, ...this.processing].filter(
       (take): take is Take =>
         take !== undefined &&
         (includeDelivery || !["delivering", "completed"].includes(take.activity.phase)),
     );
+    if (safety) this.notifySafety(takes);
     // Revoke every destination synchronously before waiting for server cleanup.
     await Promise.all(takes.map((take) => this.cancelOne(take)));
+  }
+  /** Reports an automatic cancellation; sealed audio is kept, an unsealed take is discarded. */
+  private notifySafety(takes: Take[]) {
+    const reported = takes.filter((take) => !take.preview);
+    if (!reported.length) return;
+    const lost = reported.some((take) => !take.sealed && !take.sealMayHaveSucceeded);
+    const [title, body] = lost ? notices.safety : notices.safetySaved;
+    this.desktop.notify(title, body);
   }
   async settled(): Promise<void> {
     while (this.tasks.size) await Promise.allSettled([...this.tasks]);
@@ -382,22 +456,21 @@ export class Controller {
   private announce(state: string, phase: Phase, activity: Activity = this.activity) {
     this.activity = { ...activity, phase, undoUntil: this.undoUntil };
     this.state = state;
-    this.desktop.notify(state);
   }
-  /** Only the foreground take drives the overlay; earlier takes only notify. */
-  private setState(take: Take, state: string, phase: Phase = "failed") {
+  /**
+   * Only the foreground take drives the overlay. A notice is shown for any take
+   * except a microphone test, whose outcome stays in the window.
+   */
+  private setState(take: Take, state: string, phase: Phase = "failed", notice?: Notice) {
     const shown = take === this.foreground;
     take.state = state;
     take.activity = { ...take.activity, phase };
     if (shown) {
       this.displayed = take;
       this.announce(state, phase, take.activity);
-    } else if (
-      phase === "failed" ||
-      state.startsWith("Insertion uncertain") ||
-      state.startsWith("Text ready")
-    )
-      this.desktop.notify(`Earlier dictation: ${state}`);
+    }
+    if (notice && !take.preview)
+      this.desktop.notify(notice[0], shown ? notice[1] : `Earlier dictation: ${notice[1]}`);
   }
   private async cancelOne(take: Take) {
     if (this.undoTake === take) this.clearUndo();
@@ -465,10 +538,10 @@ export class Controller {
    * The server closed the capture: it seals recorded audio archive-only or drops
    * an empty take, so this take ends without discarding the recording.
    */
-  private interrupt(take: Take, reason: string) {
+  private interrupt(take: Take, state: string, notice: Notice) {
     if (take.sealMayHaveSucceeded) return;
     take.sealed = true;
-    take.interrupted ??= reason;
+    take.interrupted ??= { state, notice };
   }
   private async watch(take: Take) {
     if (take.watching || !this.live(take)) return;
@@ -481,6 +554,7 @@ export class Controller {
       if (!this.live(take)) return;
       if (["delivering", "completed"].includes(take.activity.phase)) return;
       if (slept || !unlocked) {
+        this.notifySafety([take]);
         await this.cancelOne(take);
         return;
       }
@@ -491,7 +565,11 @@ export class Controller {
           const closed =
             error instanceof APIError && error.status === 409 && error.code === "capture_closed";
           if (closed && !take.released)
-            this.interrupt(take, "The microphone stopped. Any recorded audio is saved in history.");
+            this.interrupt(
+              take,
+              "The microphone stopped. Any recorded audio is saved in history.",
+              notices.microphone,
+            );
           else if (!take.sealed && !closed) throw error;
         }
       }
@@ -499,7 +577,7 @@ export class Controller {
       if (take.sealMayHaveSucceeded) return;
       if (this.live(take) && !["delivering", "completed"].includes(take.activity.phase)) {
         // Announce before cancelling, while the take still decides the overlay.
-        this.setState(take, "Connection lost; dictation cancelled.");
+        this.setState(take, "Connection lost; dictation cancelled.", "failed", notices.connection);
         await this.cancelTake(take);
       }
     } finally {
@@ -528,8 +606,16 @@ export class Controller {
       (source) => source.recordingFor && source.recordingFor.id !== this.device.id,
     )?.recordingFor;
     if (!options.length && holder) {
-      const host = sharingHost?.local === false ? sharingHost.name : "This computer";
-      this.setState(take, `${host} is busy with ${holder.name}. Try again when it is free.`);
+      const remote = sharingHost?.local === false ? sharingHost.name : undefined;
+      this.setState(
+        take,
+        `${remote ?? "This computer"} is busy with ${holder.name}. Try again when it is free.`,
+        "failed",
+        [
+          "Microphone in use",
+          `${holder.name} is using the microphone on ${remote ?? "this computer"}. Try again when it's free.`,
+        ],
+      );
       return;
     }
     for (const source of options.slice(0, 2)) {
@@ -584,6 +670,7 @@ export class Controller {
                 this.interrupt(
                   take,
                   `${update.error ?? "The microphone stopped."} The recording is saved in history.`,
+                  notices.microphone,
                 );
               else if (
                 update.capture.state === "recording" &&
@@ -594,9 +681,11 @@ export class Controller {
                 this.interrupt(
                   take,
                   update.error ?? "Recognition failed. The recording is saved in history.",
+                  notices.transcription,
                 );
                 void this.api.stop(record.id, take.owner).catch(() => {});
               }
+              this.noteRecognition(take, update);
               take.feedback.update(
                 update.capture.state === "recording" ? update.capture.peak : undefined,
                 update.previewText,
@@ -609,7 +698,13 @@ export class Controller {
             });
         }
         take.recordingAt = Date.now();
-        this.setState(take, `recording · ${source.name}`, "recording");
+        this.setState(
+          take,
+          `recording · ${source.name}`,
+          "recording",
+          // Daemon-only setups have no overlay to say when speech is captured.
+          this.feedbackVisible() || take.preview ? undefined : ["Recording", "Speak now."],
+        );
         break;
       } catch (error) {
         if (take.button || !(error instanceof APIError && error.allowsFallback)) throw error;
@@ -622,7 +717,7 @@ export class Controller {
     while (this.live(take) && !take.released && !take.interrupted) await Bun.sleep(40);
     if (!this.live(take)) return;
     if (take.interrupted) {
-      this.setState(take, take.interrupted);
+      this.setState(take, take.interrupted.state, "failed", take.interrupted.notice);
       return;
     }
     take.feedback.finish();
@@ -630,6 +725,7 @@ export class Controller {
     take.sealMayHaveSucceeded = true;
     const stopped = await this.api.stop(take.id, take.owner);
     this.verify(stopped, take);
+    this.noteRecognition(take, stopped);
     if (stopped.capture?.state !== "sealed") throw new Error("Capture was not sealed.");
     take.sealed = true;
     // The microphone has stopped; processing runs with the output restored.
@@ -672,6 +768,8 @@ export class Controller {
       try {
         detail = await this.api.recording(take.id);
         failingSince = undefined;
+        // The live stream is optional; polled snapshots also carry a fallback.
+        this.noteRecognition(take, detail.snapshot);
       } catch (error) {
         // The sealed take is durable on the server, so ride out a brief outage.
         if (error instanceof APIError && error.status < 500) throw error;
@@ -719,15 +817,22 @@ export class Controller {
     take.delivered();
     if (!this.live(take)) return;
     this.result = { id: take.id, text: record.insertionText, delivery };
-    this.setState(
-      take,
-      delivery === "inserted"
-        ? "Text inserted"
-        : delivery === "uncertain"
-          ? "Insertion uncertain. Check the field before copying."
-          : "Text ready. Use sottoduo result or sottoduo copy.",
-      "completed",
-    );
+    if (!take.preview) this.lastDictation = this.result;
+    if (delivery === "inserted") this.setState(take, "Text inserted", "completed");
+    else if (delivery === "uncertain")
+      this.setState(
+        take,
+        "Insertion uncertain. Check the field before copying.",
+        "completed",
+        notices.uncertain,
+      );
+    else
+      this.setState(
+        take,
+        "Text ready. Use sottoduo result or sottoduo copy.",
+        "completed",
+        notices.ready,
+      );
     take.completed =
       !take.preview && Boolean(record.insertionText.trim()) && delivery !== "uncertain";
     await this.api
@@ -737,8 +842,16 @@ export class Controller {
         delivery === "preview" ? "none" : delivery === "uncertain" ? "unconfirmed" : "inserted",
       )
       .catch(() => {
-        this.desktop.notify("Delivery receipt could not be saved; insertion will not be retried.");
+        console.warn("Delivery receipt could not be saved; insertion will not be retried.");
       });
+  }
+  /** Mirrors the Mac: local recognition with a fallback reason means cloud is unavailable. */
+  private noteRecognition(take: Take, update: Recording) {
+    const fallback =
+      update.recognition?.provider === "whisper" && !!update.recognition.fallbackReason;
+    if (fallback === !!take.activity.cloudUnavailable) return;
+    take.activity = { ...take.activity, cloudUnavailable: fallback };
+    if (take === this.foreground) this.activity = { ...this.activity, cloudUnavailable: fallback };
   }
   private verify(record: Recording, take: Take) {
     if (

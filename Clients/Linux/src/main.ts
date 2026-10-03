@@ -86,7 +86,7 @@ try {
         await desktop.monitorSession(
           () => runtime.unsafe(),
           (action) => {
-            void runtime.command(action).catch(() => desktop.notify("Shortcut failed."));
+            void runtime.command(action).catch(() => desktop.notify("Shortcut failed"));
           },
         );
         await runtime.shortcuts?.refresh();

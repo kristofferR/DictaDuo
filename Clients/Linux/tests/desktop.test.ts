@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { desktopUnlocked } from "../src/desktop.ts";
+import { desktopUnlocked, Notifier } from "../src/desktop.ts";
 const state = "LockedHint=no\nActive=yes\nType=wayland\nState=active\n";
 const lock = {
   locked: false,
@@ -39,4 +39,22 @@ test("only exact namespaced compositor events control dictation", async () => {
     "custom>>sottoduo:status",
   ])
     expect(shortcutEvent(event)).toBeUndefined();
+});
+
+test("each notification replaces the previous one instead of stacking", async () => {
+  const calls: string[][] = [];
+  const notifier = new Notifier(async (args) => {
+    calls.push(args);
+    return "41\n";
+  });
+  notifier.notify("Not pasted", "Your text is ready. Copy it from the tray or SottoDuo.");
+  notifier.notify("Check the field");
+  await notifier.settled();
+  expect(calls[0]!.some((arg) => arg.startsWith("--replace-id"))).toBe(false);
+  expect(calls[0]!.slice(-2)).toEqual([
+    "Not pasted",
+    "Your text is ready. Copy it from the tray or SottoDuo.",
+  ]);
+  expect(calls[1]).toContain("--replace-id=41");
+  expect(calls[1]!.at(-1)).toBe("Check the field");
 });
