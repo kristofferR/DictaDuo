@@ -404,8 +404,13 @@ final class SottoDuoController: ObservableObject {
     }
 
     func refreshServer() {
-        refreshTask?.cancel()
-        refreshTask = Task { [weak self] in await self?.checkServer(refreshData: true) }
+        // A check already running would make the new one return early, so wait for it.
+        let previous = refreshTask
+        previous?.cancel()
+        refreshTask = Task { [weak self] in
+            await previous?.value
+            await self?.checkServer(refreshData: true)
+        }
     }
 
     private func checkServer(refreshData: Bool) async {
