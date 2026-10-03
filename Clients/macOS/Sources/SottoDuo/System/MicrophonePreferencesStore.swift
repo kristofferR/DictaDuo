@@ -28,6 +28,8 @@ final class MicrophonePreferencesStore: ObservableObject {
     @Published private(set) var storageError: String?
     /// Sharing computers' names by host ID. Kept while offline so saved inputs still read naturally.
     @Published private(set) var hostNames: [String: String] = [:]
+    /// The connected server's computer name; `hostNames` also remembers earlier servers.
+    @Published private(set) var currentHostName: String?
     private var localDevices: [AudioInputDevice] = []
     private var remoteSources: [String: AudioSource] = [:]
     private var remoteDevices: [AudioInputDevice] = []
@@ -105,6 +107,7 @@ final class MicrophonePreferencesStore: ObservableObject {
 
     func updateRemote(_ sources: [AudioSource], server: String, host: SharingHost? = nil, deviceID: String? = nil) {
         self.deviceID = deviceID
+        if currentHostName != host?.name { currentHostName = host?.name }
         if let host {
             var names = hostNames
             for source in sources { names[source.identity.hostID] = host.name }
@@ -124,6 +127,7 @@ final class MicrophonePreferencesStore: ObservableObject {
 
     func clearRemote() {
         remoteSources = [:]; remoteDevices = []
+        currentHostName = nil
         rebuildDevices()
     }
 

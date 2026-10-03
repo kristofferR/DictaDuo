@@ -266,7 +266,7 @@ private struct MicrophoneSettingsView: View {
     }
 
     private var hint: String {
-        guard let host = store.hostNames.values.sorted().first else {
+        guard let host = store.currentHostName else {
             return "Drag a handle to reorder. Disconnected microphones keep their place."
         }
         return "Drag a handle to reorder. \(host) records one take at a time. While another computer is dictating with it, the next mic in your list is used."
@@ -540,7 +540,7 @@ private struct DJIButtonSection: View {
     }
 
     /// The server's name, from shared mic discovery.
-    private var serverName: String { store.hostNames.values.sorted().first ?? "the server" }
+    private var serverName: String { store.currentHostName ?? "the server" }
 
     var body: some View {
         let state = controller.remoteButtonState
