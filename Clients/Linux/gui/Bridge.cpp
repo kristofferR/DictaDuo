@@ -286,6 +286,9 @@ void Bridge::sendRequest(const QString &action, const QVariantMap &arguments,
     timeout = 70000;
   else if (action == "deleteHistory")
     timeout = 75000;
+  // Longer than the client's 15 s retry request, which may re-index archived audio.
+  else if (action == "retryHistory")
+    timeout = 20000;
   else if (action == "historyAudio" || action == "historyArtifact")
     timeout = 370000;
   timer->start(timeout);

@@ -20,6 +20,8 @@ ColumnLayout {
     // A retry request is in flight; `retryingID` is then followed until it settles.
     property bool retryStarting: false
     property string retryingID: ""
+    // Status reads that failed in a row while following a retry.
+    property int retryFailures: 0
     property string audioID: ""
     property string entryID: ""
     property string audioKind: ""
@@ -156,6 +158,7 @@ ColumnLayout {
     function startRetry(id, recordServer) {
         retryStarting = true;
         retryingID = id;
+        retryFailures = 0;
         message = "Starting to transcribe again…";
         bridge.request("retryHistory", {
             "id": id,
@@ -321,6 +324,8 @@ ColumnLayout {
                 root.records = root.records.map((r) => {
                     return r.id === data.record.id ? data.record : r;
                 });
+                if (requestID === "retry")
+                    root.retryFailures = 0;
                 if (requestID === "retry" && data.record.id === root.retryingID && ["completed", "failed", "cancelled"].includes(data.record.status) && !data.record.paused) {
                     root.retryingID = "";
                     root.message = data.record.error || "Transcribed again.";
@@ -363,9 +368,12 @@ ColumnLayout {
             if (!["history", "historyEntry", "retryHistory", "historyAudio", "historyArtifact", "deleteHistory"].includes(action))
                 return ;
 
-            if (action === "historyEntry" && requestID === "retry")
+            if (action === "historyEntry" && requestID === "retry") {
+                // A brief outage does not end the retry on the server; keep following it.
+                if (++root.retryFailures < 20)
+                    return ;
                 root.retryingID = "";
-            else if (action === "historyEntry")
+            } else if (action === "historyEntry")
                 root.entryID = "";
 
             if (action === "retryHistory") {

@@ -95,6 +95,8 @@ export async function serve(
                 socket.setTimeout(65_000, () => socket.destroy());
               else if (request.action === "deleteHistory")
                 socket.setTimeout(70_000, () => socket.destroy());
+              else if (request.action === "retryHistory")
+                socket.setTimeout(18_000, () => socket.destroy());
               else if (request.action === "saveShortcut")
                 socket.setTimeout(30_000, () => socket.destroy());
             }
