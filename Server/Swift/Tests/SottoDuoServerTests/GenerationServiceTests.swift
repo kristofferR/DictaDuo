@@ -53,6 +53,26 @@ final class GenerationServiceTests: XCTestCase {
         }
     }
 
+    func testReferenceServerShowsNorwegianOnlyToClientsThatUnderstandIt() async throws {
+        try await withFixture { service, _ in
+            var preferences = await service.getPreferences()
+            preferences.preferences.language = "no"
+            _ = try await service.updatePreferences(preferences)
+            let app = Application(router: SottoDuoHTTPServer.makeRouter(service: service))
+            try await app.test(.router) { client in
+                try await client.execute(uri: "/v1/preferences", method: .get, headers: [.init("Host")!: "localhost"]) { response in
+                    let text = String(decoding: response.body.readableBytesView, as: UTF8.self)
+                    XCTAssertTrue(text.contains("\"language\":\"auto\""))
+                }
+                try await client.execute(uri: "/v1/preferences", method: .get,
+                                         headers: [.init("Host")!: "localhost", .init("X-SottoDuo-Language")!: "language-v2"]) { response in
+                    let text = String(decoding: response.body.readableBytesView, as: UTF8.self)
+                    XCTAssertTrue(text.contains("\"language\":\"no\""))
+                }
+            }
+        }
+    }
+
     func testOutOfOrderListSurvivesUnsupportedProofreadingName() async throws {
         let source = "I have a list of things to do. One is book the room Three is pick up the keys. Two is send the invitation. Four is I need to get God, what's it called? I need to get the meeting room sorted so I can go there and figure out whether I can get this meeting room."
         let formatted = "I have a list of things to do.\n\n1. book the room\n3. pick up the keys\n2. send the invitation\n4. I need to get God, what's it called? I need to get the meeting room sorted so I can go there and figure out whether I can get this meeting room."

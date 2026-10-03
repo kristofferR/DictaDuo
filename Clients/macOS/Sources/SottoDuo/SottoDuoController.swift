@@ -924,6 +924,8 @@ final class SottoDuoController: ObservableObject {
                 guard endpoint == preferences.endpoint else { return }
                 sharedPreferences = saved
                 errorMessage = nil
+                // A saved change can start a model warm-up, which health then reports.
+                refreshServer()
             } catch { errorMessage = error.localizedDescription; refreshServer() }
         }
     }
