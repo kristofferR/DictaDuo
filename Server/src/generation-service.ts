@@ -284,11 +284,13 @@ export class GenerationService {
         record.updatedAt = now();
         delete record.progress;
         await this.cleanPartial(id);
-        if (Buffer.byteLength(JSON.stringify(record)) <= MAX_METADATA_BYTES)
+        if (Buffer.byteLength(JSON.stringify(record)) <= MAX_METADATA_BYTES) {
           await atomicPrivateWrite(
             join(this.directory(id), "metadata.json"),
             JSON.stringify(record),
           );
+          await this.discardPreviousOutput(id);
+        }
       }
       this.records.set(id, record);
       this.imports.indexRecord(record);
@@ -963,7 +965,10 @@ export class GenerationService {
         }
       } catch {}
     }
-    await rm(path, { force: true }).catch(() => {});
+  }
+  /** The backup goes only once the restored record is saved; a restart restores it again. */
+  private async discardPreviousOutput(id: string) {
+    await rm(join(this.directory(id), PREVIOUS_OUTPUT), { force: true }).catch(() => {});
   }
   private async savedContinuation(id: string): Promise<DictationContinuation | undefined> {
     try {
@@ -1150,7 +1155,10 @@ export class GenerationService {
     await this.restorePreviousOutput(record);
     record.updatedAt = now();
     this.processingControllers.get(record.id)?.abort();
-    await this.save(record).catch(() => this.publish(record));
+    await this.save(record).then(
+      () => this.discardPreviousOutput(record.id),
+      () => this.publish(record),
+    );
     await this.cleanPartial(record.id);
     return copy(record);
   }
@@ -1485,7 +1493,10 @@ export class GenerationService {
         if (failed.recognition) delete failed.recognition.partialText;
         failed.updatedAt = now();
         delete failed.progress;
-        await this.save(failed).catch(() => this.publish(failed));
+        await this.save(failed).then(
+          () => this.discardPreviousOutput(failed.id),
+          () => this.publish(failed),
+        );
       });
     } finally {
       await this.mutate(() => {
