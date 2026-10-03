@@ -5,8 +5,8 @@
 <h1 align="center">DictaDuo</h1>
 
 <p align="center">
-  <strong>Dictation for macOS and Linux.</strong><br>
-  Local Whisper or Soniox streaming, with shared microphones and history.
+  <strong>One dictation server for your Mac and your Linux desktop.</strong><br>
+  Shared models, dictionary, history, and microphone.
 </p>
 
 <p align="center">
@@ -15,87 +15,87 @@
 </p>
 
 <p align="center">
+  <a href="#why-dictaduo">Why DictaDuo</a> ·
   <a href="#build-from-source">Build from source</a> ·
-  <a href="#features">Features</a> ·
   <a href="#documentation">Documentation</a>
 </p>
 
 ---
 
-DictaDuo is a dictation app for macOS and Linux with Soniox streaming (with
-local Whisper fallback) and shared microphone support.
+Most dictation apps live on one computer. DictaDuo runs one dictation server
+for your Mac and your Linux desktop: the models, dictionary, cleanup rules,
+and history live on the server, and lightweight native apps record and type
+the text on each computer. Hold a key, speak, release, and the text appears
+where your cursor is, on whichever computer you are using.
 
-[Voxtype](https://github.com/peteonrails/voxtype) and
-[HyperWhisper](https://github.com/ray-amjad/hyperwhisper-app) already offer local
-transcription and text processing. DictaDuo instead uses a shared dictation
-server: the models, correction rules, settings, and history live together, with
-desktop clients handling recording and insertion. A laptop can use the desktop's
-GPU without keeping its own models loaded, and both computers use the same
-dictionary and cleanup behavior.
+## Why DictaDuo
 
-DictaDuo spans Mac and Linux with native Swift and Qt Quick clients. A microphone connected to the Linux server can serve either computer;
-the DJI button follows your selected destination. Switching computers does not
-mean moving the receiver or maintaining a second dictation setup.
+**One setup for two computers.** Teach the dictionary a name once and both
+computers spell it right. Both apps read the same history, with the original
+audio, raw recognition, and every cleanup decision. A laptop can use the
+desktop's GPU instead of keeping its own models loaded.
 
-## Features
+**One microphone for both.** Plug a DJI Mic receiver into the server. Either
+computer can record from it, and the transmitter's button starts dictation on
+whichever computer you choose. You never move the receiver or keep a second
+microphone setup.
 
-Besides the Mac app, Whisper/Qwen pipeline, Mac/Linux server, dictionaries,
-shared history, and Wispr Flow import, DictaDuo includes:
+**Fast cloud recognition with a local backup.** With a Soniox key, you see the
+words while you speak. If the cloud fails, the server transcribes the full
+recording with local Whisper instead. You can also stay fully local with
+Whisper or Parakeet v3. There is no account, subscription, or word quota.
 
-| Addition | What it does |
+**Cleanup that cannot rewrite you.** Qwen proofreads on your own server, then
+DictaDuo checks the result. Changed numbers, dropped negations, broken lists,
+or invented names are rejected, and the text from before proofreading is kept.
+History shows what changed and why.
+
+**A take is never lost.** Audio is saved to disk while you speak, so a
+network drop, app crash, or server restart does not lose a recording. There
+is no time limit. Cancelled takes are still transcribed: undo within four
+seconds to insert them, or find them in history. Any recording can be
+transcribed again.
+
+**Keep talking.** Start the next take while the last one is still
+processing; text is inserted in the order you spoke. Hold to talk or double
+tap to toggle. DictaDuo can mute your speakers while you record.
+
+**Bring your Wispr Flow history.** The Mac app imports past Wispr Flow
+dictations, text and audio, into the shared history.
+
+## What you need
+
+DictaDuo has three parts. They can all run on one Mac, or the server can run
+on another machine you reach over Tailscale or HTTPS.
+
+| Part | Runs on |
 | --- | --- |
-| **Linux desktop app** | Qt Quick client for Omarchy/Hyprland and experimental KDE Plasma Wayland, with history, microphone priorities, shared preferences, and a recording overlay. Light, dark, and Omarchy themes. |
-| **Soniox streaming** | Live transcript previews with optional local Whisper fallback if cloud recognition fails. Choose cloud, local, or automatic mode without switching apps. |
-| **Remote microphones** | Share a microphone connected to a Linux server between desktops without moving the receiver. Mac microphone priorities can mix local and remote inputs. |
-| **DJI button routing** | Start and stop dictation from the transmitter's linking button, with the receiver connected to Mac or Linux. Select which computer receives the text. |
+| **Server** | Apple Silicon Mac, or Linux x86_64/ARM64 with CPU or NVIDIA CUDA. Containers are available. |
+| **Mac app** | macOS 14+ on Apple Silicon. Swift and AppKit. |
+| **Linux app** | Omarchy/Hyprland, and experimental KDE Plasma on Wayland. Qt Quick, with light, dark, and Omarchy themes. |
 
-Linux insertion depends on application accessibility support; terminals use explicit
-copy and paste. Omarchy/Hyprland is the verified Linux desktop; Plasma integration
-still needs real-device validation, and its overlay placement is not guaranteed.
-Wispr Flow history import runs on the Mac, while either desktop can browse
-imported records.
+The apps always need a reachable server, even in local-only mode. On Linux,
+the server records the microphone through PipeWire, so a Linux desktop needs
+the server's PipeWire capture enabled, even when both run on the same
+computer. Text insertion on Linux depends on each application's accessibility
+support; terminals use copy and paste.
 
-## Recognition and privacy
+History, including original microphone audio, stays on the server until you
+delete it. Back up the server's data directory to keep it; see
+[storage](docs/architecture.md#storage).
 
-DictaDuo has a fully self-hosted Whisper and Qwen pipeline, with no required
-service account, subscription, or word quota. Soniox is an optional recognition
-provider alongside that local pipeline.
+### Recognition modes
 
 | Mode | How speech is recognized |
 | --- | --- |
-| **Automatic** | Uses Soniox when a server API key is configured, otherwise Whisper. A cloud failure falls back to Whisper using the complete recording. Requires local Whisper to be ready. |
-| **Cloud only** | Uses Soniox. Can accept recordings without local speech models; cloud failures are reported without local fallback. |
-| **Local only** | Uses Whisper on your server. No audio is sent to Soniox. |
+| **Automatic** | Soniox when a key is configured, otherwise local. A cloud failure falls back to local recognition of the complete recording. |
+| **Cloud only** | Soniox. Works without local speech models; failures are reported instead of falling back. |
+| **Local only** | Whisper or Parakeet v3 on your server. No audio leaves it. |
 
-Choose the mode under **Server preferences**. Soniox requires your own API key;
-configure it on the server using `SONIOX_API_KEY` or `--soniox-key-file`.
-Cloud recognition sends normalized speech audio and vocabulary hints to Soniox.
-Optional Qwen proofreading runs on your own server in every mode, so using cloud
-recognition does not require cloud cleanup too.
-
-Where [Voxtype's advanced cleanup](https://github.com/peteonrails/voxtype#post-processing-command-advanced)
-runs an external command, DictaDuo includes proofreading and validation in the
-pipeline. Qwen's output is checked for altered quantities, negations, list
-markers, and excessive rewriting. A response can be rejected even if the model
-completed successfully; the text from before proofreading is kept instead.
-These checks provide more control over unintended edits than a cleanup
-prompt alone. The full prompt and phrase replacements are editable, and Qwen can
-be disabled without losing dictionary corrections.
-
-The shared history also carries across to both desktops. For comparison,
-[HyperWhisper's vocabulary sync](https://github.com/ray-amjad/hyperwhisper-app/blob/main/mintlify-help/vocabulary-cloud-sync.mdx)
-uses iCloud for vocabulary while leaving transcripts, recordings, and other
-settings on each device. DictaDuo clients read the same server archive, including
-original text, cleanup outcomes, model details, and retained audio, across Mac
-and Linux.
-
-Original microphone audio is kept by default; **Keep original microphone audio**
-controls its retention for future takes. Back up the server data directory to
-preserve history. The desktop apps always need a reachable server, including in
-Local only mode.
-
-See [Soniox setup and fallback behavior](docs/soniox-streaming.md) and
-[server storage](docs/architecture.md#storage).
+Parakeet is faster and detects 25 European languages, but not Norwegian, and
+it ignores recognition vocabulary. Cloud recognition sends speech audio and
+vocabulary hints to Soniox; proofreading always stays on your server. See
+[Soniox setup](docs/soniox-streaming.md) and [server models](Server/README.md#models).
 
 ## Build from source
 
@@ -127,7 +127,7 @@ which has separate settings from the regular app.
 Grant **Microphone** and **Accessibility** permissions. The default hold-to-dictate
 key is <kbd>Right Option</kbd>, configurable under **This Mac**. Inputs are under
 **Microphone**; dictionaries and cleanup are under **Server preferences**.
-Recordings are limited to three minutes. For Fn/Globe shortcuts, set macOS
+For Fn/Globe shortcuts, set macOS
 **Keyboard → Press Globe key to → Do Nothing** if its action conflicts.
 
 For the regular app, run `./scripts/build-app.sh` and move `build/DictaDuo.app`
