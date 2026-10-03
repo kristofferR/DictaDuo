@@ -19,6 +19,13 @@ enum SottoDuoPalette {
     static let glassTint = adaptive(light: 0xF8F6F2, dark: 0x223949)
     static let success = Color(nsColor: .systemGreen)
     static let warning = Color(nsColor: .systemOrange)
+    // History status tints: ink on a matching wash, legible in both appearances.
+    static let okInk = adaptive(light: 0x2F6B45, dark: 0x9FDCB6)
+    static let okTint = adaptive(light: 0xE2EEE5, dark: 0x23392F)
+    static let warningInk = adaptive(light: 0x85550F, dark: 0xF0CF8F)
+    static let warningTint = adaptive(light: 0xF6EAD3, dark: 0x3B3324)
+    static let errorInk = adaptive(light: 0xA23B2C, dark: 0xF1A7A7)
+    static let errorTint = adaptive(light: 0xF5DEDA, dark: 0x40282B)
 
     private static func adaptive(light: UInt32, dark: UInt32, darkAlpha: CGFloat = 1,
                                  contrastLight: UInt32? = nil, contrastDark: UInt32? = nil) -> Color {

@@ -10,6 +10,7 @@ struct HistoryPage: View {
     @State private var copiedID: UUID?
     @State private var showingWisprFlowImport = false
     @State private var pendingDiscardID: UUID?
+    @State private var pendingRetryID: UUID?
 
     private var devices: [DeviceIdentity] {
         var seen = Set<String>()
@@ -97,9 +98,10 @@ struct HistoryPage: View {
             WisprFlowImportSheet(controller: controller)
                 .onDisappear { controller.closeWisprFlowImportSheet() }
         }
-        .confirmationDialog("Delete this dictation from the server?", isPresented: $confirmingDelete) {
+        .confirmationDialog(selected.map { isInterrupted($0) } == true ? "Discard this recording?"
+                                : "Delete this dictation from the server?", isPresented: $confirmingDelete) {
             if let selected {
-                Button("Delete dictation", role: .destructive) {
+                Button(isInterrupted(selected) ? "Discard recording" : "Delete dictation", role: .destructive) {
                     controller.errorMessage = nil
                     controller.deleteGeneration(selected.id)
                 }
@@ -115,6 +117,21 @@ struct HistoryPage: View {
                 Button("Discard recording", role: .destructive) { controller.discardPendingRecording(id) }
             }
             Button("Cancel", role: .cancel) { pendingDiscardID = nil }
+        }
+        .confirmationDialog("Transcribe this take again?", isPresented: Binding(
+            get: { pendingRetryID != nil }, set: { if !$0 { pendingRetryID = nil } }
+        )) {
+            if let id = pendingRetryID {
+                Button("Transcribe again") {
+                    controller.errorMessage = nil
+                    controller.retryGeneration(id)
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingRetryID = nil }
+        } message: {
+            let record = controller.generations.first { $0.id == pendingRetryID }
+            Text("The new transcript replaces the current one in History on every device. Nothing is pasted."
+                 + (record.map { " " + HistoryLabels.retryEngine($0, installed: controller.serverHealth?.recognitionEngines) } ?? ""))
         }
     }
 
@@ -134,7 +151,7 @@ struct HistoryPage: View {
                                     .accessibilityLabel("Discard saved recording")
                             }
                             HStack {
-                                Text(controller.pendingRecordingIsPaused(recording.id) ? "Paused" : "Saved on this Mac, waiting to upload")
+                                Text(controller.pendingRecordingIsPaused(recording.id) ? "Interrupted" : "Saved on this Mac, waiting to upload")
                                 Spacer()
                                 Text(sottoduoDuration(controller.pendingRecordingAudioSeconds(recording.id))).monospacedDigit()
                             }
@@ -157,29 +174,24 @@ struct HistoryPage: View {
                 }
             }
             ForEach(filtered) { generation in
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack {
-                        Text(generation.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
-                            .font(.caption)
-                        Spacer(minLength: 4)
-                        if generation.status != .completed {
-                            Image(systemName: generation.status == .failed ? "exclamationmark.circle" : "clock")
-                                .foregroundStyle(SottoDuoPalette.warning)
-                        }
-                    }
-                    Text(summary(generation))
-                        .font(.callout)
-                        .lineLimit(2)
-                        .frame(maxWidth: .infinity, minHeight: 34, alignment: .topLeading)
-                    Label(sourceLabel(generation),
-                          systemImage: generation.importedSource == nil ? "laptopcomputer" : "square.and.arrow.down")
-                        .font(.caption2)
+                let status = HistoryLabels.status(generation, interrupted: isInterrupted(generation))
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("\(generation.createdAt.formatted(.dateTime.month(.abbreviated).day().hour().minute())) · \(sourceLabel(generation))")
+                        .font(.caption)
                         .foregroundStyle(SottoDuoPalette.muted)
                         .lineLimit(1)
+                    Text(summary(generation))
+                        .font(.callout)
+                        .foregroundStyle(transcript(generation).isEmpty ? SottoDuoPalette.muted : SottoDuoPalette.ink)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                    if let status { HistoryChip(status: status) }
                 }
                 .padding(.vertical, 8)
                 .tag(generation.id)
-                .accessibilityLabel("\(sourceLabel(generation)), \(summary(generation))")
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel([sourceLabel(generation), summary(generation), status?.label]
+                    .compactMap { $0 }.joined(separator: ", "))
             }
         }
         .listStyle(.inset)
@@ -195,7 +207,11 @@ struct HistoryPage: View {
 
     @ViewBuilder private var detail: some View {
         if let selected {
-            VStack(alignment: .leading, spacing: 16) {
+            let interrupted = isInterrupted(selected)
+            // Failed and interrupted takes need a decision; a banner holds the explanation and actions.
+            let problem = interrupted || selected.status == .failed
+            let text = transcript(selected)
+            VStack(alignment: .leading, spacing: 14) {
                 HStack {
                     Text(selected.createdAt, format: .dateTime.month(.wide).day().hour().minute()).font(.headline)
                     Spacer()
@@ -206,45 +222,80 @@ struct HistoryPage: View {
                         .disabled(selected.finalText.isEmpty || controller.loadingGenerationDetails.contains(selected.id))
                         .help("Copy transcript")
                         .accessibilityLabel("Copy transcript")
-                    Button { confirmingDelete = true } label: { Image(systemName: "trash") }
-                        .disabled(!(selected.status.isTerminal || controller.isPausedRecording(selected.id)) || controller.serverHealth == nil)
-                        .help("Delete from server")
-                        .accessibilityLabel("Delete dictation")
+                    // Interrupted takes are discarded from their banner.
+                    if !interrupted {
+                        // A cached detail stays completed while a retry runs; deleting would abort it.
+                        Button { confirmingDelete = true } label: { Image(systemName: "trash") }
+                            .disabled(!selected.status.isTerminal || controller.serverHealth == nil
+                                      || controller.retryingGenerationIDs.contains(selected.id))
+                            .help("Delete from server")
+                            .accessibilityLabel("Delete dictation")
+                    }
                 }
                 HStack(spacing: 12) {
                     Label(sourceLabel(selected),
                           systemImage: selected.importedSource == nil ? "laptopcomputer" : "square.and.arrow.down")
-                    if selected.importedSource == nil {
-                        Text(controller.isPausedRecording(selected.id) ? "Paused on \(selected.device.name)" : statusLabel(selected.status))
-                    }
-                    if let delivery = deliveryLabel(selected.delivery?.status) { Text(delivery) }
                     if let sourceStatus = selected.importedSource?.sourceStatus, !sourceStatus.isEmpty {
                         Text("Wispr Flow: \(sourceStatus)")
                     }
-                    if selected.audioSeconds > 0 { Text(sottoduoDuration(selected.audioSeconds)).monospacedDigit() }
+                    if problem, savedSeconds(selected) > 0 { Text(sottoduoDuration(savedSeconds(selected))).monospacedDigit() }
                     let gapSeconds = controller.recordingGapSeconds(selected.id)
                     if gapSeconds > 0 { Text("\(sottoduoDuration(gapSeconds)) paused").monospacedDigit() }
                 }
                 .font(.caption)
                 .foregroundStyle(SottoDuoPalette.muted)
+                if problem {
+                    problemBanner(selected, interrupted: interrupted)
+                } else {
+                    if let status = HistoryLabels.status(selected, interrupted: false) {
+                        HStack(spacing: 8) {
+                            HistoryChip(status: status)
+                            if let detail = status.detail {
+                                Text(detail).font(.caption).foregroundStyle(SottoDuoPalette.muted)
+                            }
+                        }
+                    }
+                    let recognition = HistoryLabels.recognition(selected)
+                    if !recognition.isEmpty {
+                        Text(recognition)
+                            .font(.caption)
+                            .foregroundStyle(SottoDuoPalette.muted)
+                            .help([selected.speech, selected.proofreading].compactMap { $0.map { "\($0.modelID) · \($0.backend)" } }
+                                .joined(separator: "\n"))
+                    }
+                }
+                // A failed retry of a finished take keeps the transcript and says why.
+                if !problem, let error = selected.error {
+                    Text(error)
+                        .font(.callout)
+                        .foregroundStyle(HistoryTone.warning.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(HistoryTone.warning.tint))
+                        .accessibilityIdentifier("history.error-banner")
+                }
                 Divider()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
-                        if let error = selected.error {
-                            Text(error).foregroundStyle(SottoDuoPalette.warning)
-                        }
                         if controller.loadingGenerationDetails.contains(selected.id) {
                             ProgressView("Loading transcript…").controlSize(.small)
                         }
-                        Text(selected.status == .completed
-                            ? (selected.finalText.isEmpty ? "No transcript available." : selected.finalText)
-                            : (selected.previewText.isEmpty ? "Processing saved audio…" : selected.previewText))
-                            .font(.body)
-                            .lineSpacing(4)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        // A problem banner already says why there is no transcript.
+                        if !text.isEmpty || !problem {
+                            Text(!text.isEmpty ? text
+                                 : selected.status.isTerminal ? "No transcript available." : "Processing saved audio…")
+                                .font(.body)
+                                .lineSpacing(4)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        let cleanup = selected.importedSource == nil ? HistoryLabels.cleanup(selected.textProcessing?.status) : nil
                         if !selected.rawText.isEmpty && selected.rawText != selected.finalText {
-                            DisclosureGroup(selected.importedSource == nil ? "Original transcript" : "Wispr Flow's transcript") {
+                            DisclosureGroup(selected.importedSource == nil
+                                            ? "Original transcript" + (cleanup.map { " · \($0)" } ?? "")
+                                            : "Wispr Flow's transcript") {
                                 Text(selected.rawText)
                                     .font(.callout)
                                     .foregroundStyle(SottoDuoPalette.muted)
@@ -252,6 +303,8 @@ struct HistoryPage: View {
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(.top, 8)
                             }
+                        } else if let cleanup, selected.textProcessing?.reason == nil {
+                            Text(cleanup).font(.caption).foregroundStyle(SottoDuoPalette.muted)
                         }
                         if let source = selected.importedSource, !source.variantNames.isEmpty {
                             Text("Text versions from Wispr Flow: \(source.variantNames.joined(separator: ", "))")
@@ -263,7 +316,7 @@ struct HistoryPage: View {
                         }
                         if let processing = selected.textProcessing {
                             if let reason = processing.reason {
-                                Text("\(cleanupLabel(processing.status)): \(reason)").font(.caption).foregroundStyle(SottoDuoPalette.warning)
+                                Text("\(cleanup ?? "Text cleanup"): \(reason)").font(.caption).foregroundStyle(SottoDuoPalette.warning)
                             }
                             if processing.status == .rejected, let proposed = processing.proposedText {
                                 DisclosureGroup("Rejected cleanup") {
@@ -283,15 +336,9 @@ struct HistoryPage: View {
                 .frame(maxHeight: .infinity)
                 Divider()
                 HStack {
-                    if selected.canTranscribeAgain {
-                        let supported = controller.serverHealth?.generationRetry == true
-                        Button("Transcribe again") {
-                            controller.errorMessage = nil
-                            controller.retryGeneration(selected.id)
-                        }
-                        .disabled(!supported || controller.retryingGenerationIDs.contains(selected.id))
-                        .help(supported ? "Transcribe the saved audio again. Nothing is pasted."
-                              : "Update SottoDuo on the server to transcribe recordings again.")
+                    // Failed takes offer this in their banner.
+                    if controller.canTranscribeAgain(selected) && !problem {
+                        transcribeAgainButton(selected)
                     }
                     if selected.inferenceAudio != nil {
                         Button("Open audio") {
@@ -335,12 +382,6 @@ struct HistoryPage: View {
                 }
                 .frame(height: 28)
                 .disabled(controller.serverHealth == nil || !selected.status.isTerminal)
-                if let speech = selected.speech {
-                    Text("\(speech.modelID) · \(speech.backend)")
-                        .font(.caption2)
-                        .foregroundStyle(SottoDuoPalette.muted)
-                        .lineLimit(1)
-                }
             }
             .padding(.leading, 20)
             .padding(.top, 8)
@@ -351,51 +392,103 @@ struct HistoryPage: View {
         }
     }
 
-    private func statusLabel(_ status: GenerationStatus) -> String {
-        switch status {
-        case .receiving: "Recording"
-        case .queued: "Waiting to transcribe"
-        case .transcribing: "Transcribing"
-        case .proofreading: "Cleaning up text"
-        case .completed: "Done"
-        case .failed: "Transcription failed"
-        case .cancelled: "Cancelled"
+    private func problemBanner(_ selected: GenerationRecord, interrupted: Bool) -> some View {
+        let tone: HistoryTone = interrupted ? .warning : .error
+        let savedHere = isSavedHere(selected.id)
+        return VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(interrupted ? "Interrupted" : "Couldn't transcribe").fontWeight(.semibold)
+                Text(interrupted ? interruptedText(selected, savedHere: savedHere)
+                                 : selected.error ?? "No transcript was produced.")
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            .foregroundStyle(tone.ink)
+            if interrupted {
+                HStack {
+                    if savedHere {
+                        // Only the Mac that made the recording holds what is needed to finish it.
+                        Button("Finish") { controller.finishPendingRecording(selected.id) }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(!controller.canFinishPendingRecording(selected.id))
+                            .help("Stop here and transcribe what was saved.")
+                        if controller.pendingRecordingIsPaused(selected.id) {
+                            Button("Resume") { controller.resumePendingRecording(selected.id) }
+                                .disabled(!controller.canResumePendingRecording(selected.id))
+                                .help("Keep recording into this take.")
+                        }
+                        Button("Discard", role: .destructive) { pendingDiscardID = selected.id }
+                    } else if selected.capture == nil {
+                        // A server-microphone take needs its owner's secret, which only that computer holds.
+                        Button("Discard", role: .destructive) { confirmingDelete = true }
+                            .disabled(controller.serverHealth == nil)
+                    }
+                }
+                if savedHere {
+                    Text("Finish transcribes what was saved. Discard deletes it.")
+                        .font(.caption)
+                        .foregroundStyle(tone.ink)
+                }
+            } else if controller.canTranscribeAgain(selected) {
+                transcribeAgainButton(selected, prominent: true)
+            }
         }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(tone.tint))
     }
 
-    /// One label table for the delivery statuses both clients write.
-    private func deliveryLabel(_ status: String?) -> String? {
-        switch status {
-        case "inserted": "Pasted"
-        case "listUpdated": "List updated"
-        case "copied": "Copied"
-        case "unconfirmed": "Check the field"
-        case "failed": "Couldn't paste"
-        case "tested": "Microphone test"
-        case "cancelled", "none": "Not pasted"
-        default: nil
-        }
+    private func interruptedText(_ selected: GenerationRecord, savedHere: Bool) -> String {
+        let seconds = savedSeconds(selected)
+        let saved = seconds > 0 ? "\(sottoduoDuration(seconds)) of audio is saved." : "Its audio is saved."
+        let elsewhere = !savedHere && selected.device.id != controller.preferences.deviceID
+        return "The recording stopped before it finished. \(saved)" + (elsewhere ? " Finish it on \(selected.device.name)." : "")
     }
 
-    private func cleanupLabel(_ status: TextProcessingRecord.Status?) -> String {
-        switch status {
-        case .disabled: "Text cleanup off"
-        case .unavailable: "Text cleanup unavailable"
-        case .applied: "Text cleaned up"
-        case .unchanged: "Text cleanup made no changes"
-        case .failed: "Text cleanup failed"
-        case .rejected, .skipped, nil: "Text cleanup skipped"
+    @ViewBuilder private func transcribeAgainButton(_ selected: GenerationRecord, prominent: Bool = false) -> some View {
+        let supported = controller.serverHealth?.generationRetry == true
+        let retrying = controller.retryingGenerationIDs.contains(selected.id)
+        let asks = selected.asksBeforeTranscribingAgain
+        let button = Button(retrying ? "Transcribing…" : asks ? "Transcribe again…" : "Transcribe again") {
+            controller.errorMessage = nil
+            if asks { pendingRetryID = selected.id } else { controller.retryGeneration(selected.id) }
         }
+        .disabled(!supported || retrying || controller.serverHealth == nil)
+        .help(supported ? "Transcribe the saved audio again. Nothing is pasted."
+              : "Update SottoDuo on the server to transcribe recordings again.")
+        if prominent { button.buttonStyle(.borderedProminent) } else { button }
+    }
+
+    private func isInterrupted(_ generation: GenerationRecord) -> Bool { controller.isPausedRecording(generation.id) }
+
+    /// This Mac holds a local copy of the recording, so it can finish or resume it.
+    private func isSavedHere(_ id: UUID) -> Bool { controller.pendingRecordings.contains { $0.id == id } }
+
+    private func savedSeconds(_ generation: GenerationRecord) -> TimeInterval {
+        generation.audioSeconds > 0 ? generation.audioSeconds : controller.pendingRecordingAudioSeconds(generation.id)
     }
 
     private func sourceLabel(_ generation: GenerationRecord) -> String {
         generation.importedSource == nil ? generation.device.name : "Imported from Wispr Flow"
     }
 
+    private func transcript(_ generation: GenerationRecord) -> String {
+        generation.status == .completed || !generation.finalText.isEmpty ? generation.finalText : generation.previewText
+    }
+
     private func summary(_ generation: GenerationRecord) -> String {
         if !generation.previewText.isEmpty { return generation.previewText }
         if !generation.finalText.isEmpty { return generation.finalText }
-        return generation.importedSource == nil ? statusLabel(generation.status) : "No transcript recovered"
+        if generation.importedSource != nil { return "No transcript recovered" }
+        if isInterrupted(generation) {
+            let seconds = savedSeconds(generation)
+            return seconds > 0 ? "\(sottoduoDuration(seconds)) of audio saved" : "Audio saved"
+        }
+        switch generation.status {
+        case .failed: return "No transcript"
+        case .completed, .cancelled: return "No speech"
+        case .receiving, .queued, .transcribing, .proofreading: return "No transcript yet"
+        }
     }
 
     private func sourceFileLabel(_ filename: WisprFlowArtifactName) -> String {
@@ -408,18 +501,59 @@ struct HistoryPage: View {
         }
     }
 
-    private func hintDetails(_ title: String, hints: ModelHintUsage) -> some View {
+    @ViewBuilder private func hintDetails(_ title: String, hints: ModelHintUsage) -> some View {
         // A zero budget means the engine has no vocabulary prompting at all.
-        DisclosureGroup(hints.tokenBudget == 0 ? "\(title): not used by this engine"
-                                               : "\(title): \(hints.omittedTerms.count) terms did not fit") {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Used: \(hints.includedTerms.isEmpty ? "None" : hints.includedTerms.joined(separator: ", "))")
-                Text("Did not fit: \(hints.omittedTerms.joined(separator: ", "))")
+        if hints.tokenBudget == 0 {
+            Text("Vocabulary not used by this engine").font(.caption).foregroundStyle(SottoDuoPalette.muted)
+        } else {
+            DisclosureGroup("\(title): \(hints.omittedTerms.count) terms did not fit") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Used: \(hints.includedTerms.isEmpty ? "None" : hints.includedTerms.joined(separator: ", "))")
+                    Text("Did not fit: \(hints.omittedTerms.joined(separator: ", "))")
+                }
+                .font(.caption)
+                .foregroundStyle(SottoDuoPalette.muted)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .font(.caption)
-            .foregroundStyle(SottoDuoPalette.muted)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct HistoryChip: View {
+    let status: HistoryStatus
+
+    var body: some View {
+        Text(status.label)
+            .font(.caption.weight(.semibold))
+            .lineLimit(1)
+            .foregroundStyle(status.tone.ink)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(status.tone.tint))
+            .overlay { if status.tone == .accent { Capsule().strokeBorder(SottoDuoPalette.line) } }
+    }
+}
+
+private extension HistoryTone {
+    var ink: Color {
+        switch self {
+        case .ok: SottoDuoPalette.okInk
+        case .warning: SottoDuoPalette.warningInk
+        case .error: SottoDuoPalette.errorInk
+        case .neutral: SottoDuoPalette.muted
+        case .accent: SottoDuoPalette.ink
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .ok: SottoDuoPalette.okTint
+        case .warning: SottoDuoPalette.warningTint
+        case .error: SottoDuoPalette.errorTint
+        // Translucent, so it stays visible on selected and hovered rows.
+        case .neutral: SottoDuoPalette.muted.opacity(0.16)
+        case .accent: .clear
         }
     }
 }
@@ -593,12 +727,5 @@ private struct WisprFlowImportSheet: View {
             Button("Close") { dismiss() }
             Button("Try again") { controller.prepareWisprFlowImport() }
         }
-    }
-}
-
-private extension GenerationRecord {
-    /// Sealed audio outlives a failed or cancelled run on the server.
-    var canTranscribeAgain: Bool {
-        importedSource == nil && inferenceAudio != nil && (status == .failed || status == .cancelled)
     }
 }

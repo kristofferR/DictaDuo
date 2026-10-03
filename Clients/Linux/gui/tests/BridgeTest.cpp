@@ -821,7 +821,8 @@ private slots:
     window->setProperty("page",1);
     auto *page = window->findChild<QQuickItem *>("historyPage");
     QVERIFY(page);
-    QTRY_COMPARE(page->property("records").toList().size(), 3);
+    const int listed = items.size() + 1;
+    QTRY_COMPARE(page->property("records").toList().size(), listed);
     QTRY_VERIFY(olderReads > 0);
     QTRY_VERIFY(!page->property("loading").toBool());
     QCOMPARE(page->property("selectedID").toString(), "");
@@ -848,7 +849,7 @@ private slots:
     QCOMPARE(page->property("selectedID").toString(),"preview-2");
     auto *list = page->findChild<QQuickItem *>("historyList");
     QVERIFY(list);
-    QCOMPARE(list->property("count").toInt(),3);
+    QCOMPARE(list->property("count").toInt(),listed);
     auto *handle = window->findChild<QQuickItem *>("historyResizeHandle");
     QVERIFY(handle);
     const auto originalWidth = list->width();
@@ -877,7 +878,7 @@ private slots:
     QCOMPARE(deleted["id"].toString(),"preview");
     QTRY_VERIFY(!page->property("loading").toBool());
     QCOMPARE(page->property("selectedID").toString(),"preview-2");
-    QTRY_COMPARE(list->property("count").toInt(),2);
+    QTRY_COMPARE(list->property("count").toInt(),listed - 1);
     QVERIFY(QMetaObject::invokeMethod(page,"filterSource",Q_ARG(QVariant,"wispr-flow")));
     QTRY_COMPARE(requestedSource, "wispr-flow");
     QTRY_VERIFY(!page->property("loading").toBool());
@@ -898,6 +899,123 @@ private slots:
     QVERIFY(!page->property("loading").toBool());
     QCOMPARE(reads, beforeLegacy + 2);
     QCOMPARE(warnings.count(),0);
+  }
+  void historyShowsStatusAndTranscribesAgain() {
+    QTemporaryDir directory;
+    qputenv("XDG_RUNTIME_DIR", directory.path().toUtf8());
+    QVERIFY(QDir().mkpath(directory.path() + "/sottoduo-client"));
+    QLocalServer server;
+    QVERIFY(server.listen(directory.path() + "/sottoduo-client/control.sock"));
+    QFile fixture(":/qt/qml/SottoDuo/preview.json");
+    QVERIFY(fixture.open(QIODevice::ReadOnly));
+    auto sample = QJsonDocument::fromJson(fixture.readAll()).object();
+    const auto items = sample["history"].toObject()["items"].toArray();
+    QStringList retried;
+    QJsonObject settled;
+    connect(&server, &QLocalServer::newConnection, &server, [&] {
+      auto *socket = server.nextPendingConnection();
+      connect(socket, &QLocalSocket::readyRead, socket, [&, socket] {
+        if (!socket->canReadLine()) return;
+        const auto request = QJsonDocument::fromJson(socket->readLine()).object();
+        const auto action = request["action"].toString();
+        const QJsonValue serverURL = sample["snapshot"].toObject().value("server");
+        auto data = sample.value(action);
+        if (action == "history") {
+          data = QJsonObject{{"items", items}, {"queryID", request["queryID"]}, {"server", serverURL}};
+        } else if (action == "retryHistory") {
+          const QString id = request.value("id").toString();
+          retried << id;
+          QJsonObject record;
+          for (const auto &item : items)
+            if (item.toObject().value("id").toString() == id) record = item.toObject();
+          settled = record;
+          settled["status"] = "completed";
+          // A failed retry of a finished take keeps it and says why.
+          settled["error"] = id == "preview"
+              ? QJsonValue("Transcribing again failed: The engine stopped. The previous transcript is kept.")
+              : QJsonValue();
+          record["status"] = "queued";
+          data = QJsonObject{{"record", record}, {"server", serverURL}};
+        } else if (action == "historyEntry") {
+          data = QJsonObject{{"record", settled}, {"server", serverURL}};
+        }
+        socket->write(QJsonDocument(QJsonObject{{"ok",true},{"data",data}}).toJson(QJsonDocument::Compact) + '\n');
+      });
+    });
+    Bridge bridge(false);
+    QTRY_VERIFY(bridge.connected());
+    QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty("bridge", &bridge);
+    engine.rootContext()->setContextProperty(
+        "portalShortcuts", QVariantMap{{"plasma", false}, {"supported", false}, {"trigger", ""}, {"message", ""}});
+    QSignalSpy warnings(&engine, &QQmlEngine::warnings);
+    engine.load(QUrl::fromLocalFile(QString(SOTTODUO_QML_DIR) + "/Main.qml"));
+    QVERIFY(!engine.rootObjects().isEmpty());
+    auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+    QVERIFY(window);
+    window->setProperty("page", 1);
+    auto *page = window->findChild<QQuickItem *>("historyPage");
+    QVERIFY(page);
+    QTRY_COMPARE(page->property("records").toList().size(), items.size());
+    QTRY_VERIFY(page->property("retrySupported").toBool());
+    auto *chip = page->findChild<QQuickItem *>("historyDetailChip");
+    auto *recognition = page->findChild<QQuickItem *>("historyRecognition");
+    auto *banner = page->findChild<QQuickItem *>("historyBanner");
+    auto *bannerText = page->findChild<QQuickItem *>("historyBannerText");
+    auto *bannerRetry = page->findChild<QQuickItem *>("bannerRetryHistory");
+    auto *retry = page->findChild<QQuickItem *>("retryHistory");
+    auto *discard = page->findChild<QQuickItem *>("discardHistory");
+    auto *remove = page->findChild<QQuickItem *>("deleteHistory");
+    auto *dialog = window->findChild<QObject *>("retryHistoryDialog");
+    QVERIFY(chip && recognition && banner && bannerText && bannerRetry && retry && discard && remove && dialog);
+    auto label = [&] { return chip->property("status").toMap()["label"].toString(); };
+
+    page->setProperty("selectedID", "preview");
+    QCOMPARE(label(), QString("Pasted"));
+    QCOMPARE(recognition->property("text").toString(), QString("Recognized with cloud · English · 0:08"));
+    QVERIFY(!banner->isVisible());
+    QCOMPARE(retry->property("text").toString(), QString("Transcribe again…"));
+    QVERIFY(QMetaObject::invokeMethod(retry, "clicked"));
+    QVERIFY(dialog->property("visible").toBool());
+    QVERIFY(dialog->property("engine").toString().contains("Whisper, language Detect automatically"));
+    QVERIFY(retried.isEmpty());
+    auto *confirm = window->findChild<QQuickItem *>("confirmHistoryRetry");
+    QVERIFY(confirm);
+    QVERIFY(QMetaObject::invokeMethod(confirm, "clicked"));
+    QTRY_COMPARE(retried, QStringList{"preview"});
+    QTRY_VERIFY(page->property("message").toString().startsWith("Transcribing again failed"));
+    QCOMPARE(page->property("retryingID").toString(), QString());
+    auto *errorBanner = page->findChild<QQuickItem *>("historyErrorBanner");
+    QVERIFY(errorBanner && errorBanner->property("visible").toBool());
+    QCOMPARE(label(), QString("Pasted"));
+
+    page->setProperty("selectedID", "preview-cancelled");
+    QCOMPARE(label(), QString("Not pasted"));
+    QCOMPARE(recognition->property("text").toString(), QString("Recognized locally (cloud unavailable) · Norwegian · 0:05"));
+
+    page->setProperty("selectedID", "preview-test");
+    QCOMPARE(label(), QString("Test (no paste)"));
+
+    page->setProperty("selectedID", "preview-failed");
+    QVERIFY(banner->isVisible());
+    QVERIFY(bannerText->property("text").toString().contains("stopped responding"));
+    QVERIFY(bannerRetry->isVisible());
+    QVERIFY(!retry->isVisible());
+    QVERIFY(QMetaObject::invokeMethod(bannerRetry, "clicked"));
+    QVERIFY(!dialog->property("visible").toBool());
+    QTRY_COMPARE(retried, (QStringList{"preview", "preview-failed"}));
+    QTRY_VERIFY(page->property("retryingID").toString().isEmpty());
+    QCOMPARE(page->property("message").toString(), QString("Transcribed again."));
+
+    page->setProperty("selectedID", "preview-interrupted");
+    QVERIFY(banner->isVisible());
+    QCOMPARE(bannerText->property("text").toString(),
+             QString("The recording stopped before it finished. 0:31 of audio is saved. Finish it on MacBook."));
+    QVERIFY(!bannerRetry->isVisible());
+    QVERIFY(!retry->isVisible());
+    QVERIFY(discard->isVisible());
+    QVERIFY(!remove->isVisible());
+    QCOMPARE(warnings.count(), 0);
   }
   void processingDraftsSurviveConflictsAndNavigation() {
     QTemporaryDir directory;

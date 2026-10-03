@@ -576,7 +576,13 @@ final class SottoDuoController: ObservableObject {
                 from: newPosition)
             let fetched = merged.items
             let fetchedIDs = Set(fetched.map(\.id))
-            for snapshot in recordings.items { recordingSnapshots[snapshot.id] = snapshot }
+            for snapshot in recordings.items {
+                // A take transcribed again elsewhere stays completed but has a new revision.
+                if let cached = recordingSnapshots[snapshot.id], cached.revision != snapshot.revision {
+                    generationDetails[snapshot.id] = nil
+                }
+                recordingSnapshots[snapshot.id] = snapshot
+            }
             for item in fetched where generationDetails[item.id]?.status != item.status {
                 generationDetails[item.id] = nil
             }
@@ -594,6 +600,10 @@ final class SottoDuoController: ObservableObject {
                 recordingHistoryPosition = merged.sessions
             }
             hasMoreHistory = historyPosition != .end || recordingHistoryPosition != .end
+            // A selected take whose detail was invalidated above loads it again.
+            if let selected = selectedGenerationDetailID, generationDetails[selected] == nil {
+                loadGenerationDetail(selected)
+            }
         } catch is CancellationError {
         } catch let error as URLError where error.code == .cancelled {
             // A newer refresh superseded this one.
@@ -615,6 +625,7 @@ final class SottoDuoController: ObservableObject {
         let endpoint = preferences.endpoint
         let source = historySourceFilter
         loadingGenerationDetails.insert(id)
+        let revision = recordingSnapshots[id]?.revision
         Task { [weak self] in
             guard let self else { return }
             defer { loadingGenerationDetails.remove(id) }
@@ -622,6 +633,12 @@ final class SottoDuoController: ObservableObject {
                 let value = try await client().materializedRecording(id)
                 guard selectedGenerationDetailID == id, endpoint == preferences.endpoint,
                       source == historySourceFilter, !Task.isCancelled else { return }
+                // The take changed while loading (a retry elsewhere): this response may be stale.
+                guard recordingSnapshots[id]?.revision == revision else {
+                    loadingGenerationDetails.remove(id)
+                    loadGenerationDetail(id)
+                    return
+                }
                 // Keep only the selected full transcript: long sessions must not
                 // accumulate in memory while browsing the compact history list.
                 if value.status == .completed { generationDetails = [id: value] }
@@ -965,6 +982,19 @@ final class SottoDuoController: ObservableObject {
     }
 
     /// A long recording paused before it finished; only the computer that made it can resume it.
+    /// The server retries a recording session only once its capture has fully stopped.
+    func isStillRecording(_ id: UUID) -> Bool {
+        guard let state = recordingSnapshots[id]?.captureState else { return false }
+        return state == .recording || state == .interrupted
+    }
+
+    /// Whether History offers Transcribe again for this take on the connected server.
+    func canTranscribeAgain(_ record: GenerationRecord) -> Bool {
+        record.canTranscribeAgain && !isStillRecording(record.id)
+            // Finished takes need a server that lists the addition.
+            && (record.status != .completed || serverHealth?.features?.contains("retry-completed") == true)
+    }
+
     func isPausedRecording(_ id: UUID) -> Bool {
         guard let snapshot = recordingSnapshots[id] else { return false }
         return snapshot.captureState == .interrupted && snapshot.processingState != .completed
@@ -1102,8 +1132,9 @@ final class SottoDuoController: ObservableObject {
         take.gate.decide(false)
     }
 
-    /// Re-runs transcription on a failed or cancelled recording's saved audio.
-    /// The result lands in history only; nothing is pasted.
+    /// Re-runs transcription on a finished, failed or cancelled recording's saved audio.
+    /// The result lands in history only; nothing is pasted. A failed retry of a
+    /// finished take keeps its transcript and reports why in `error`.
     func retryGeneration(_ id: UUID) {
         // One retry per recording at a time; a second would be rejected and
         // leave an error over the first one's result.
@@ -1124,6 +1155,7 @@ final class SottoDuoController: ObservableObject {
                     generationDetails[id] = nil
                     if settled.processingState != .completed { errorMessage = settled.error ?? "Transcription failed again." }
                     else {
+                        if let error = settled.error { errorMessage = error }
                         // The server now holds the result; a local copy left from the
                         // failed run is redundant, and discarding it would erase both.
                         if let spool = pendingSpools[id] {
@@ -1142,7 +1174,9 @@ final class SottoDuoController: ObservableObject {
                         await self?.replaceGeneration(record)
                     }
                     replaceGeneration(final)
-                    if final.status != .completed { errorMessage = final.error ?? "Transcription failed again." }
+                    if final.status != .completed || final.error != nil {
+                        errorMessage = final.error ?? "Transcription failed again."
+                    }
                 }
             } catch { errorMessage = error.localizedDescription }
             refreshServer()

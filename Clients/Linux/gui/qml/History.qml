@@ -17,6 +17,15 @@ ColumnLayout {
     property bool retriedRead: false
     property bool append: false
     property bool deleting: false
+    // A retry request is in flight; `retryingID` is then followed until it settles.
+    property bool retryStarting: false
+    property string retryingID: ""
+    // The server `retryingID` belongs to; a reconnect to the same server keeps following it.
+    property string retryServer: ""
+    // Starting a retry ignores detail loads sent before it, which carry the old transcript.
+    property int entryEpoch: 0
+    // Status reads that failed in a row while following a retry.
+    property int retryFailures: 0
     property string audioID: ""
     property string entryID: ""
     property string audioKind: ""
@@ -52,8 +61,123 @@ ColumnLayout {
     readonly property var selected: filtered.find((r) => {
         return r.id === selectedID;
     }) || null
-    readonly property bool acting: deleting || audioID.length > 0
+    readonly property bool acting: deleting || retryStarting || audioID.length > 0
     readonly property bool available: bridge.connected && !bridge.snapshot.setupRequired && server === bridge.snapshot.server
+    readonly property bool retrySupported: !!ui.health && ui.health.generationRetry === true
+
+    // Shared label tables: the Mac client uses the same words and tones.
+    function deliveryStatus(status) {
+        return ({
+            inserted: { label: "Pasted", tone: "ok", detail: "Pasted at your cursor." },
+            listUpdated: { label: "List updated", tone: "ok", detail: "The list was updated. Nothing was pasted." },
+            copied: { label: "Copied", tone: "neutral", detail: "Copied to the clipboard." },
+            unconfirmed: { label: "Check the field", tone: "warning", detail: "The paste could not be confirmed." },
+            cancelled: { label: "Not pasted", tone: "neutral", detail: "You cancelled this take." },
+            none: { label: "Not pasted", tone: "neutral", detail: "Nothing was pasted." },
+            failed: { label: "Couldn't paste", tone: "error", detail: "The text is saved here to copy." },
+            tested: { label: "Test (no paste)", tone: "accent", detail: "Microphone test. Nothing is pasted." }
+        })[status] || null;
+    }
+
+    // Problems and progress come first, then how the text was delivered.
+    function status(record) {
+        if (!record)
+            return null;
+        if (record.paused)
+            return { label: "Interrupted", tone: "warning", detail: "" };
+        const progress = ({
+            receiving: "Recording",
+            queued: "Waiting to transcribe",
+            transcribing: "Transcribing",
+            proofreading: "Cleaning up text"
+        })[record.status];
+        if (progress)
+            return { label: progress, tone: "neutral", detail: "" };
+        if (record.status === "failed")
+            return { label: "Couldn't transcribe", tone: "error", detail: "" };
+        if (record.status === "cancelled")
+            return deliveryStatus("cancelled");
+        // A microphone test is never pasted; its receipt says "none".
+        if (record.mode === "test")
+            return deliveryStatus("tested");
+        // List summaries of recording sessions carry no delivery receipt.
+        return deliveryStatus(record.delivery ? record.delivery.status : "") || { label: "Done", tone: "neutral", detail: "" };
+    }
+
+    function languageName(code) {
+        if (!code)
+            return "";
+        return ({
+            ar: "Arabic", cs: "Czech", da: "Danish", de: "German", el: "Greek", en: "English",
+            es: "Spanish", fi: "Finnish", fr: "French", hi: "Hindi", hu: "Hungarian", is: "Icelandic",
+            it: "Italian", ja: "Japanese", ko: "Korean", nb: "Norwegian Bokmål", nl: "Dutch",
+            nn: "Norwegian Nynorsk", no: "Norwegian", pl: "Polish", pt: "Portuguese", ro: "Romanian",
+            ru: "Russian", sv: "Swedish", tr: "Turkish", uk: "Ukrainian", zh: "Chinese"
+        })[code.toLowerCase().split(/[-_]/)[0]] || code;
+    }
+
+    function duration(record) {
+        const audio = record ? record.inferenceAudio || record.originalAudio : null;
+        const value = audio && audio.sampleRate ? audio.frameCount / audio.sampleRate : record && record.importedSource ? record.importedSource.durationSeconds : undefined;
+        if (value === undefined || value <= 0)
+            return "";
+        const seconds = Math.round(value);
+        return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
+    }
+
+    // How the speech was recognized, its language and length.
+    function recognitionLine(record) {
+        const recognition = record.recognition;
+        const backend = record.speech ? record.speech.backend : "";
+        const how = recognition ? (recognition.provider === "soniox" ? "Recognized with cloud" : recognition.fallbackReason ? "Recognized locally (cloud unavailable)" : "Recognized locally") : backend ? (backend.startsWith("soniox") ? "Recognized with cloud" : "Recognized locally") : "";
+        return [how, languageName(record.detectedLanguage), duration(record)].filter(part => !!part).join(" · ");
+    }
+
+    // The server keeps saved audio for finished, failed and cancelled takes; interrupted ones must be finished first.
+    function canRetry(record) {
+        // Finished takes need a server that lists the addition.
+        const completedRetry = !!ui.health && (ui.health.features || []).includes("retry-completed");
+        return !!record && !record.importedSource && !!record.inferenceAudio && !record.paused && !record.capturing && (["failed", "cancelled"].includes(record.status) || record.status === "completed" && completedRetry);
+    }
+
+    // A retry runs on the take's own engine and language, or Whisper if that engine is gone.
+    function engineSummary(record) {
+        const preferences = record && record.settings ? record.settings.preferences : null;
+        if (!preferences)
+            return "";
+        const installed = (ui.health && ui.health.recognitionEngines) || ["whisper"];
+        const parakeet = preferences.recognitionEngine === "parakeet" && installed.includes("parakeet");
+        const language = parakeet || preferences.language === "auto" ? "Detect automatically" : languageName(preferences.language);
+        return "Current engine: " + (parakeet ? "Parakeet" : "Whisper") + ", language " + language + ".";
+    }
+
+    // A finished take asks first because the new transcript replaces it.
+    function transcribeAgain() {
+        if (!canRetry(selected) || !available || acting || retryingID || !retrySupported || bridge.preview)
+            return;
+        if (selected.status === "completed") {
+            retryDialog.recordID = selected.id;
+            retryDialog.recordServer = server;
+            retryDialog.engine = engineSummary(selected);
+            retryDialog.open();
+            return;
+        }
+        startRetry(selected.id, server);
+    }
+
+    function startRetry(id, recordServer) {
+        retryStarting = true;
+        retryingID = id;
+        retryServer = recordServer;
+        entryEpoch++;
+        entryID = "";
+        retryFailures = 0;
+        message = "Starting to transcribe again…";
+        bridge.request("retryHistory", {
+            "id": id,
+            "server": recordServer
+        });
+    }
 
     function reconcile() {
         if (selectedID && !filtered.some((r) => {
@@ -71,7 +195,7 @@ ColumnLayout {
         bridge.request("historyEntry", {
             "id": entryID,
             "server": server
-        });
+        }, "entry-" + entryEpoch);
     }
 
     function load(older, retry) {
@@ -151,6 +275,7 @@ ColumnLayout {
 
         deleteDialog.recordID = selected.id;
         deleteDialog.recordServer = server;
+        deleteDialog.interrupted = !!selected.paused;
         deleteDialog.open();
     }
 
@@ -164,8 +289,19 @@ ColumnLayout {
         load(false);
     }
 
+    // Follows a take being transcribed again until it settles.
+    Timer {
+        interval: 1500
+        repeat: true
+        running: root.retryingID.length > 0 && !root.retryStarting && root.available && !bridge.preview
+        onTriggered: bridge.request("historyEntry", {
+            "id": root.retryingID,
+            "server": root.server
+        }, "retry")
+    }
+
     Connections {
-        function onReply(action, data) {
+        function onReply(action, data, requestID) {
             if (action === "history") {
                 if (!bridge.preview && (data.queryID !== root.queryID || data.server !== root.server)) {
                     root.loading = false;
@@ -193,6 +329,9 @@ ColumnLayout {
                 Qt.callLater(root.maybeLoadOlder);
             }
             if (action === "historyEntry") {
+                if (requestID !== "retry" && requestID !== "entry-" + root.entryEpoch)
+                    return ;
+
                 if (data.record.id === root.entryID)
                     root.entryID = "";
                 if (data.server !== root.server)
@@ -201,6 +340,22 @@ ColumnLayout {
                 root.records = root.records.map((r) => {
                     return r.id === data.record.id ? data.record : r;
                 });
+                if (requestID === "retry")
+                    root.retryFailures = 0;
+                if (requestID === "retry" && data.record.id === root.retryingID && ["completed", "failed", "cancelled"].includes(data.record.status) && !data.record.paused) {
+                    root.retryingID = "";
+                    root.message = data.record.error || "Transcribed again.";
+                }
+            }
+            if (action === "retryHistory") {
+                root.retryStarting = false;
+                if (data.server !== root.server)
+                    return ;
+
+                root.records = root.records.map((r) => {
+                    return r.id === data.record.id ? data.record : r;
+                });
+                root.message = "Transcribing again. Nothing is pasted.";
             }
             if (action === "deleteHistory") {
                 root.deleting = false;
@@ -225,12 +380,24 @@ ColumnLayout {
             }
         }
 
-        function onFailed(action, message) {
-            if (!["history", "historyEntry", "historyAudio", "historyArtifact", "deleteHistory"].includes(action))
+        function onFailed(action, message, requestID) {
+            if (!["history", "historyEntry", "retryHistory", "historyAudio", "historyArtifact", "deleteHistory"].includes(action))
                 return ;
 
-            if (action === "historyEntry")
+            if (action === "historyEntry" && requestID === "retry") {
+                // A brief outage does not end the retry on the server; keep following it.
+                if (++root.retryFailures < 20)
+                    return ;
+                root.retryingID = "";
+            } else if (action === "historyEntry" && requestID === "entry-" + root.entryEpoch)
                 root.entryID = "";
+
+            if (action === "retryHistory") {
+                root.retryStarting = false;
+                root.retryingID = "";
+                // The detail load this retry superseded was ignored; load it again.
+                root.loadEntry();
+            }
 
             if (action === "history")
                 root.loading = false;
@@ -255,8 +422,12 @@ ColumnLayout {
                 root.entryID = "";
                 root.loading = false;
                 root.deleting = false;
+                root.retryStarting = false;
+                if (bridge.connected && server !== root.retryServer)
+                    root.retryingID = "";
                 root.server = server;
                 deleteDialog.close();
+                retryDialog.close();
                 if (bridge.connected)
                     root.load(false);
 
@@ -389,40 +560,45 @@ ColumnLayout {
             }
 
             delegate: ItemDelegate {
+                id: row
+
                 required property var modelData
+                readonly property var rowStatus: root.status(modelData)
+                readonly property string transcript: modelData.finalText || modelData.insertionText || modelData.previewText || ""
 
                 width: ListView.view.width
                 implicitHeight: summary.implicitHeight + 30
                 onClicked: root.selectedID = modelData.id
-                Accessible.name: modelData.device.name + ", " + (modelData.finalText || modelData.insertionText || modelData.previewText || modelData.status)
+                Accessible.name: modelData.device.name + ", " + summaryText.text + (rowStatus ? ", " + rowStatus.label : "")
 
                 contentItem: ColumnLayout {
                     id: summary
 
-                    spacing: 8
+                    spacing: 7
 
                     SLabel {
                         ui: root.ui
-                        text: new Date(modelData.createdAt).toLocaleString(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })
+                        text: new Date(modelData.createdAt).toLocaleString(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) + " · " + modelData.device.name + (modelData.importedSource ? " · Wispr Flow" : "")
                         font.pixelSize: 12
                         color: root.ui.c.muted
+                        elide: Text.ElideRight
+                        maximumLineCount: 1
                         Layout.fillWidth: true
                     }
 
                     SLabel {
+                        id: summaryText
                         ui: root.ui
-                        text: modelData.finalText || modelData.insertionText || modelData.previewText || (modelData.paused ? "Paused" : "") || ({ receiving: "Recording…", queued: "Waiting to transcribe", transcribing: "Transcribing…", proofreading: "Cleaning up text…", failed: "Transcription failed", cancelled: "Cancelled", completed: "No speech" })[modelData.status] || modelData.status
+                        text: row.transcript || (modelData.paused ? (root.duration(modelData) ? root.duration(modelData) + " of audio saved" : "Audio saved") : modelData.status === "failed" ? "No transcript" : modelData.status === "completed" || modelData.status === "cancelled" ? "No speech" : "No transcript yet")
+                        color: row.transcript ? root.ui.c.ink : root.ui.c.muted
                         maximumLineCount: 2
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                     }
 
-                    SLabel {
+                    HistoryChip {
                         ui: root.ui
-                        text: modelData.device.name + (modelData.importedSource ? " · Wispr Flow" : "")
-                        font.pixelSize: 11
-                        color: root.ui.c.muted
-                        Layout.fillWidth: true
+                        status: row.rowStatus
                     }
 
                 }
@@ -479,9 +655,10 @@ ColumnLayout {
 
         property string recordID: ""
         property string recordServer: ""
+        property bool interrupted: false
 
         objectName: "deleteHistoryDialog"
-        title: "Delete this dictation?"
+        title: interrupted ? "Discard this recording?" : "Delete this dictation?"
         parent: Overlay.overlay
         anchors.centerIn: parent
         modal: true
@@ -491,20 +668,20 @@ ColumnLayout {
             SLabel {
                 ui: root.ui
                 Layout.fillWidth: true
-                text: "Its archived text and recordings will be removed from shared history on every device. This cannot be undone."
+                text: deleteDialog.interrupted ? "Its saved audio will be removed from shared history on every device. This cannot be undone." : "Its archived text and recordings will be removed from shared history on every device. This cannot be undone."
             }
 
             RowLayout {
                 SButton {
                     ui: root.ui
-                    text: "Keep dictation"
+                    text: deleteDialog.interrupted ? "Keep recording" : "Keep dictation"
                     onClicked: deleteDialog.close()
                 }
 
                 SButton {
                     ui: root.ui
                     objectName: "confirmHistoryDelete"
-                    text: "Delete dictation"
+                    text: deleteDialog.interrupted ? "Discard recording" : "Delete dictation"
                     enabled: root.available && !root.acting && !bridge.preview && deleteDialog.recordServer === root.server
                     onClicked: {
                         root.deleting = true;
@@ -514,6 +691,53 @@ ColumnLayout {
                             "server": deleteDialog.recordServer
                         });
                         deleteDialog.close();
+                    }
+                }
+
+            }
+
+        }
+
+    }
+
+    Dialog {
+        id: retryDialog
+
+        property string recordID: ""
+        property string recordServer: ""
+        property string engine: ""
+
+        objectName: "retryHistoryDialog"
+        title: "Transcribe this take again?"
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        modal: true
+        width: 420
+
+        contentItem: ColumnLayout {
+            SLabel {
+                ui: root.ui
+                Layout.fillWidth: true
+                text: "The new transcript replaces the current one in History on every device. Nothing is pasted." + (retryDialog.engine ? " " + retryDialog.engine : "")
+            }
+
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                SButton {
+                    ui: root.ui
+                    text: "Cancel"
+                    onClicked: retryDialog.close()
+                }
+
+                SButton {
+                    ui: root.ui
+                    objectName: "confirmHistoryRetry"
+                    primary: true
+                    text: "Transcribe again"
+                    enabled: root.available && !root.acting && !root.retryingID && !bridge.preview && retryDialog.recordServer === root.server
+                    onClicked: {
+                        root.startRetry(retryDialog.recordID, retryDialog.recordServer);
+                        retryDialog.close();
                     }
                 }
 

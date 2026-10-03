@@ -12,7 +12,7 @@ qt_standard_project_setup(REQUIRES 6.8)
 qt_add_executable(sottoduo-gui main.cpp Bridge.cpp Bridge.h HudSurface.cpp HudSurface.h DesktopIntegration.cpp DesktopIntegration.h GuiInstance.cpp GuiInstance.h PortalShortcuts.cpp PortalShortcuts.h)
 qt_add_qml_module(sottoduo-gui URI SottoDuo VERSION 1.0 QML_FILES
   qml/Main.qml qml/SButton.qml qml/SLabel.qml qml/StatusDot.qml qml/Group.qml qml/Setting.qml qml/Dictation.qml qml/MicrophoneTestButton.qml
-  qml/History.qml qml/HistoryDetail.qml qml/Microphone.qml qml/Preferences.qml qml/DictionaryEditor.qml qml/Computer.qml qml/Hud.qml qml/DjiSettings.qml qml/LevelMeter.qml qml/ShortcutSettings.qml qml/PortalShortcutSettings.qml qml/ConnectionSettings.qml
+  qml/History.qml qml/HistoryDetail.qml qml/HistoryChip.qml qml/Microphone.qml qml/Preferences.qml qml/DictionaryEditor.qml qml/Computer.qml qml/Hud.qml qml/DjiSettings.qml qml/LevelMeter.qml qml/ShortcutSettings.qml qml/PortalShortcutSettings.qml qml/ConnectionSettings.qml
   RESOURCES mark.svg preview.json)
 target_link_libraries(sottoduo-gui PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::Widgets Qt6::Network Qt6::Svg Qt6::DBus LayerShellQt::Interface)
 if(LIBPORTAL_FOUND)

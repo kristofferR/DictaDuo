@@ -55,6 +55,7 @@ export class API {
         "X-SottoDuo-Cloud-Recognition": "cloud-v1",
         "X-SottoDuo-Features": "features-v1",
         "X-SottoDuo-Language": "language-v2",
+        "X-SottoDuo-Generation-Retry": "retry-v1",
         ...(owner ? { "X-SottoDuo-Capture-Owner": owner } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -110,6 +111,33 @@ export class API {
   /** Removes a settled recording session from shared history. */
   async discardRecording(id: string) {
     await this.request(`/v2/recordings/${encodeURIComponent(id)}/discard`, "POST", {});
+  }
+  /** Transcribes a settled session's saved audio again. Nothing is pasted. */
+  async retryRecording(id: string) {
+    return validateBody(
+      "RecordingSnapshot",
+      await this.request(
+        `/v2/recordings/${encodeURIComponent(id)}/retry`,
+        "POST",
+        undefined,
+        undefined,
+        // A finished take's saved audio is verified before the retry starts.
+        120_000,
+      ),
+    );
+  }
+  /** Transcribes a settled legacy generation's saved audio again. Nothing is pasted. */
+  async retryGeneration(id: string) {
+    return validateBody(
+      "GenerationRecord",
+      await this.request(
+        `/v1/generations/${encodeURIComponent(id)}/retry`,
+        "POST",
+        undefined,
+        undefined,
+        15_000,
+      ),
+    );
   }
   async deleteHistory(id: string) {
     await this.request(`/v1/generations/${encodeURIComponent(id)}`, "DELETE");

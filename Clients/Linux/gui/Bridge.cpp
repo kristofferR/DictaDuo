@@ -109,12 +109,18 @@ void Bridge::updateColors() {
                          {"canvas", "#1b252e"},  {"surface", "#222c35"},
                          {"sidebar", "#2b3e4d"}, {"line", "#485b6b"},
                          {"accent", "#a7d6f5"},  {"onAccent", "#192c3a"},
-                         {"tint", "#304452"}}
+                         {"tint", "#304452"},    {"ok", "#9fdcb6"},
+                         {"okTint", "#23392f"},  {"warning", "#f0cf8f"},
+                         {"warningTint", "#3b3324"}, {"error", "#f1a7a7"},
+                         {"errorTint", "#40282b"}}
            : QVariantMap{{"ink", "#352d3a"},     {"muted", "#766d78"},
                          {"canvas", "#f8f6f2"},  {"surface", "#fffdf9"},
                          {"sidebar", "#ede8e4"}, {"line", "#d5cdd1"},
                          {"accent", "#b44634"},  {"onAccent", "#ffffff"},
-                         {"tint", "#eee2de"}};
+                         {"tint", "#eee2de"},    {"ok", "#2f6b45"},
+                         {"okTint", "#e2eee5"},  {"warning", "#85550f"},
+                         {"warningTint", "#f6ead3"}, {"error", "#a23b2c"},
+                         {"errorTint", "#f5deda"}};
   QString note;
   if (m_theme == "omarchy") {
     const QString state = qEnvironmentVariable(
@@ -145,6 +151,15 @@ void Bridge::updateColors() {
       QColor accent = palette.value("accent", palette.value("color4", fg));
       if (contrast(bg, accent) < 4.5)
         accent = fg;
+      // Status tones follow the theme's green, yellow and red when they stay legible.
+      const auto tone = [&](const QString &name, const QString &fallback) {
+        const QColor color = palette.value(name, QColor(fallback));
+        return contrast(bg, color) < 4.5 ? fg : color;
+      };
+      const bool darkTheme = luminance(bg) < .18;
+      const QColor ok = tone("color2", darkTheme ? "#9fdcb6" : "#2f6b45");
+      const QColor warning = tone("color3", darkTheme ? "#f0cf8f" : "#85550f");
+      const QColor error = tone("color1", darkTheme ? "#f1a7a7" : "#a23b2c");
       colors = {{"canvas", bg.name()},
                 {"ink", fg.name()},
                 {"muted", blend(fg, bg, .25).name()},
@@ -156,7 +171,13 @@ void Bridge::updateColors() {
                                      contrast(accent, QColor("white"))
                                  ? "#000000"
                                  : "#ffffff"},
-                {"tint", blend(bg, accent, .13).name()}};
+                {"tint", blend(bg, accent, .13).name()},
+                {"ok", ok.name()},
+                {"okTint", blend(bg, ok, .14).name()},
+                {"warning", warning.name()},
+                {"warningTint", blend(bg, warning, .14).name()},
+                {"error", error.name()},
+                {"errorTint", blend(bg, error, .14).name()}};
       note = "Following the active Omarchy palette.";
     } else
       note = "Omarchy colors unavailable. Using Glacier until a palette is "
@@ -263,8 +284,13 @@ void Bridge::sendRequest(const QString &action, const QVariantMap &arguments,
     timeout = 35000;
   else if (action == "history" || action == "historyEntry")
     timeout = 70000;
+  else if (action == "retryHistory")
+    timeout = 125000;
   else if (action == "deleteHistory")
     timeout = 75000;
+  // Longer than the client's 15 s retry request, which may re-index archived audio.
+  else if (action == "retryHistory")
+    timeout = 20000;
   else if (action == "historyAudio" || action == "historyArtifact")
     timeout = 370000;
   timer->start(timeout);
