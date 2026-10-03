@@ -296,9 +296,8 @@ ColumnLayout {
 
                     SLabel {
                         ui: root.ui
-                        // With Soniox configured, readiness still describes the local engine.
-                        // In Automatic mode with Soniox configured, readiness describes the local engine.
-                        text: !root.health ? "Checking…" : root.health.speech.backend.startsWith("soniox") && !!root.latest && root.latest.preferences.recognitionMode !== "cloud" ? (root.parakeet ? "Parakeet v3" : "Whisper large-v3-turbo") : root.modelName(root.health.speech)
+                        // In Automatic mode with Soniox configured, readiness describes the saved local engine.
+                        text: !root.health ? "Checking…" : root.health.speech.backend.startsWith("soniox") && !!root.latest && root.latest.preferences.recognitionMode !== "cloud" ? (root.latest.preferences.recognitionEngine === "parakeet" && root.installedEngines.includes("parakeet") ? "Parakeet v3" : "Whisper large-v3-turbo") : root.modelName(root.health.speech)
                     }
                     StatusDot {
                         id: speechStatus

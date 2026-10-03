@@ -149,13 +149,16 @@ struct ServerPreferencesPage: View {
     private var engineChoice: Bool {
         draft.recognitionEngine != nil && (controller.serverHealth?.recognitionEngines?.count ?? 0) > 1
     }
+    /// Status rows describe the saved preferences, not the unsaved draft.
     private var modelsLoading: Bool {
         guard let health = controller.serverHealth else { return false }
+        let cleanupEnabled = controller.sharedPreferences?.preferences.textCorrectionEnabled ?? true
         return ServerModelStatus(health.speech, health: health) == .loading
-            || ServerModelStatus(health.proofreading, health: health, enabled: draft.textCorrectionEnabled) == .loading
+            || ServerModelStatus(health.proofreading, health: health, enabled: cleanupEnabled) == .loading
     }
-    private var localEngineName: String {
-        parakeet ? "Parakeet v3" : "Whisper large-v3-turbo"
+    private var savedLocalEngineName: String {
+        let saved = controller.sharedPreferences?.preferences.recognitionEngine == .parakeet && installedEngines.contains(.parakeet)
+        return saved ? "Parakeet v3" : "Whisper large-v3-turbo"
     }
     /// Older servers reject Norwegian, so it is offered only when the server lists it.
     private var languageOptions: [(String, String)] {
@@ -436,13 +439,11 @@ struct ServerPreferencesPage: View {
 
     @ViewBuilder private func modelsGroup(_ health: ServerHealth) -> some View {
         let cleanupEnabled = controller.sharedPreferences?.preferences.textCorrectionEnabled ?? true
-        // With Soniox configured, speech readiness still describes the local engine;
-        // the cloud row covers Soniox.
         // In Automatic mode with Soniox configured, speech readiness describes the
         // local engine (the cloud row covers Soniox); Cloud only reports Soniox itself.
         let localReadiness = health.speech.backend.hasPrefix("soniox")
             && controller.sharedPreferences?.preferences.recognitionMode != .cloud
-        modelRow("Speech recognition", name: localReadiness ? localEngineName : health.speech.friendlyName,
+        modelRow("Speech recognition", name: localReadiness ? savedLocalEngineName : health.speech.friendlyName,
                  status: ServerModelStatus(health.speech, health: health))
         modelRow("Text cleanup", name: health.proofreading.friendlyName,
                  status: ServerModelStatus(health.proofreading, health: health, enabled: cleanupEnabled))
