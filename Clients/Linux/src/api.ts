@@ -52,6 +52,7 @@ export class API {
         "X-SottoDuo-Recognition": "streaming-v1",
         "X-SottoDuo-Recognition-Engine": "engine-v1",
         "X-SottoDuo-Microphone-Sharing": "sharing-v1",
+        "X-SottoDuo-Features": "features-v1",
         ...(owner ? { "X-SottoDuo-Capture-Owner": owner } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),

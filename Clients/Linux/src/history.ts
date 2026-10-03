@@ -66,7 +66,8 @@ function parseCursor(before: string): Cursor {
 }
 /** Runs recorded in different formats; the server exports their originals only one at a time. */
 type OriginalRun = { runID: string; byteCount: number };
-type Entry = Generation & { originalRuns?: OriginalRun[] };
+/** `paused`: a long recording stopped before it finished; only its own computer can resume it. */
+type Entry = Generation & { originalRuns?: OriginalRun[]; paused?: boolean };
 function originalRuns(snapshot: Recording): OriginalRun[] | undefined {
   const streams = snapshot.streams.filter((stream) => stream.kind === "original");
   const format = streams[0]?.format;
@@ -139,6 +140,10 @@ function summary(snapshot: Recording): Entry {
     ...(inferenceAudio ? { inferenceAudio } : {}),
     ...(originalAudio ? { originalAudio } : {}),
     ...(runs ? { originalRuns: runs } : {}),
+    ...(snapshot.captureState === "interrupted" &&
+    !["completed", "failed"].includes(snapshot.processingState)
+      ? { paused: true }
+      : {}),
   };
 }
 async function privateDirectory(path: string) {
@@ -248,7 +253,7 @@ export class HistoryTools {
       const recording = this.recordings.has(id);
       const record: Entry = recording ? await this.session(id) : await this.api.get(id, 60_000);
       if (action === "deleteHistory") {
-        if (!terminal.has(record.status))
+        if (!terminal.has(record.status) && !record.paused)
           throw new ClientNotice("Finish or cancel this recording before deleting it.");
         if (recording) await this.api.discardRecording(id);
         else await this.api.deleteHistory(id);

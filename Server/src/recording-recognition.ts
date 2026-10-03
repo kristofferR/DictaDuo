@@ -206,7 +206,7 @@ export class LiveRecognition {
         !state.cloudOnly &&
         Math.min(target, state.availableFrames) - live.fedFrame > BACKLOG_FRAMES
       ) {
-        this.fail(id, "Live recognition fell behind; using server recognition.");
+        this.fail(id, "Cloud transcription fell behind, so the server transcribed locally.");
         continue;
       }
       // Pace against recent sending, so a long upload gap never becomes a burst.

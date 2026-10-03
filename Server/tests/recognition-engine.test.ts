@@ -399,6 +399,27 @@ test("responses include engine fields only for clients that request them", async
     (await app.inject({ url: "/v1/health", headers })).json(),
   );
   expect(health.recognitionEngines).toEqual(["whisper", "parakeet"]);
+  // Whether cloud recognition is configured is negotiated separately.
+  expect((await app.inject({ url: "/v1/health", headers })).body).not.toContain("cloudRecognition");
+  const cloud = validateBody(
+    "ServerHealth",
+    (
+      await app.inject({
+        url: "/v1/health",
+        headers: { "x-sottoduo-cloud-recognition": "cloud-v1" },
+      })
+    ).json(),
+  );
+  expect(cloud.cloudRecognition).toBe(false);
+  // Additions to API version 3 are listed only for clients that ask.
+  expect(cloud).not.toHaveProperty("features");
+  const features = validateBody(
+    "ServerHealth",
+    (
+      await app.inject({ url: "/v1/health", headers: { "x-sottoduo-features": "features-v1" } })
+    ).json(),
+  );
+  expect(features.features).toContain("retry-completed");
   // v2 recording snapshots carry frozen preferences, negotiated the same way.
   const create = (extra = {}) =>
     app.inject({

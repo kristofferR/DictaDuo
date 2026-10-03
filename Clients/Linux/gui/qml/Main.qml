@@ -133,7 +133,7 @@ ApplicationWindow {
         if (phase === "recording")
             return "Listening.";
         if (phase === "processing")
-            return feedback.processingStage === "proofreading" ? "Refining text…" : feedback.processingStage === "queued" ? "Waiting to transcribe…" : "Transcribing…";
+            return feedback.processingStage === "proofreading" ? "Cleaning up text…" : feedback.processingStage === "queued" ? "Waiting to transcribe…" : "Transcribing…";
         if (phase === "delivering")
             return "Delivering text…";
         if (phase === "failed")

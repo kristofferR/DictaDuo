@@ -224,7 +224,7 @@ test("restart recovers unfinished metadata and removes partial audio", async () 
     );
   resources.push({ service: recovered, path });
   expect((await recovered.get(record.id)).status).toBe("failed");
-  expect((await recovered.get(record.id)).error).toContain("Server restarted");
+  expect((await recovered.get(record.id)).error).toContain("server restarted");
   await expect(
     readFile(join(path, "generations", record.id, "inference.raw")),
   ).rejects.toMatchObject({ code: "ENOENT" });
@@ -638,6 +638,37 @@ test("a cancelled sealed recording can be transcribed again without overwriting 
   expect(final.finalText).toBe("Recording 2.");
 });
 
+test("a retry of a finished take stopped during cleanup gives back the finished transcript", async () => {
+  const inference = new QueuedInference();
+  const { service, path } = await setup(inference);
+  const record = await upload(service);
+  await service.finish(record.id, { inferenceFrames: 4000 });
+  inference.releases[0]!.release();
+  const done = await completed(service, record.id);
+  expect(done.status).toBe("completed");
+  inference.proofStarted = deferred();
+  inference.proofRelease = deferred();
+  await service.retry(record.id);
+  inference.releases[1]!.release();
+  // The retry has new speech but no finished text when the server stops.
+  await inference.proofStarted.promise;
+  await service.shutdown();
+  const restarted = await GenerationService.open(
+    { dataDirectory: path, development: true },
+    new FakeInference(),
+  );
+  resources.push({ service: restarted, path });
+  const recovered = await restarted.get(record.id);
+  expect(recovered.rawText).toBe(done.rawText);
+  expect(recovered.finalText).toBe(done.finalText);
+  // The finished take stays finished, with a note that the retry did not change it.
+  expect(recovered.status).toBe("completed");
+  expect(recovered.error).toContain("previous transcript is kept");
+  expect(await readFile(join(path, "generations", record.id, "transcript.txt"), "utf8")).toBe(
+    done.finalText,
+  );
+});
+
 test("a retry that fails before new speech keeps the transcript it replaced", async () => {
   const inference = new QueuedInference();
   inference.proofRelease = deferred();
@@ -674,7 +705,7 @@ test("a retry that fails before new speech keeps the transcript it replaced", as
   expect(cancelled.rawText).toBe("Recording 1.");
 });
 
-test("only failed or cancelled recordings with sealed audio can be retried", async () => {
+test("only finished recordings with sealed audio can be retried", async () => {
   const { service } = await setup();
   const receiving = await upload(service);
   await expect(service.retry(receiving.id)).rejects.toMatchObject({ code: "not_retryable" });
@@ -683,7 +714,15 @@ test("only failed or cancelled recordings with sealed audio can be retried", asy
   const done = await upload(service);
   await service.finish(done.id, { inferenceFrames: 4000 });
   expect((await completed(service, done.id)).status).toBe("completed");
-  await expect(service.retry(done.id)).rejects.toMatchObject({ code: "not_retryable" });
+  await service.recordDelivery(done.id, {
+    status: "inserted",
+    reportedAt: new Date().toISOString(),
+  });
+  // A finished take can be transcribed again; the new text was never pasted.
+  const retried = await service.retry(done.id);
+  expect(retried.status).toBe("queued");
+  expect(retried.delivery).toBeUndefined();
+  expect((await completed(service, done.id)).status).toBe("completed");
 });
 
 test("a transient speech failure is retried once before the recording fails", async () => {

@@ -51,7 +51,7 @@ export function parseConfig(value: unknown): Config {
   const s = value.sources;
   if (s.server !== endpoint(value.server))
     throw new Error(
-      "Microphone preferences belong to another server. Reselect sources before changing their server scope.",
+      "These microphone settings belong to another server. Choose your microphones again for this server.",
     );
   if (
     typeof s.hostID !== "string" ||

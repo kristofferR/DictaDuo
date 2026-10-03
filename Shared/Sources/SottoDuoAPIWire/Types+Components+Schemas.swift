@@ -557,6 +557,14 @@ extension Components {
             ///
             /// - Remark: Generated from `#/components/schemas/ServerHealth/generationRetry`.
             public var generationRetry: Swift.Bool?
+            /// Whether cloud recognition (Soniox) is configured on this server. Request this field with X-SottoDuo-Cloud-Recognition: cloud-v1. An omitted value means unknown.
+            ///
+            /// - Remark: Generated from `#/components/schemas/ServerHealth/cloudRecognition`.
+            public var cloudRecognition: Swift.Bool?
+            /// Additions to API version 3 this server supports, such as retry-completed (finished takes can be transcribed again) and language-no (Norwegian). Request this field with X-SottoDuo-Features: features-v1. An omitted value means none.
+            ///
+            /// - Remark: Generated from `#/components/schemas/ServerHealth/features`.
+            public var features: [Swift.String]?
             /// Local recognition engines installed on this server. Request this field with X-SottoDuo-Recognition-Engine: engine-v1. An omitted value means Whisper only.
             ///
             /// - Remark: Generated from `#/components/schemas/ServerHealth/recognitionEngines`.
@@ -575,6 +583,8 @@ extension Components {
             ///   - isDev:
             ///   - ready:
             ///   - generationRetry: Whether failed or cancelled generations with sealed audio can be retried. Request this field with X-SottoDuo-Generation-Retry: retry-v1. An omitted value means unsupported.
+            ///   - cloudRecognition: Whether cloud recognition (Soniox) is configured on this server. Request this field with X-SottoDuo-Cloud-Recognition: cloud-v1. An omitted value means unknown.
+            ///   - features: Additions to API version 3 this server supports, such as retry-completed (finished takes can be transcribed again) and language-no (Norwegian). Request this field with X-SottoDuo-Features: features-v1. An omitted value means none.
             ///   - recognitionEngines: Local recognition engines installed on this server. Request this field with X-SottoDuo-Recognition-Engine: engine-v1. An omitted value means Whisper only.
             ///   - speech:
             ///   - proofreading:
@@ -585,6 +595,8 @@ extension Components {
                 isDev: Swift.Bool,
                 ready: Swift.Bool,
                 generationRetry: Swift.Bool? = nil,
+                cloudRecognition: Swift.Bool? = nil,
+                features: [Swift.String]? = nil,
                 recognitionEngines: [Components.Schemas.RecognitionEngine]? = nil,
                 speech: Components.Schemas.ModelRuntimeInfo,
                 proofreading: Components.Schemas.ModelRuntimeInfo,
@@ -595,6 +607,8 @@ extension Components {
                 self.isDev = isDev
                 self.ready = ready
                 self.generationRetry = generationRetry
+                self.cloudRecognition = cloudRecognition
+                self.features = features
                 self.recognitionEngines = recognitionEngines
                 self.speech = speech
                 self.proofreading = proofreading
@@ -606,6 +620,8 @@ extension Components {
                 case isDev
                 case ready
                 case generationRetry
+                case cloudRecognition
+                case features
                 case recognitionEngines
                 case speech
                 case proofreading
@@ -633,6 +649,14 @@ extension Components {
                     Swift.Bool.self,
                     forKey: .generationRetry
                 )
+                self.cloudRecognition = try container.decodeIfPresent(
+                    Swift.Bool.self,
+                    forKey: .cloudRecognition
+                )
+                self.features = try container.decodeIfPresent(
+                    [Swift.String].self,
+                    forKey: .features
+                )
                 self.recognitionEngines = try container.decodeIfPresent(
                     [Components.Schemas.RecognitionEngine].self,
                     forKey: .recognitionEngines
@@ -655,6 +679,8 @@ extension Components {
                     "isDev",
                     "ready",
                     "generationRetry",
+                    "cloudRecognition",
+                    "features",
                     "recognitionEngines",
                     "speech",
                     "proofreading",

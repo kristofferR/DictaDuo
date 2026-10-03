@@ -378,3 +378,36 @@ test("original runs recorded in different formats open one at a time", async () 
   );
   expect(requested).toEqual([second]);
 });
+
+test("a paused long recording is labelled paused and can be deleted", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sottoduo-history-"));
+  const previous = process.env.XDG_RUNTIME_DIR;
+  process.env.XDG_RUNTIME_DIR = directory;
+  cleanup.push(async () => {
+    if (previous === undefined) delete process.env.XDG_RUNTIME_DIR;
+    else process.env.XDG_RUNTIME_DIR = previous;
+    await rm(directory, { recursive: true, force: true });
+  });
+  const api = new API("http://127.0.0.1:1", "token");
+  const snapshot = {
+    id: randomUUID().toUpperCase(),
+    createdAt: new Date().toISOString(),
+    processingState: "queued",
+    captureState: "interrupted",
+    streams: [],
+    previewText: "",
+  };
+  api.history = async () => ({ items: [] });
+  api.recordingHistory = async () =>
+    ({ items: [snapshot] }) as unknown as Awaited<ReturnType<API["recordingHistory"]>>;
+  api.recording = async () => ({ snapshot }) as unknown as Awaited<ReturnType<API["recording"]>>;
+  const discarded: string[] = [];
+  api.discardRecording = async (id) => {
+    discarded.push(id);
+  };
+  const tools = new HistoryTools(api);
+  const [item] = (await tools.list(undefined, undefined, "q")).items;
+  expect(item).toMatchObject({ status: "queued", paused: true });
+  await tools.action("deleteHistory", { id: snapshot.id, server: api.endpoint });
+  expect(discarded).toEqual([snapshot.id]);
+});

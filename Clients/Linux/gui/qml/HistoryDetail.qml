@@ -13,10 +13,60 @@ ColumnLayout {
     readonly property var audio: record ? record.inferenceAudio || record.originalAudio : null
     readonly property var processing: record ? record.textProcessing : null
     readonly property bool terminal: !!record && ["completed", "failed", "cancelled"].includes(record.status)
+    // Paused long recordings can be deleted too; only their own computer can resume them.
+    readonly property bool deletable: terminal || (!!record && !!record.paused)
     // A listed session holds only the transcript's tail until its full record loads.
     readonly property bool partial: !!record && !!record.summaryOnly
     property string copiedID: ""
     onRecordChanged: copiedID = ""
+
+    // One label table for statuses both clients write; Mac uses the same words.
+    function statusLabel(status) {
+        return ({
+            receiving: "Recording",
+            queued: "Waiting to transcribe",
+            transcribing: "Transcribing",
+            proofreading: "Cleaning up text",
+            completed: "Done",
+            failed: "Transcription failed",
+            cancelled: "Cancelled"
+        })[status] || status;
+    }
+    function deliveryLabel(delivery) {
+        if (!delivery)
+            return "";
+        return ({
+            inserted: "Pasted",
+            listUpdated: "List updated",
+            copied: "Copied",
+            unconfirmed: "Check the field",
+            failed: "Couldn't paste",
+            tested: "Microphone test",
+            cancelled: "Not pasted",
+            none: "Not pasted"
+        })[delivery.status] || "";
+    }
+    function cleanupLabel(processing) {
+        const status = processing.status || (processing.enabled ? "applied" : "disabled");
+        return ({
+            disabled: "Text cleanup off",
+            unavailable: "Text cleanup unavailable",
+            applied: "Text cleaned up",
+            unchanged: "Text cleanup made no changes",
+            rejected: "Text cleanup skipped",
+            failed: "Text cleanup failed",
+            skipped: "Text cleanup skipped"
+        })[status] || "Text cleanup";
+    }
+
+    // A zero budget means the engine has no vocabulary prompting at all.
+    function hintText(title, hints) {
+        if (!hints || !hints.omittedTerms.length)
+            return "";
+        if (hints.tokenBudget === 0)
+            return title + ": not used by this engine";
+        return title + ": " + hints.omittedTerms.length + (hints.omittedTerms.length === 1 ? " term" : " terms") + " did not fit (" + hints.omittedTerms.join(", ") + ")";
+    }
 
     function model(value) {
         return value ? value.modelID + " · " + value.backend : "";
@@ -72,7 +122,7 @@ ColumnLayout {
             ui: root.ui
             objectName: "deleteHistory"
             text: root.history.deleting ? "Deleting…" : "Delete"
-            enabled: root.terminal && root.history.available && !root.history.acting && !root.history.loading && !bridge.preview
+            enabled: root.deletable && root.history.available && !root.history.acting && !root.history.loading && !bridge.preview
             onClicked: root.history.confirmDelete()
         }
 
@@ -84,7 +134,7 @@ ColumnLayout {
         visible: !!root.record
         color: root.ui.c.muted
         font.pixelSize: 12
-        text: root.record ? root.record.device.name + " · " + (root.record.importedSource ? "Wispr Flow · " : "SottoDuo · ") + root.record.status + (root.duration() ? " · " + root.duration() : "") + " · Delivery: " + (root.record.delivery ? root.record.delivery.status : "not reported") : ""
+        text: root.record ? [root.record.device.name, root.record.importedSource ? "Wispr Flow" : "SottoDuo", root.record.paused ? "Paused on " + root.record.device.name : root.statusLabel(root.record.status), root.duration(), root.deliveryLabel(root.record.delivery)].filter(part => !!part).join(" · ") : ""
     }
 
     ScrollView {
@@ -158,14 +208,14 @@ ColumnLayout {
                 ui: root.ui
                 Layout.fillWidth: true
                 visible: !!text
-                text: root.record ? root.record.formattingRejectionReason || "" : ""
+                text: root.record && root.record.formattingRejectionReason ? "List formatting skipped: " + root.record.formattingRejectionReason : ""
             }
 
             SLabel {
                 ui: root.ui
                 Layout.fillWidth: true
                 visible: !!text
-                text: root.processing ? "Text cleanup: " + (root.processing.status || (root.processing.enabled ? "enabled" : "disabled")) + (root.processing.reason ? "\n" + root.processing.reason : "") : ""
+                text: root.processing ? root.cleanupLabel(root.processing) + (root.processing.reason ? ": " + root.processing.reason : "") : ""
             }
 
             CheckBox {
@@ -195,7 +245,7 @@ ColumnLayout {
                 color: root.ui.c.muted
                 font.pixelSize: 12
                 visible: !!text
-                text: root.record && root.record.recognitionHints && root.record.recognitionHints.omittedTerms.length ? "Voice vocabulary omitted: " + root.record.recognitionHints.omittedTerms.join(", ") : ""
+                text: root.record ? root.hintText("Recognition vocabulary", root.record.recognitionHints) : ""
             }
 
             SLabel {
@@ -204,7 +254,7 @@ ColumnLayout {
                 color: root.ui.c.muted
                 font.pixelSize: 12
                 visible: !!text
-                text: root.record && root.record.proofreadingHints && root.record.proofreadingHints.omittedTerms.length ? "Cleanup vocabulary omitted: " + root.record.proofreadingHints.omittedTerms.join(", ") : ""
+                text: root.record ? root.hintText("Text cleanup vocabulary", root.record.proofreadingHints) : ""
             }
 
             SLabel {
@@ -222,7 +272,7 @@ ColumnLayout {
                 color: root.ui.c.muted
                 font.pixelSize: 12
                 visible: !!text
-                text: root.record && root.record.proofreading ? "Cleanup: " + root.model(root.record.proofreading) : ""
+                text: root.record && root.record.proofreading ? "Text cleanup: " + root.model(root.record.proofreading) : ""
             }
 
         }
@@ -245,7 +295,7 @@ ColumnLayout {
 
         SButton {
             ui: root.ui
-            text: "Open original"
+            text: "Open original recording"
             visible: !!root.record && !!root.record.originalAudio
             enabled: root.history.available && !root.history.acting && !bridge.preview
             onClicked: root.history.openAudio("original")
@@ -258,7 +308,7 @@ ColumnLayout {
                 required property var modelData
                 required property int index
                 ui: root.ui
-                text: "Open original run " + (index + 1)
+                text: "Open original recording, part " + (index + 1)
                 enabled: root.history.available && !root.history.acting && !bridge.preview
                 onClicked: root.history.openAudio("original", modelData.runID)
             }

@@ -280,14 +280,20 @@ export class CaptureSessions {
       this.active = session;
       if (button) {
         const aborted = () => {
-          void this.fail(session, "The button destination was disarmed or disconnected.");
+          void this.fail(
+            session,
+            "The DJI button stopped pointing at this computer, so recording stopped.",
+          );
         };
         button.signal.addEventListener("abort", aborted, { once: true });
         session.detachButton = () => button?.signal.removeEventListener("abort", aborted);
       }
       session.timer = setInterval(() => {
         if (session.state !== "stopping" && Date.now() >= session.leaseUntil)
-          void this.fail(session, "The destination stopped renewing its recording lease.");
+          void this.fail(
+            session,
+            "This computer lost contact with the server, so recording stopped.",
+          );
         else if (!this.safeEligible(session.source)) {
           if (session.state === "preparing")
             this.abortPreparation(
@@ -298,7 +304,11 @@ export class CaptureSessions {
                 "The microphone became unavailable before recording was ready.",
               ),
             );
-          else void this.fail(session, "The microphone became unavailable or its status expired.");
+          else
+            void this.fail(
+              session,
+              "The microphone disconnected or stopped responding, so recording stopped.",
+            );
         }
       }, 250);
       session.timer.unref();
@@ -365,7 +375,7 @@ export class CaptureSessions {
                   "The microphone could not start recording.",
                 ),
               );
-            else void this.fail(session, "The microphone lost its audio source.");
+            else void this.fail(session, "The microphone lost its audio, so recording stopped.");
           },
         }),
         captureLimits.readyMS,
@@ -540,7 +550,8 @@ export class CaptureSessions {
   async shutdown() {
     this.stopping = true;
     await this.admission;
-    if (this.active) await this.fail(this.active, "The capture host is shutting down.");
+    if (this.active)
+      await this.fail(this.active, "The server is shutting down, so recording stopped.");
     // A first discovery after upgrading records which microphones stay shared.
     await this.sharing.settled().catch((error: unknown) => {
       console.error("Microphone sharing could not be saved; review it after restarting.", error);

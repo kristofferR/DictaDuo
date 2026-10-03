@@ -66,6 +66,40 @@ test("GUI shortcut release waits for the preceding press check", async () => {
   expect(actions).toEqual(["start", "stop"]);
 });
 
+test("GUI undo and copy-last requests reach the controller", async () => {
+  const config = parseConfig({
+    server: "http://localhost:8394",
+    tokenFile: "/private/token",
+    destinationHelper: "/private/helper",
+    device: { id: "desktop", name: "Desktop" },
+    sources: {
+      server: "http://localhost:8394",
+      hostID: "desktop",
+      mode: "automatic",
+      priority: [],
+    },
+  });
+  const desktop: Desktop = {
+    unlocked: async () => true,
+    capture: async () => {
+      throw new Error("not used");
+    },
+    defaultInput: async () => undefined,
+    notify() {},
+  };
+  const controller = new Controller(
+    new API(config.server, "t"),
+    desktop,
+    config.device,
+    config.sources,
+  );
+  let undone = 0;
+  controller.undo = () => void undone++;
+  const gui = createGUIHandler(new API(config.server, "t"), controller, desktop, config);
+  await gui({ version: 1, action: "undo" });
+  expect(undone).toBe(1);
+  await expect(gui({ version: 1, action: "copyLast" })).rejects.toThrow("no dictation to copy");
+});
 test("GUI requests are versioned and scoped; source preferences persist without losing private configuration", async () => {
   const dir = await mkdtemp(join(tmpdir(), "sottoduo-gui-"));
   const previous = process.env.SOTTODUO_CLIENT_CONFIG;

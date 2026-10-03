@@ -25,7 +25,7 @@ export async function saveSharedPreferences(api: API, value: unknown) {
     snapshot = validateBody("PreferencesSnapshot", value);
   } catch {
     throw new ClientNotice(
-      "Check the settings: list names, preferred spellings and cleanup instructions cannot be empty, and each word allows up to 8 replacement phrases.",
+      "Check the settings: list names, preferred spellings and text cleanup instructions cannot be empty, and each word allows up to 8 replacement phrases.",
     );
   }
   const dictionary = decodePersonalDictionary(snapshot.preferences.dictionary);
@@ -61,7 +61,7 @@ export async function saveSharedPreferences(api: API, value: unknown) {
         );
       if (error.status === 400)
         throw new ClientNotice(
-          "The server rejected these settings. Check the dictionary and cleanup instructions, then try again.",
+          "The server rejected these settings. Check the dictionary and text cleanup instructions, then try again.",
         );
     }
     throw new ClientNotice(

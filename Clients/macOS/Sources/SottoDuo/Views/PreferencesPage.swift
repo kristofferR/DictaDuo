@@ -126,8 +126,19 @@ struct ServerPreferencesPage: View {
     @State private var draft = ServerPreferences()
     @State private var base: PreferencesSnapshot?
     @State private var expandedLists = Set<String>()
+    @State private var listPendingRemoval: String?
 
     private var dirty: Bool { base.map { draft != $0.preferences } ?? false }
+    /// The draft as saved. One replacement phrase per line: blank lines are editing leftovers, not phrases.
+    private var cleanedDraft: ServerPreferences {
+        var value = draft
+        for list in value.dictionary.lists.indices {
+            for entry in value.dictionary.lists[list].entries.indices {
+                value.dictionary.lists[list].entries[entry].aliases.removeAll { $0.isEmpty }
+            }
+        }
+        return value
+    }
     private var changedRemotely: Bool {
         guard let base, let latest = controller.sharedPreferences else { return false }
         return dirty && base.revision != latest.revision
@@ -137,6 +148,9 @@ struct ServerPreferencesPage: View {
     private var engineChoice: Bool {
         draft.recognitionEngine != nil && (controller.serverHealth?.recognitionEngines?.count ?? 0) > 1
     }
+    private var installedEngines: [RecognitionEngine] { controller.serverHealth?.recognitionEngines ?? [] }
+    /// Recognition runs locally with Parakeet, which ignores language and vocabulary.
+    private var parakeet: Bool { draft.recognitionEngine == .parakeet && installedEngines.contains(.parakeet) }
     private var engine: Binding<RecognitionEngine> {
         Binding { draft.recognitionEngine ?? .whisper } set: { draft.recognitionEngine = $0 }
     }
@@ -147,6 +161,13 @@ struct ServerPreferencesPage: View {
         ("Russian", "ru"), ("Ukrainian", "uk"), ("Swedish", "sv")
     ]
 
+
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(SottoDuoPalette.muted)
+            .fixedSize(horizontal: false, vertical: true)
+    }
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
@@ -156,10 +177,12 @@ struct ServerPreferencesPage: View {
                     .disabled(!dirty)
                 Button("Save shared preferences") {
                     controller.errorMessage = nil
+                    // The saved value must equal the draft, so the reply is recognized as this save.
+                    draft = cleanedDraft
                     controller.updateSharedPreferences(draft, expectedRevision: base?.revision)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!available || !dirty || changedRemotely || draft.validationError != nil || controller.isSavingPreferences)
+                .disabled(!available || !dirty || changedRemotely || cleanedDraft.validationError != nil || controller.isSavingPreferences)
                 .accessibilityIdentifier("preferences.save-shared")
             }
             .frame(height: 34)
@@ -170,7 +193,7 @@ struct ServerPreferencesPage: View {
             HStack {
                 SottoDuoActionMessage(message: changedRemotely
                     ? "Shared preferences changed on another device. Reload to continue."
-                    : (draft.validationError ?? controller.errorMessage))
+                    : (cleanedDraft.validationError ?? controller.errorMessage))
                 Button("Reload") { loadLatest() }
                     .opacity(changedRemotely ? 1 : 0)
                     .disabled(!changedRemotely)
@@ -181,7 +204,7 @@ struct ServerPreferencesPage: View {
                 if let health = controller.serverHealth {
                     Section {
                         runtimeRow("Voice", runtime: health.speech)
-                        runtimeRow("Proofreading", runtime: health.proofreading)
+                        runtimeRow("Text cleanup", runtime: health.proofreading)
                     } header: { Text("Server models").textCase(nil) }
                 }
                 Section {
@@ -193,20 +216,32 @@ struct ServerPreferencesPage: View {
                     .help("Automatic uses Soniox when configured on the server. Local only never sends audio to Soniox.")
                     .accessibilityIdentifier("preferences.recognition-mode")
                     if engineChoice {
-                        Picker("Local engine", selection: engine) {
-                            Text("Whisper large-v3-turbo").tag(RecognitionEngine.whisper)
-                            Text("Parakeet v3").tag(RecognitionEngine.parakeet)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Picker("Local engine", selection: engine) {
+                                Text("Whisper large-v3-turbo").tag(RecognitionEngine.whisper)
+                                Text("Parakeet v3").tag(RecognitionEngine.parakeet)
+                            }
+                            .accessibilityIdentifier("preferences.recognition-engine")
+                            caption(parakeet
+                                ? "Faster. Detects 25 European languages on its own, not Norwegian, and ignores recognition vocabulary."
+                                : "Slower. Follows the Language setting and uses recognition vocabulary.")
                         }
-                        .help("Parakeet is faster but recognizes only 25 European languages, not Norwegian, and ignores recognition vocabulary.")
-                        .accessibilityIdentifier("preferences.recognition-engine")
+                    } else if installedEngines.count == 1 {
+                        VStack(alignment: .leading, spacing: 4) {
+                            LabeledContent("Local engine", value: installedEngines[0] == .parakeet ? "Parakeet v3" : "Whisper large-v3-turbo")
+                            caption("The only engine installed on the server.")
+                        }
                     }
-                    Picker("Language", selection: $draft.language) {
-                        ForEach(languages, id: \.1) { name, code in Text(name).tag(code) }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Picker("Language", selection: $draft.language) {
+                            ForEach(languages, id: \.1) { name, code in Text(name).tag(code) }
+                        }
+                        if parakeet { caption("Used for cloud recognition. Parakeet detects the language itself.") }
                     }
-                    Toggle("Proofread with Qwen", isOn: $draft.textCorrectionEnabled)
+                    Toggle("Clean up text after transcribing", isOn: $draft.textCorrectionEnabled)
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("Cleanup instructions")
+                            Text("Text cleanup instructions")
                             Spacer()
                             Button("Reset to default") {
                                 draft.proofreadingPrompt = ServerPreferences.defaultProofreadingPrompt
@@ -221,14 +256,16 @@ struct ServerPreferencesPage: View {
                             .frame(height: 352)
                             .background(SottoDuoPalette.surface, in: RoundedRectangle(cornerRadius: 6))
                             .overlay { RoundedRectangle(cornerRadius: 6).stroke(SottoDuoPalette.muted.opacity(0.25)) }
-                            .accessibilityLabel("Cleanup instructions")
+                            .accessibilityLabel("Text cleanup instructions")
                             .accessibilityIdentifier("preferences.cleanup-prompt")
                     }
-                    TextField("Recognition vocabulary", text: $draft.vocabulary, axis: .vertical)
-                        .lineLimit(3...5)
-                        .help(draft.recognitionEngine == .parakeet
-                            ? "Parakeet ignores recognition vocabulary. Dictionary replacements and cleanup still apply."
-                            : "Names and specialized terms to help voice recognition.")
+                    VStack(alignment: .leading, spacing: 4) {
+                        TextField("Recognition vocabulary", text: $draft.vocabulary, axis: .vertical)
+                            .lineLimit(3...5)
+                        caption(parakeet
+                            ? "Parakeet ignores this list. Dictionary replacements and text cleanup still apply."
+                            : "Names and specialized terms that help recognition.")
+                    }
                 } header: { Text("Processing").textCase(nil) }
                 .disabled(!available)
 
@@ -264,6 +301,9 @@ struct ServerPreferencesPage: View {
     }
 
     @ViewBuilder private var dictionaryEditor: some View {
+        Text("\(draft.dictionary.lists.reduce(0) { $0 + $1.entries.count }) of 500 words · up to 32 lists")
+            .font(.caption)
+            .foregroundStyle(SottoDuoPalette.muted)
         ForEach($draft.dictionary.lists) { $list in
             DisclosureGroup(isExpanded: Binding(
                 get: { expandedLists.contains(list.id) },
@@ -274,13 +314,15 @@ struct ServerPreferencesPage: View {
                     HStack(alignment: .top, spacing: 10) {
                         VStack(alignment: .leading, spacing: 8) {
                             TextField("Preferred spelling", text: $entry.term)
-                            TextField("Words or phrases to replace, separated by commas", text: Binding(
-                                get: { entry.aliases.joined(separator: ", ") },
+                            TextField("Replacement phrases, one per line (up to 8)", text: Binding(
+                                get: { entry.aliases.joined(separator: "\n") },
                                 set: { value in
-                                    entry.aliases = value.isEmpty ? [] : value.components(separatedBy: ",")
+                                    // One phrase per line, so a phrase may contain a comma.
+                                    entry.aliases = value.isEmpty ? [] : value.components(separatedBy: .newlines)
                                         .map { $0.trimmingCharacters(in: .whitespaces) }
                                 }
-                            ))
+                            ), axis: .vertical)
+                            .lineLimit(1...8)
                             .font(.caption)
                             .help("Use narrow phrases: preferred ‘auth middleware’, replace ‘off middleware’. Replacing ‘off’ alone also changes ordinary uses of that word.")
                         }
@@ -305,9 +347,7 @@ struct ServerPreferencesPage: View {
                 HStack {
                     Button("Add word") { list.entries.append(DictionaryEntry(term: "")) }
                     Spacer()
-                    Button("Remove list", role: .destructive) {
-                        draft.dictionary.lists.removeAll { $0.id == list.id }
-                    }
+                    Button("Remove list", role: .destructive) { listPendingRemoval = list.id }
                 }
                 .padding(.top, 8)
             } label: {
@@ -322,6 +362,17 @@ struct ServerPreferencesPage: View {
             let list = DictionaryList(name: "New list")
             draft.dictionary.lists.append(list)
             expandedLists.insert(list.id)
+        }
+        .confirmationDialog(
+            "Remove “\(draft.dictionary.lists.first { $0.id == listPendingRemoval }?.name ?? "list")”?",
+            isPresented: Binding(get: { listPendingRemoval != nil }, set: { if !$0 { listPendingRemoval = nil } })
+        ) {
+            Button("Remove list", role: .destructive) {
+                draft.dictionary.lists.removeAll { $0.id == listPendingRemoval }
+                listPendingRemoval = nil
+            }
+        } message: {
+            Text("Its words are removed when you save. Discard changes brings them back before then.")
         }
     }
 

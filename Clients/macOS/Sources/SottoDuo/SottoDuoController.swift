@@ -220,6 +220,8 @@ final class SottoDuoController: ObservableObject {
     private var recordingBaseSeconds: TimeInterval = 0
     private var capturePowerActivity: NSObjectProtocol?
     private var microphoneStartTask: Task<Void, Never>?
+    /// The latest connection check; a slower, older one never applies its result.
+    private var connectionProbe: Task<Void, Never>?
     private var recorderStopTask: Task<CapturedAudio, Error>?
     private var deliveryTail: Task<Void, Never>?
     private var insertionRebases = ConfirmedInsertionRebases<InsertionTarget>()
@@ -416,7 +418,9 @@ final class SottoDuoController: ObservableObject {
             let health = try await connection.health()
             guard endpoint == preferences.endpoint, !Task.isCancelled else { return }
             serverHealth = health
-            serverStatusMessage = health.apiVersion != SottoDuoAPI.version ? "Server API version is incompatible"
+            serverStatusMessage = health.apiVersion != SottoDuoAPI.version
+                ? (health.apiVersion > SottoDuoAPI.version ? "The server is newer than this app. Update SottoDuo on this Mac."
+                    : "The server is older than this app. Update SottoDuo on the server.")
                 : (health.ready ? "Server online" : (health.message ?? "Server models are not ready"))
             if !isBusy, activity == .idle { statusMessage = isServerReady ? "Ready when you are" : serverStatusMessage }
             if refreshData {
@@ -443,8 +447,53 @@ final class SottoDuoController: ObservableObject {
         }
     }
 
+    /// Checks the address, token and API version before replacing a working connection.
     func saveConnection(endpoint: String, token: String, deviceName: String) {
         guard !isBusy, wisprFlowImportTask == nil else { return }
+        // Probe with the token exactly as it will be saved.
+        let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Only the newest attempt may apply its connection.
+        connectionProbe?.cancel()
+        connectionProbe = nil
+        guard serverClientFactory == nil, let probe = try? ServerClient(endpoint: endpoint, token: trimmedToken) else {
+            applyConnection(endpoint: endpoint, token: token, deviceName: deviceName)
+            return
+        }
+        serverStatusMessage = "Checking connection…"
+        connectionProbe = Task { [weak self] in
+            do {
+                let health = try await probe.health()
+                guard let self, !Task.isCancelled else { return }
+                guard health.apiVersion == SottoDuoAPI.version else {
+                    errorMessage = health.apiVersion > SottoDuoAPI.version
+                        ? "The server is newer than this app. Update SottoDuo on this Mac."
+                        : "The server is older than this app. Update SottoDuo on the server."
+                    refreshServer()
+                    return
+                }
+                // Health needs no token, so check it against an authenticated endpoint.
+                _ = try await probe.preferences()
+                guard !Task.isCancelled else { return }
+                // Work may have started on the current server while the check ran.
+                guard !isBusy, wisprFlowImportTask == nil else {
+                    errorMessage = "Finish dictation or the import before changing the connection."
+                    refreshServer()
+                    return
+                }
+                applyConnection(endpoint: endpoint, token: token, deviceName: deviceName)
+            } catch {
+                guard let self, !Task.isCancelled else { return }
+                if case ServerClientError.rejected(let status, _) = error, [401, 403].contains(status) {
+                    errorMessage = "The server rejected this access token. Check it and try again."
+                } else {
+                    errorMessage = "Couldn't reach a SottoDuo server at that address. Check it and that the server is running."
+                }
+                refreshServer()
+            }
+        }
+    }
+
+    private func applyConnection(endpoint: String, token: String, deviceName: String) {
         guard preferences.save(endpoint: endpoint, token: token, deviceName: deviceName) else {
             errorMessage = preferences.errorMessage
             return
@@ -768,14 +817,12 @@ final class SottoDuoController: ObservableObject {
                 case .partial:
                     counts.partial += 1
                     if counts.unarchivedWarning == nil {
-                        let sourceReported = session.unarchivedArtifacts.map { omitted in
-                            "\(omitted.filename.rawValue) (\(ByteCountFormatter.string(fromByteCount: Int64(omitted.byteCount), countStyle: .file)), SHA-256 \(omitted.sha256))"
-                        }
-                        let mediaNames = sourceReported.isEmpty
-                            ? result.unarchivedArtifactNames.map(\.rawValue).joined(separator: ", ")
-                            : sourceReported.joined(separator: ", ")
-                        let mediaWarning = mediaNames.isEmpty ? nil
-                            : "Session \(sourceID.uuidString) has unarchived media: \(mediaNames). Source version details are in source.json."
+                        // Exact sizes and hashes stay in each entry's source data, not the UI.
+                        let names = session.unarchivedArtifacts.isEmpty
+                            ? result.unarchivedArtifactNames.map(\.rawValue)
+                            : session.unarchivedArtifacts.map(\.filename.rawValue)
+                        let mediaWarning = names.isEmpty ? nil
+                            : "Some recordings are missing files Wispr Flow did not keep (\(Set(names).sorted().joined(separator: ", "))). Each entry's Full source data lists them."
                         let warnings = [mediaWarning, session.provenanceWarning].compactMap { $0 }
                         if !warnings.isEmpty { counts.unarchivedWarning = warnings.joined(separator: "\n") }
                     }
@@ -908,6 +955,13 @@ final class SottoDuoController: ObservableObject {
             }
             catch { errorMessage = error.localizedDescription }
         }
+    }
+
+    /// A long recording paused before it finished; only the computer that made it can resume it.
+    func isPausedRecording(_ id: UUID) -> Bool {
+        guard let snapshot = recordingSnapshots[id] else { return false }
+        return snapshot.captureState == .interrupted && snapshot.processingState != .completed
+            && snapshot.processingState != .failed
     }
 
     func recordingGapSeconds(_ id: UUID) -> TimeInterval {
@@ -1312,7 +1366,7 @@ final class SottoDuoController: ObservableObject {
             }
         }
         if pendingRecordingCount > 0 && recoveryMessage == nil {
-            recoveryMessage = "\(pendingRecordingCount) saved recording\(pendingRecordingCount == 1 ? "" : "s") pending recovery"
+            recoveryMessage = "\(pendingRecordingCount) recording\(pendingRecordingCount == 1 ? "" : "s") saved on this Mac \(pendingRecordingCount == 1 ? "is" : "are") waiting to upload"
         }
     }
 

@@ -80,6 +80,8 @@ const outputKeys = [
   "proofreadingHints",
   "proofreading",
   "continuation",
+  // The previous text was delivered, not the retried one.
+  "delivery",
 ] as const;
 const MAX_PREFERENCES_BYTES = 262_144;
 const MAX_CHUNK_BYTES = 1_048_576;
@@ -275,17 +277,20 @@ export class GenerationService {
       if (!terminal(record)) {
         if (record.capture) record.capture.state = "stopped";
         record.status = "failed";
-        record.error = "Server restarted before this generation completed.";
-        await this.restorePreviousOutput(record);
+        record.error =
+          "The server restarted before this finished. Transcribe it again from History.";
+        const restored = await this.restorePreviousOutput(record);
         if (record.recognition) delete record.recognition.partialText;
         record.updatedAt = now();
         delete record.progress;
         await this.cleanPartial(id);
-        if (Buffer.byteLength(JSON.stringify(record)) <= MAX_METADATA_BYTES)
+        if (Buffer.byteLength(JSON.stringify(record)) <= MAX_METADATA_BYTES) {
           await atomicPrivateWrite(
             join(this.directory(id), "metadata.json"),
             JSON.stringify(record),
           );
+          if (restored) await this.discardPreviousOutput(id);
+        }
       }
       this.records.set(id, record);
       this.imports.indexRecord(record);
@@ -364,14 +369,16 @@ export class GenerationService {
         : ready
           ? "Server ready."
           : this.preferences.preferences.recognitionMode === "cloud" && !this.configuration.soniox
-            ? "Soniox API key is not configured."
+            ? "Cloud transcription needs a Soniox API key on the server. Add one, or choose Local."
             : this.warming
               ? "Loading server models…"
-              : "Server models are unavailable.";
+              : "The server's speech models are unavailable. Check the server log.";
       if (!state.speechLoaded) this.beginWarmup();
       return {
         apiVersion: API_VERSION,
         generationRetry: true,
+        cloudRecognition: !!this.configuration.soniox,
+        features: ["retry-completed"],
         recognitionEngines: [...this.engines],
         serverVersion: "0.1.0",
         isDev: this.configuration.development,
@@ -393,7 +400,7 @@ export class GenerationService {
           message: this.preferences.preferences.textCorrectionEnabled
             ? state.proofLoaded
               ? undefined
-              : "Unavailable; deterministic text is preserved."
+              : "Unavailable. Text is kept as transcribed."
             : "Disabled",
         },
         message,
@@ -885,11 +892,11 @@ export class GenerationService {
           "not_retryable",
           "This recording has no saved audio to transcribe again.",
         );
-      if (record.status !== "failed" && record.status !== "cancelled")
+      if (!terminal(record))
         throw new ServiceError(
           409,
           "not_retryable",
-          "Only failed or cancelled recordings can be transcribed again.",
+          "Only finished recordings can be transcribed again.",
         );
       if (!state.available) {
         // The take's frozen engine may differ from the shared preference.
@@ -898,10 +905,14 @@ export class GenerationService {
       }
       // Keep the saved audio and metadata, but drop the previous run's output.
       // A transcript it replaces stays recoverable until the retry succeeds.
-      if (record.rawText)
+      // A completed take is backed up even when it recognized no speech.
+      if (record.rawText || record.status === "completed")
         await atomicPrivateWrite(
           join(this.directory(record.id), PREVIOUS_OUTPUT),
-          JSON.stringify(Object.fromEntries(outputKeys.map((key) => [key, record[key]]))),
+          JSON.stringify({
+            ...Object.fromEntries(outputKeys.map((key) => [key, record[key]])),
+            previousStatus: record.status,
+          }),
         );
       delete record.error;
       for (const key of outputKeys) delete record[key];
@@ -929,21 +940,48 @@ export class GenerationService {
     });
   }
   /**
-   * A retry that failed before producing new speech gives back the transcript
-   * it replaced; newer text from the retry wins.
+   * A retry that did not finish gives back the whole output it replaced, even
+   * when it had recognized new speech before failing or being interrupted. A
+   * finished take stays finished; callers set the failure first, which then
+   * becomes the explanation of why nothing changed. Returns false when the
+   * backup must be kept because restoring it failed.
    */
-  private async restorePreviousOutput(record: GenerationRecord) {
-    const path = join(this.directory(record.id), PREVIOUS_OUTPUT);
-    if (!record.rawText) {
-      try {
-        const previous = JSON.parse(
-          (await readRegularFile(path, MAX_METADATA_BYTES)).toString("utf8"),
-        ) as Partial<GenerationRecord>;
-        for (const key of outputKeys)
-          if (previous[key] !== undefined) Object.assign(record, { [key]: previous[key] });
-      } catch {}
+  private async restorePreviousOutput(record: GenerationRecord): Promise<boolean> {
+    if (record.finalText) return true;
+    let previous: Partial<GenerationRecord> & { previousStatus?: GenerationRecord["status"] };
+    try {
+      previous = JSON.parse(
+        (
+          await readRegularFile(
+            join(this.directory(record.id), PREVIOUS_OUTPUT),
+            MAX_METADATA_BYTES,
+          )
+        ).toString("utf8"),
+      );
+    } catch (error) {
+      // No backup means nothing to restore; an unreadable one is kept.
+      return (error as NodeJS.ErrnoException).code === "ENOENT";
     }
-    await rm(path, { force: true }).catch(() => {});
+    for (const key of outputKeys)
+      if (previous[key] !== undefined) Object.assign(record, { [key]: previous[key] });
+    if (previous.previousStatus === "completed") {
+      try {
+        // The retry may already have replaced the transcript artifact.
+        await atomicPrivateWrite(
+          join(this.directory(record.id), "transcript.txt"),
+          record.finalText,
+        );
+      } catch {
+        return false;
+      }
+      record.status = "completed";
+      record.error = `Transcribing again stopped: ${record.error ?? "it did not finish."} The previous transcript is kept.`;
+    }
+    return true;
+  }
+  /** The backup goes only once the restored record is saved; a restart restores it again. */
+  private async discardPreviousOutput(id: string) {
+    await rm(join(this.directory(id), PREVIOUS_OUTPUT), { force: true }).catch(() => {});
   }
   private async savedContinuation(id: string): Promise<DictationContinuation | undefined> {
     try {
@@ -1127,10 +1165,13 @@ export class GenerationService {
     if (record.recognition) delete record.recognition.partialText;
     record.error = message;
     delete record.progress;
-    await this.restorePreviousOutput(record);
+    const restored = await this.restorePreviousOutput(record);
     record.updatedAt = now();
     this.processingControllers.get(record.id)?.abort();
-    await this.save(record).catch(() => this.publish(record));
+    await this.save(record).then(
+      () => (restored ? this.discardPreviousOutput(record.id) : undefined),
+      () => this.publish(record),
+    );
     await this.cleanPartial(record.id);
     return copy(record);
   }
@@ -1459,13 +1500,16 @@ export class GenerationService {
         // A retry may have queued the record again since, so leave it alone.
         if (!record || terminal(record) || signal.aborted) return;
         const failed = copy(record);
-        await this.restorePreviousOutput(failed);
-        if (failed.recognition) delete failed.recognition.partialText;
         failed.status = "failed";
         failed.error = error instanceof Error ? error.message : "Processing failed.";
+        const restored = await this.restorePreviousOutput(failed);
+        if (failed.recognition) delete failed.recognition.partialText;
         failed.updatedAt = now();
         delete failed.progress;
-        await this.save(failed).catch(() => this.publish(failed));
+        await this.save(failed).then(
+          () => (restored ? this.discardPreviousOutput(failed.id) : undefined),
+          () => this.publish(failed),
+        );
       });
     } finally {
       await this.mutate(() => {

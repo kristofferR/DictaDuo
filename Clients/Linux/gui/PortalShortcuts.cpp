@@ -133,12 +133,15 @@ void PortalShortcuts::created(void *source, void *result) {
       session, "activated",
       G_CALLBACK(+[](XdpGlobalShortcutsSession *, char *id, guint64, GVariant *,
                      gpointer user) {
+        auto *self = static_cast<PortalShortcuts *>(user);
         if (g_strcmp0(id, "dictate") == 0)
-          QMetaObject::invokeMethod(static_cast<PortalShortcuts *>(user),
-                                    [self = static_cast<PortalShortcuts *>(user)] {
-                                      emit self->pressed();
-                                    },
+          QMetaObject::invokeMethod(self, [self] { emit self->pressed(); },
                                     Qt::QueuedConnection);
+        else if (g_strcmp0(id, "cancel") == 0 || g_strcmp0(id, "copy") == 0 ||
+                 g_strcmp0(id, "undo") == 0)
+          QMetaObject::invokeMethod(
+              self, [self, name = QString::fromUtf8(id)] { emit self->action(name); },
+              Qt::QueuedConnection);
       }),
       this);
   g_signal_connect(
@@ -169,6 +172,12 @@ void PortalShortcuts::created(void *source, void *result) {
       reinterpret_cast<GDestroyNotify>(xdp_global_shortcut_free));
   g_ptr_array_add(shortcuts, xdp_global_shortcut_new(
                                   "dictate", "Hold to dictate with SottoDuo", "F8"));
+  g_ptr_array_add(shortcuts, xdp_global_shortcut_new(
+                                  "cancel", "Cancel SottoDuo dictation", ""));
+  g_ptr_array_add(shortcuts, xdp_global_shortcut_new(
+                                  "copy", "Copy the last SottoDuo dictation", ""));
+  g_ptr_array_add(shortcuts, xdp_global_shortcut_new(
+                                  "undo", "Paste a cancelled SottoDuo dictation", ""));
   m_shortcuts = shortcuts;
   xdp_global_shortcuts_session_bind_shortcuts(
       session, shortcuts, nullptr, nullptr,

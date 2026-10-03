@@ -61,7 +61,7 @@ struct HistoryPage: View {
             .layoutPriority(1)
 
             HStack {
-                Text("\(filtered.count) sessions\(controller.hasMoreHistory ? " loaded" : "")")
+                Text("\(filtered.count) \(filtered.count == 1 ? "dictation" : "dictations")\(controller.hasMoreHistory ? " loaded" : "")")
                     .font(.caption)
                     .foregroundStyle(SottoDuoPalette.muted)
                 Spacer()
@@ -134,7 +134,7 @@ struct HistoryPage: View {
                                     .accessibilityLabel("Discard saved recording")
                             }
                             HStack {
-                                Text(controller.pendingRecordingIsPaused(recording.id) ? "Recording paused" : "Awaiting processing")
+                                Text(controller.pendingRecordingIsPaused(recording.id) ? "Paused" : "Saved on this Mac, waiting to upload")
                                 Spacer()
                                 Text(sottoduoDuration(controller.pendingRecordingAudioSeconds(recording.id))).monospacedDigit()
                             }
@@ -142,14 +142,16 @@ struct HistoryPage: View {
                             HStack {
                                 Button("Resume") { controller.resumePendingRecording(recording.id) }
                                     .disabled(!controller.canResumePendingRecording(recording.id))
+                                    .help("Keep recording into this take.")
                                 Button("Finish") { controller.finishPendingRecording(recording.id) }
                                     .disabled(!controller.canFinishPendingRecording(recording.id))
+                                    .help("Stop here and transcribe what was saved.")
                             }
                             .buttonStyle(.borderless)
                         }
                         .padding(.vertical, 8)
                     }
-                    Button("Retry synchronization", action: controller.retryPendingRecordings)
+                    Button("Upload saved recordings", action: controller.retryPendingRecordings)
                         .buttonStyle(.borderless)
                         .disabled(controller.isBusy)
                 }
@@ -205,17 +207,19 @@ struct HistoryPage: View {
                         .help("Copy transcript")
                         .accessibilityLabel("Copy transcript")
                     Button { confirmingDelete = true } label: { Image(systemName: "trash") }
-                        .disabled(!selected.status.isTerminal || controller.serverHealth == nil)
+                        .disabled(!(selected.status.isTerminal || controller.isPausedRecording(selected.id)) || controller.serverHealth == nil)
                         .help("Delete from server")
                         .accessibilityLabel("Delete dictation")
                 }
                 HStack(spacing: 12) {
                     Label(sourceLabel(selected),
                           systemImage: selected.importedSource == nil ? "laptopcomputer" : "square.and.arrow.down")
-                    if selected.importedSource == nil { Text(statusLabel(selected.status)) }
-                    if selected.delivery?.status == "cancelled" { Text("Not pasted") }
+                    if selected.importedSource == nil {
+                        Text(controller.isPausedRecording(selected.id) ? "Paused on \(selected.device.name)" : statusLabel(selected.status))
+                    }
+                    if let delivery = deliveryLabel(selected.delivery?.status) { Text(delivery) }
                     if let sourceStatus = selected.importedSource?.sourceStatus, !sourceStatus.isEmpty {
-                        Text("Flow status: \(sourceStatus)")
+                        Text("Wispr Flow: \(sourceStatus)")
                     }
                     if selected.audioSeconds > 0 { Text(sottoduoDuration(selected.audioSeconds)).monospacedDigit() }
                     let gapSeconds = controller.recordingGapSeconds(selected.id)
@@ -240,7 +244,7 @@ struct HistoryPage: View {
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         if !selected.rawText.isEmpty && selected.rawText != selected.finalText {
-                            DisclosureGroup(selected.importedSource == nil ? "Original transcript" : "Wispr Flow ASR") {
+                            DisclosureGroup(selected.importedSource == nil ? "Original transcript" : "Wispr Flow's transcript") {
                                 Text(selected.rawText)
                                     .font(.callout)
                                     .foregroundStyle(SottoDuoPalette.muted)
@@ -250,16 +254,16 @@ struct HistoryPage: View {
                             }
                         }
                         if let source = selected.importedSource, !source.variantNames.isEmpty {
-                            Text("Stored text versions: \(source.variantNames.joined(separator: ", "))")
+                            Text("Text versions from Wispr Flow: \(source.variantNames.joined(separator: ", "))")
                                 .font(.caption)
                                 .foregroundStyle(SottoDuoPalette.muted)
                         }
                         if let reason = selected.formattingRejectionReason {
-                            Text(reason).font(.caption).foregroundStyle(SottoDuoPalette.warning)
+                            Text("List formatting skipped: \(reason)").font(.caption).foregroundStyle(SottoDuoPalette.warning)
                         }
                         if let processing = selected.textProcessing {
                             if let reason = processing.reason {
-                                Text(reason).font(.caption).foregroundStyle(SottoDuoPalette.warning)
+                                Text("\(cleanupLabel(processing.status)): \(reason)").font(.caption).foregroundStyle(SottoDuoPalette.warning)
                             }
                             if processing.status == .rejected, let proposed = processing.proposedText {
                                 DisclosureGroup("Rejected cleanup") {
@@ -269,41 +273,44 @@ struct HistoryPage: View {
                             }
                         }
                         if let hints = selected.recognitionHints, !hints.omittedTerms.isEmpty {
-                            hintDetails("Voice vocabulary", hints: hints)
+                            hintDetails("Recognition vocabulary", hints: hints)
                         }
                         if let hints = selected.proofreadingHints, !hints.omittedTerms.isEmpty {
-                            hintDetails("Cleanup vocabulary", hints: hints)
+                            hintDetails("Text cleanup vocabulary", hints: hints)
                         }
                     }
                 }
                 .frame(maxHeight: .infinity)
                 Divider()
                 HStack {
-                    if selected.canTranscribeAgain && controller.serverHealth?.generationRetry == true {
+                    if selected.canTranscribeAgain {
+                        let supported = controller.serverHealth?.generationRetry == true
                         Button("Transcribe again") {
                             controller.errorMessage = nil
                             controller.retryGeneration(selected.id)
                         }
-                        .disabled(controller.serverHealth == nil || controller.retryingGenerationIDs.contains(selected.id))
-                        .help("Transcribe the saved audio again. Nothing is pasted.")
+                        .disabled(!supported || controller.retryingGenerationIDs.contains(selected.id))
+                        .help(supported ? "Transcribe the saved audio again. Nothing is pasted."
+                              : "Update SottoDuo on the server to transcribe recordings again.")
                     }
                     if selected.inferenceAudio != nil {
                         Button("Open audio") {
                             controller.errorMessage = nil
                             controller.openGenerationAudio(selected, kind: .inference)
                         }
+                        .help("The 16 kHz audio used for transcription.")
                     }
                     let originalRuns = controller.originalRecordingRuns(selected.id)
                     if originalRuns.count > 1 {
-                        Menu("Open original") {
+                        Menu("Open original recording") {
                             ForEach(Array(originalRuns.enumerated()), id: \.element.runID) { index, run in
-                                Button("Run \(index + 1) · \(run.format.sampleRate) Hz · \(run.format.channels) ch") {
+                                Button("Part \(index + 1)") {
                                     controller.openGenerationAudio(selected, kind: .original, runID: run.runID)
                                 }
                             }
                         }
                     } else if selected.originalAudio != nil || !originalRuns.isEmpty {
-                        Button("Open original") {
+                        Button("Open original recording") {
                             controller.errorMessage = nil
                             controller.openGenerationAudio(selected, kind: .original)
                         }
@@ -347,12 +354,37 @@ struct HistoryPage: View {
     private func statusLabel(_ status: GenerationStatus) -> String {
         switch status {
         case .receiving: "Recording"
-        case .queued: "Queued"
+        case .queued: "Waiting to transcribe"
         case .transcribing: "Transcribing"
-        case .proofreading: "Proofreading"
-        case .completed: "Completed"
-        case .failed: "Failed"
+        case .proofreading: "Cleaning up text"
+        case .completed: "Done"
+        case .failed: "Transcription failed"
         case .cancelled: "Cancelled"
+        }
+    }
+
+    /// One label table for the delivery statuses both clients write.
+    private func deliveryLabel(_ status: String?) -> String? {
+        switch status {
+        case "inserted": "Pasted"
+        case "listUpdated": "List updated"
+        case "copied": "Copied"
+        case "unconfirmed": "Check the field"
+        case "failed": "Couldn't paste"
+        case "tested": "Microphone test"
+        case "cancelled", "none": "Not pasted"
+        default: nil
+        }
+    }
+
+    private func cleanupLabel(_ status: TextProcessingRecord.Status?) -> String {
+        switch status {
+        case .disabled: "Text cleanup off"
+        case .unavailable: "Text cleanup unavailable"
+        case .applied: "Text cleaned up"
+        case .unchanged: "Text cleanup made no changes"
+        case .failed: "Text cleanup failed"
+        case .rejected, .skipped, nil: "Text cleanup skipped"
         }
     }
 
@@ -370,9 +402,9 @@ struct HistoryPage: View {
         switch filename {
         case .sourceJSON: "Full source data"
         case .sourceWAV: "Wispr Flow audio"
-        case .opusJSON: "Opus packets"
+        case .opusJSON: "Compressed audio (Opus)"
         case .screenshotPNG: "Screenshot"
-        case .builtInAudio: "Built-in audio (unarchived)"
+        case .builtInAudio: "Built-in audio (not imported)"
         }
     }
 
@@ -458,9 +490,9 @@ private struct WisprFlowImportSheet: View {
                 Divider()
                 countRow("With transcripts", count: preview.transcriptCount)
                 countRow("Without text", count: preview.sessionCount - preview.transcriptCount)
-                countRow("Metadata only", count: preview.metadataOnlyCount)
+                countRow("Details only, no text or audio", count: preview.metadataOnlyCount)
                 countRow("WAV found", count: preview.wavCount)
-                countRow("Opus packet sets", count: preview.opusCount)
+                countRow("Compressed audio", count: preview.opusCount)
                 countRow("Screenshots", count: preview.screenshotCount)
                 countRow("Dictionary entries to archive", count: preview.dictionaryCount)
                 if let knownCount {
@@ -492,7 +524,7 @@ private struct WisprFlowImportSheet: View {
             Text("\(counts.processed) of \(counts.total) processed")
                 .monospacedDigit()
                 .foregroundStyle(SottoDuoPalette.muted)
-            Text("\(counts.imported) imported · \(counts.enriched) enriched · \(counts.skipped) complete · \(counts.partial) partial · \(counts.failed) failed")
+            Text("\(counts.imported) new · \(counts.enriched) updated · \(counts.skipped) already here · \(counts.partial) missing files · \(counts.failed) failed")
                 .font(.caption)
         }
     }
@@ -504,10 +536,10 @@ private struct WisprFlowImportSheet: View {
                 .font(.headline)
             Text("\(counts.processed) of \(preview.sessionCount) sessions processed")
                 .monospacedDigit()
-            countRow("Imported", count: counts.imported)
-            countRow("Enriched", count: counts.enriched)
-            countRow("Already complete", count: counts.skipped)
-            countRow("Partial media", count: counts.partial)
+            countRow("New", count: counts.imported)
+            countRow("Updated with more files", count: counts.enriched)
+            countRow("Already in SottoDuo", count: counts.skipped)
+            countRow("Missing some files", count: counts.partial)
             countRow("Failed", count: counts.failed)
             if preview.dictionaryCount > 0 {
                 Text(counts.dictionaryArchived ? "Dictionary archived" : "Dictionary was not archived")
