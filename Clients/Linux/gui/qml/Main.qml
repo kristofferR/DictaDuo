@@ -261,9 +261,10 @@ ApplicationWindow {
                 app.notice = "Changes saved.";
         }
         function onFailed(action, message) {
-            // A window start that fails brings the window back, so its error is seen.
-            if (action === "start" && app.windowStartPending) {
-                app.windowStartPending = false;
+            // A window start or a tray copy that fails brings the window back, so its error is seen.
+            if (action === "copyLast" || (action === "start" && app.windowStartPending)) {
+                if (action === "start")
+                    app.windowStartPending = false;
                 app.show();
                 app.raise();
                 app.requestActivate();
