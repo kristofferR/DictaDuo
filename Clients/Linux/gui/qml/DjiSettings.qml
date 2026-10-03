@@ -7,6 +7,7 @@ Group {
     objectName: "djiSettings"
     title: "DJI button"
     property var receiver: null
+    property int connectionRevision: -1
     property bool checking: false
     property bool saving: false
     property bool targeting: false
@@ -127,6 +128,13 @@ Group {
     Connections {
         target: bridge
         function onSnapshotChanged() {
+            // Another server's computers and target must never be offered here.
+            const revision = bridge.snapshot.connectionRevision || 0;
+            if (bridge.connected && revision !== root.connectionRevision) {
+                root.connectionRevision = revision;
+                root.receiver = null;
+                root.checkReceiver();
+            }
             if (!bridge.connected) {
                 root.receiver = null;
                 root.checking = false;
