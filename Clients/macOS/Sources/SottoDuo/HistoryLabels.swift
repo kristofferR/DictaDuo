@@ -37,7 +37,9 @@ enum HistoryLabels {
         case .proofreading: return .init(label: "Cleaning up text", tone: .neutral)
         case .failed: return .init(label: "Couldn't transcribe", tone: .error)
         case .cancelled: return delivery("cancelled")
-        case .completed: return delivery(record.delivery?.status) ?? (record.mode == .test ? delivery("tested") : nil)
+        // List summaries of recording sessions carry no delivery receipt.
+        case .completed: return delivery(record.delivery?.status)
+            ?? (record.mode == .test ? delivery("tested") : .init(label: "Done", tone: .neutral))
         }
     }
 

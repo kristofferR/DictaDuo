@@ -93,7 +93,8 @@ ColumnLayout {
             return { label: "Couldn't transcribe", tone: "error", detail: "" };
         if (record.status === "cancelled")
             return deliveryStatus("cancelled");
-        return deliveryStatus(record.delivery ? record.delivery.status : "") || (record.mode === "test" ? deliveryStatus("tested") : null);
+        // List summaries of recording sessions carry no delivery receipt.
+        return deliveryStatus(record.delivery ? record.delivery.status : "") || (record.mode === "test" ? deliveryStatus("tested") : { label: "Done", tone: "neutral", detail: "" });
     }
 
     function languageName(code) {

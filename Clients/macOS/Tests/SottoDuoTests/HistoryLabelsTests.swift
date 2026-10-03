@@ -23,7 +23,7 @@ final class HistoryLabelsTests: XCTestCase {
         XCTAssertEqual(HistoryLabels.status(record(.failed), interrupted: false)?.tone, .error)
         XCTAssertEqual(HistoryLabels.status(record(.cancelled), interrupted: false)?.label, "Not pasted")
         XCTAssertEqual(HistoryLabels.status(record(.completed, mode: .test), interrupted: false)?.label, "Test (no paste)")
-        XCTAssertNil(HistoryLabels.status(record(.completed), interrupted: false))
+        XCTAssertEqual(HistoryLabels.status(record(.completed), interrupted: false)?.label, "Done")
         XCTAssertNil(HistoryLabels.delivery("not reported"))
         XCTAssertNil(HistoryLabels.cleanup(.disabled))
         XCTAssertEqual(HistoryLabels.cleanup(.rejected), "Cleanup not used (kept recognized text)")
