@@ -444,7 +444,11 @@ test("without a GUI, the undo window and safety cancellations are announced", as
   await record(f);
   await f.controller.cancelAll(false, true);
   await f.controller.settled();
-  expect(f.notices.map((notice) => notice.title)).toEqual(["Not pasted", "Recording", "Dictation cancelled"]);
+  expect(f.notices.map((notice) => notice.title)).toEqual([
+    "Not pasted",
+    "Recording",
+    "Dictation cancelled",
+  ]);
 });
 test("uncertain admission never opens a fallback microphone", async () => {
   const f = await fixture();

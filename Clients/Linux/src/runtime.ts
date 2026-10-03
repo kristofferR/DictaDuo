@@ -79,7 +79,12 @@ export class ClientRuntime {
   }
   gui(request: unknown): Promise<unknown> {
     // The GUI polls its snapshot and says whether take progress is on screen.
-    if (request && typeof request === "object" && "feedbackVisible" in request && request.feedbackVisible === true)
+    if (
+      request &&
+      typeof request === "object" &&
+      "feedbackVisible" in request &&
+      request.feedbackVisible === true
+    )
       this.guiSeenAt = Date.now();
     if (
       request &&
