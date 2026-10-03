@@ -243,8 +243,11 @@ export class CaptureSessions {
           "This microphone is not shared with other computers.",
         );
       const record = await this.store.createCapture(request, owner);
-      // Sharing may have been turned off while the session was being created.
-      if (button?.signal.aborted || (!local && !this.sharing.isShared(request.source))) {
+      // Sharing may have been turned off while a new session was being created.
+      if (
+        button?.signal.aborted ||
+        (!existing && !local && !this.sharing.isShared(request.source))
+      ) {
         await this.store.discard(record.id);
         throw closed();
       }

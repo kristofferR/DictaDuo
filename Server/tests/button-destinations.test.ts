@@ -210,6 +210,15 @@ test("a target change lets the current button take finish and never inherits a p
   // Back to "last computer I dictated on": nothing is selected until a shortcut take.
   await f.broker.setTarget({ mode: "lastDictated" });
   expect(f.broker.state().selected).toBeUndefined();
+  // Also when the switch happens during a take: the take finishes, then nothing is selected.
+  await f.broker.setTarget({ mode: "device", device: { id: "linux", name: "Linux" } });
+  f.advance(501);
+  f.broker.press("epoch", 2);
+  const take = f.broker.state(f.b).command!;
+  await f.broker.setTarget({ mode: "lastDictated" });
+  expect(f.broker.state().selected?.id).toBe(f.b);
+  f.broker.complete(f.b, take.takeID, f.owner);
+  expect(f.broker.state().selected).toBeUndefined();
 });
 test("a target that cannot be saved is reported and not applied", async () => {
   const f = fixture("/nonexistent-sottoduo-directory/button-target.json");

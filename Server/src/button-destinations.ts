@@ -52,6 +52,8 @@ export class ButtonDestinations {
   private timer: ReturnType<typeof setInterval>;
   private closed = false;
   private target: Target = { mode: "lastDictated" };
+  /** A take kept its old selection through a target change; clear it when it ends. */
+  private clearAfterRoute = false;
   private targetWrites: Promise<void> = Promise.resolve();
   constructor(
     private service: Pick<GenerationService, "captures" | "resolveResult">,
@@ -82,6 +84,7 @@ export class ButtonDestinations {
     this.target = next;
     // A take already recording finishes where it started; the new target applies after.
     if (changed && !this.route) this.selected = undefined;
+    else if (changed) this.clearAfterRoute = true;
     return this.state();
   }
   /** A pinned computer is selected whenever it is connected; "off" never selects. */
@@ -227,6 +230,11 @@ export class ButtonDestinations {
       this.route.controller.abort();
       this.route = undefined;
       delete this.registrations.get(id.toUpperCase())!.command;
+      if (this.clearAfterRoute) {
+        this.clearAfterRoute = false;
+        this.selected = undefined;
+        this.applyTarget();
+      }
     }
     return this.state(id);
   }
@@ -237,6 +245,7 @@ export class ButtonDestinations {
   private disarm() {
     const route = this.route;
     this.selected = undefined;
+    this.clearAfterRoute = false;
     this.route = undefined;
     if (route) {
       route.controller.abort();
