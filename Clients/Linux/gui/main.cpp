@@ -137,7 +137,7 @@ int main(int argc, char **argv) {
   auto *cancel = menu.addAction("Cancel dictation", &bridge,
                                 [&bridge] { bridge.request("cancel"); });
   auto *start = menu.addAction("Start dictation", &bridge,
-                               [&bridge] { bridge.request("start"); });
+                               [window] { QMetaObject::invokeMethod(window, "startFromTray"); });
   auto *copyLast = menu.addAction("Copy last dictation", &bridge,
                                   [&bridge] { bridge.request("copyLast"); });
   menu.addSeparator();

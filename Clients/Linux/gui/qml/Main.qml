@@ -58,6 +58,11 @@ ApplicationWindow {
     readonly property bool canStart: bridge.connected && serverReady && !snapshot.setupRequired && !shortcutBlocked && !microphoneTestActive
     // The window takes focus from the field being dictated into, so it steps aside first.
     property bool windowStartPending: false
+    // The tray starts without showing the window; a failure brings it back.
+    function startFromTray() {
+        windowStartPending = true;
+        bridge.request("start");
+    }
     function startFromWindow() {
         if (!canStart)
             return;
