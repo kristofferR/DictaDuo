@@ -157,7 +157,8 @@ export class CaptureSessions {
   sources(): components["schemas"]["AudioSourceList"] {
     const snapshot = structuredClone(this.provider?.sources() ?? []);
     validateBody("AudioSourceList", { sources: snapshot });
-    this.sharing.observe(snapshot.map((source) => source.identity));
+    // Once shutdown drains sharing writes, discovery records nothing new.
+    if (!this.stopping) this.sharing.observe(snapshot.map((source) => source.identity));
     const identities = new Set<string>();
     for (const source of snapshot) {
       const identity = JSON.stringify([source.identity.hostID, source.identity.id]);

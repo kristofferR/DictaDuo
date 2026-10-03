@@ -17,6 +17,8 @@ export class MicrophoneSharing {
   private known = new Map<string, Identity>();
   private seeded: boolean;
   private writes: Promise<void> = Promise.resolve();
+  /** A discovery write failed; later observations and shutdown retry it. */
+  private dirty = false;
 
   constructor(private readonly file?: string) {
     const saved = file ? load(file) : undefined;
@@ -32,7 +34,10 @@ export class MicrophoneSharing {
   /** Records newly discovered sources. */
   observe(sources: Identity[]) {
     const unseen = sources.filter((source) => !this.known.has(key(source)));
-    if (!unseen.length) return;
+    if (!unseen.length) {
+      if (this.dirty) this.persist();
+      return;
+    }
     for (const source of unseen) {
       this.known.set(key(source), structuredClone(source));
       if (!this.seeded) this.shared.add(key(source));
@@ -60,12 +65,16 @@ export class MicrophoneSharing {
 
   /** Waits for pending writes, so tests and shutdown see the saved state. */
   settled() {
+    if (this.dirty) this.persist();
     return this.writes;
   }
 
   /** Discovery records new sources in the background; a later write retries it. */
   private persist() {
-    void this.enqueue(() => this.save(this.known, this.shared)).catch(() => {});
+    this.dirty = false;
+    void this.enqueue(() => this.save(this.known, this.shared)).catch(() => {
+      this.dirty = true;
+    });
   }
 
   private enqueue(step: () => Promise<void>) {
