@@ -17,6 +17,7 @@ export class ClientRuntime {
   private changing = false;
   private mutations = 0;
   private generation = 0;
+  private guiSeenAt = 0;
   private shortcutQueue: Promise<unknown> = Promise.resolve();
   private readonly doubleTap = new DoubleTap();
   /** The take a pending tap was made during, so a pair cannot span one ending. */
@@ -40,6 +41,7 @@ export class ClientRuntime {
     controller = new Controller(api, this.desktop, config.device, config.sources),
   ) {
     controller.captureAllowed = () => !this.changing && !this.shortcuts?.blocked;
+    controller.feedbackVisible = () => Date.now() - this.guiSeenAt < 5000;
     controller.output = this.output;
     controller.muteOutput = config.muteOutputWhileRecording;
     const buttons = new ButtonDestinationClient(
@@ -75,6 +77,8 @@ export class ClientRuntime {
     void this.current?.controller.cancelAll(false).catch(() => {});
   }
   gui(request: unknown): Promise<unknown> {
+    // The GUI polls its snapshot, so a recent request means progress is on screen.
+    this.guiSeenAt = Date.now();
     if (
       request &&
       typeof request === "object" &&

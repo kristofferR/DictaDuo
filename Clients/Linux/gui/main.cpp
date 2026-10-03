@@ -193,7 +193,8 @@ int main(int argc, char **argv) {
     cancel->setVisible(
         busy && !undoOpen &&
         QStringList{"preparing", "recording", "processing"}.contains(phase));
-    start->setVisible(window->property("canStartTake").toBool() || undoOpen);
+    // During undo, Start only shows once a new take can start; otherwise it would paste.
+    start->setVisible(window->property("canStartTake").toBool());
     start->setEnabled(window->property("canStart").toBool());
     const QString key = window->property("dictationKey").toString();
     // Text after a tab is drawn as the menu's shortcut hint.

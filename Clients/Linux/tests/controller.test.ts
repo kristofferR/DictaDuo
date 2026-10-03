@@ -96,6 +96,8 @@ async function fixture(inference = new FakeInference()) {
     { id: "desktop-client", name: "Omarchy" },
     { hostID: "desktop", mode: "automatic", priority: [{ hostID: "desktop", id: "dji" }] },
   );
+  // Most tests model a running GUI, which shows progress itself.
+  controller.feedbackVisible = () => true;
   cleanup.push(async () => {
     await controller.cancelAll();
     await controller.settled();
@@ -420,6 +422,15 @@ test("a take that fails before recording does not promise saved audio", async ()
   f.controller.start();
   await f.controller.settled();
   expect(f.notices.map((notice) => notice.title)).toEqual(["Couldn't start dictation"]);
+});
+test("without a GUI, the start of recording is announced", async () => {
+  const f = await fixture();
+  f.controller.feedbackVisible = () => false;
+  f.controller.start();
+  await until(() => f.controller.activity.phase === "recording");
+  expect(f.notices).toEqual([{ title: "Recording", body: "Speak now." }]);
+  f.controller.stop();
+  await f.controller.settled();
 });
 test("uncertain admission never opens a fallback microphone", async () => {
   const f = await fixture();

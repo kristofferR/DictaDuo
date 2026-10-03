@@ -163,6 +163,8 @@ export class Controller {
   private displayed?: Take;
   feedback = new RecordingFeedback();
   captureAllowed: () => boolean = () => true;
+  /** The GUI shows progress; without it, recording start is announced by notification. */
+  feedbackVisible: () => boolean = () => false;
   output?: Output;
   muteOutput = false;
   /** Background retries for a discard that failed transiently. */
@@ -670,7 +672,13 @@ export class Controller {
             });
         }
         take.recordingAt = Date.now();
-        this.setState(take, `recording · ${source.name}`, "recording");
+        this.setState(
+          take,
+          `recording · ${source.name}`,
+          "recording",
+          // Daemon-only setups have no overlay to say when speech is captured.
+          this.feedbackVisible() || take.preview ? undefined : ["Recording", "Speak now."],
+        );
         break;
       } catch (error) {
         if (take.button || !(error instanceof APIError && error.allowsFallback)) throw error;
