@@ -149,6 +149,11 @@ struct ServerPreferencesPage: View {
     private var engineChoice: Bool {
         draft.recognitionEngine != nil && (controller.serverHealth?.recognitionEngines?.count ?? 0) > 1
     }
+    private var modelsLoading: Bool {
+        guard let health = controller.serverHealth else { return false }
+        return ServerModelStatus(health.speech, health: health) == .loading
+            || ServerModelStatus(health.proofreading, health: health, enabled: draft.textCorrectionEnabled) == .loading
+    }
     private var installedEngines: [RecognitionEngine] { controller.serverHealth?.recognitionEngines ?? [] }
     /// Recognition runs locally with Parakeet, which ignores language and vocabulary.
     private var parakeet: Bool { draft.recognitionEngine == .parakeet && installedEngines.contains(.parakeet) }
@@ -298,6 +303,13 @@ struct ServerPreferencesPage: View {
         .onAppear {
             loadLatest()
             controller.refreshServer()
+        }
+        // Warm-up sends no event, so keep checking while a model is still loading.
+        .task(id: modelsLoading) {
+            while modelsLoading, !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(3)) } catch { return }
+                controller.refreshServer()
+            }
         }
         .onChange(of: controller.sharedPreferences) { old, latest in
             if base == nil || !dirty || latest?.preferences == draft {
