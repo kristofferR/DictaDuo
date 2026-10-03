@@ -279,7 +279,7 @@ export class GenerationService {
         record.status = "failed";
         record.error =
           "The server restarted before this finished. Transcribe it again from History.";
-        await this.restorePreviousOutput(record);
+        const restored = await this.restorePreviousOutput(record);
         if (record.recognition) delete record.recognition.partialText;
         record.updatedAt = now();
         delete record.progress;
@@ -289,7 +289,7 @@ export class GenerationService {
             join(this.directory(id), "metadata.json"),
             JSON.stringify(record),
           );
-          await this.discardPreviousOutput(id);
+          if (restored) await this.discardPreviousOutput(id);
         }
       }
       this.records.set(id, record);
@@ -943,28 +943,41 @@ export class GenerationService {
    * A retry that did not finish gives back the whole output it replaced, even
    * when it had recognized new speech before failing or being interrupted. A
    * finished take stays finished; callers set the failure first, which then
-   * becomes the explanation of why nothing changed.
+   * becomes the explanation of why nothing changed. Returns false when the
+   * backup must be kept because restoring it failed.
    */
-  private async restorePreviousOutput(record: GenerationRecord) {
-    const path = join(this.directory(record.id), PREVIOUS_OUTPUT);
-    if (!record.finalText) {
-      try {
-        const previous = JSON.parse(
-          (await readRegularFile(path, MAX_METADATA_BYTES)).toString("utf8"),
-        ) as Partial<GenerationRecord> & { previousStatus?: GenerationRecord["status"] };
-        for (const key of outputKeys)
-          if (previous[key] !== undefined) Object.assign(record, { [key]: previous[key] });
-        if (previous.previousStatus === "completed") {
-          // The retry may already have replaced the transcript artifact.
-          await atomicPrivateWrite(
-            join(this.directory(record.id), "transcript.txt"),
-            record.finalText,
-          );
-          record.status = "completed";
-          record.error = `Transcribing again stopped: ${record.error ?? "it did not finish."} The previous transcript is kept.`;
-        }
-      } catch {}
+  private async restorePreviousOutput(record: GenerationRecord): Promise<boolean> {
+    if (record.finalText) return true;
+    let previous: Partial<GenerationRecord> & { previousStatus?: GenerationRecord["status"] };
+    try {
+      previous = JSON.parse(
+        (
+          await readRegularFile(
+            join(this.directory(record.id), PREVIOUS_OUTPUT),
+            MAX_METADATA_BYTES,
+          )
+        ).toString("utf8"),
+      );
+    } catch (error) {
+      // No backup means nothing to restore; an unreadable one is kept.
+      return (error as NodeJS.ErrnoException).code === "ENOENT";
     }
+    for (const key of outputKeys)
+      if (previous[key] !== undefined) Object.assign(record, { [key]: previous[key] });
+    if (previous.previousStatus === "completed") {
+      try {
+        // The retry may already have replaced the transcript artifact.
+        await atomicPrivateWrite(
+          join(this.directory(record.id), "transcript.txt"),
+          record.finalText,
+        );
+      } catch {
+        return false;
+      }
+      record.status = "completed";
+      record.error = `Transcribing again stopped: ${record.error ?? "it did not finish."} The previous transcript is kept.`;
+    }
+    return true;
   }
   /** The backup goes only once the restored record is saved; a restart restores it again. */
   private async discardPreviousOutput(id: string) {
@@ -1152,11 +1165,11 @@ export class GenerationService {
     if (record.recognition) delete record.recognition.partialText;
     record.error = message;
     delete record.progress;
-    await this.restorePreviousOutput(record);
+    const restored = await this.restorePreviousOutput(record);
     record.updatedAt = now();
     this.processingControllers.get(record.id)?.abort();
     await this.save(record).then(
-      () => this.discardPreviousOutput(record.id),
+      () => (restored ? this.discardPreviousOutput(record.id) : undefined),
       () => this.publish(record),
     );
     await this.cleanPartial(record.id);
@@ -1489,12 +1502,12 @@ export class GenerationService {
         const failed = copy(record);
         failed.status = "failed";
         failed.error = error instanceof Error ? error.message : "Processing failed.";
-        await this.restorePreviousOutput(failed);
+        const restored = await this.restorePreviousOutput(failed);
         if (failed.recognition) delete failed.recognition.partialText;
         failed.updatedAt = now();
         delete failed.progress;
         await this.save(failed).then(
-          () => this.discardPreviousOutput(failed.id),
+          () => (restored ? this.discardPreviousOutput(failed.id) : undefined),
           () => this.publish(failed),
         );
       });

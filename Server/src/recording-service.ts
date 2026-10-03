@@ -1115,12 +1115,13 @@ export class RecordingService {
       try {
         await this.commit(manifest);
       } catch (error) {
-        // The session is still completed on disk; put its result back.
+        // The queued manifest may or may not have reached disk, so the result is
+        // copied back and both backups stay: startup drops them for a completed
+        // manifest, and a resumed retry that fails restores from them.
         const directory = this.directory(manifest.snapshot.id);
-        await rename(join(directory, PREVIOUS_RESULT), join(directory, "result.json")).catch(
-          () => {},
-        );
-        await rm(join(directory, PREVIOUS_MANIFEST), { force: true });
+        await readRegularFile(join(directory, PREVIOUS_RESULT), 64 * 1024 * 1024)
+          .then((result) => atomicPrivateWrite(join(directory, "result.json"), result))
+          .catch(() => {});
         throw error;
       }
       this.schedule();
