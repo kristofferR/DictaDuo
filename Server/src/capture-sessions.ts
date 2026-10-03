@@ -244,13 +244,19 @@ export class CaptureSessions {
           "This microphone is not shared with other computers.",
         );
       const record = await this.store.createCapture(request, owner);
-      // Sharing may have been turned off while a new session was being created.
-      if (
-        button?.signal.aborted ||
-        (!existing && !local && !this.sharing.isShared(request.source))
-      ) {
+      if (button?.signal.aborted) {
         await this.store.discard(record.id);
         throw closed();
+      }
+      // Sharing may have been turned off while a new session was being created;
+      // like an unshared source, the client falls back to its next input.
+      if (!existing && !local && !this.sharing.isShared(request.source)) {
+        await this.store.discard(record.id);
+        throw new ServiceError(
+          503,
+          "source_unavailable",
+          "This microphone is not shared with other computers.",
+        );
       }
       button?.admitted(record.id);
       if (this.active?.id === record.id) return { ready: this.active.ready };
