@@ -39,6 +39,10 @@ const notices = {
     "Dictation cancelled",
     "The screen locked or the computer slept, so the take was not saved.",
   ],
+  safetySaved: [
+    "Dictation cancelled",
+    "The screen locked or the computer slept, so nothing was pasted. The audio is saved in History.",
+  ],
   undo: ["Not pasted", "Press the dictation key within 4 seconds to paste it."],
 } as const satisfies Record<string, Notice>;
 /**
@@ -418,9 +422,17 @@ export class Controller {
         take !== undefined &&
         (includeDelivery || !["delivering", "completed"].includes(take.activity.phase)),
     );
-    if (safety && takes.some((take) => !take.preview)) this.desktop.notify(...notices.safety);
+    if (safety) this.notifySafety(takes);
     // Revoke every destination synchronously before waiting for server cleanup.
     await Promise.all(takes.map((take) => this.cancelOne(take)));
+  }
+  /** Reports an automatic cancellation; sealed audio is kept, an unsealed take is discarded. */
+  private notifySafety(takes: Take[]) {
+    const reported = takes.filter((take) => !take.preview);
+    if (!reported.length) return;
+    const lost = reported.some((take) => !take.sealed && !take.sealMayHaveSucceeded);
+    const [title, body] = lost ? notices.safety : notices.safetySaved;
+    this.desktop.notify(title, body);
   }
   async settled(): Promise<void> {
     while (this.tasks.size) await Promise.allSettled([...this.tasks]);
@@ -540,7 +552,7 @@ export class Controller {
       if (!this.live(take)) return;
       if (["delivering", "completed"].includes(take.activity.phase)) return;
       if (slept || !unlocked) {
-        if (!take.preview) this.desktop.notify(...notices.safety);
+        this.notifySafety([take]);
         await this.cancelOne(take);
         return;
       }

@@ -60,6 +60,9 @@ ApplicationWindow {
     property bool windowStartPending: false
     // The tray starts without showing the window; a failure brings it back.
     function startFromTray() {
+        // An active window would be captured as the destination, so it steps aside too.
+        if (app.visible && app.active)
+            return startFromWindow();
         windowStartPending = true;
         bridge.request("start");
     }
