@@ -157,6 +157,11 @@ struct ServerPreferencesPage: View {
     private var localEngineName: String {
         parakeet ? "Parakeet v3" : "Whisper large-v3-turbo"
     }
+    /// Servers that report cloud availability shipped with Norwegian; older ones reject it.
+    private var languageOptions: [(String, String)] {
+        let norwegian = controller.serverHealth?.cloudRecognition != nil || draft.language == "no"
+        return languages.filter { $0.1 != "no" || norwegian }
+    }
     private var installedEngines: [RecognitionEngine] { controller.serverHealth?.recognitionEngines ?? [] }
     /// Recognition runs locally with Parakeet, which ignores language and vocabulary.
     private var parakeet: Bool { draft.recognitionEngine == .parakeet && installedEngines.contains(.parakeet) }
@@ -244,7 +249,7 @@ struct ServerPreferencesPage: View {
                     }
                     VStack(alignment: .leading, spacing: 4) {
                         Picker("Language", selection: $draft.language) {
-                            ForEach(languages, id: \.1) { name, code in Text(name).tag(code) }
+                            ForEach(languageOptions, id: \.1) { name, code in Text(name).tag(code) }
                         }
                         if parakeet {
                             caption(draft.language == "no"

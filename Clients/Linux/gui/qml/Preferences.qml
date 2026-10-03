@@ -493,10 +493,12 @@ ColumnLayout {
                     }
 
                     ComboBox {
-                        property var codes: ["auto", "en", "es", "fr", "de", "it", "pt", "nl", "ja", "zh", "ko", "hi", "ar", "pl", "ru", "uk", "sv", "no"]
+                        // Servers that report cloud availability shipped with Norwegian; older ones reject it.
+                        readonly property bool norwegian: root.cloudRecognition !== undefined || (!!root.draft && root.draft.preferences.language === "no")
+                        property var codes: ["auto", "en", "es", "fr", "de", "it", "pt", "nl", "ja", "zh", "ko", "hi", "ar", "pl", "ru", "uk", "sv"].concat(norwegian ? ["no"] : [])
 
                         implicitWidth: 245
-                        model: ["Detect automatically", "English", "Spanish", "French", "German", "Italian", "Portuguese", "Dutch", "Japanese", "Chinese", "Korean", "Hindi", "Arabic", "Polish", "Russian", "Ukrainian", "Swedish", "Norwegian"]
+                        model: ["Detect automatically", "English", "Spanish", "French", "German", "Italian", "Portuguese", "Dutch", "Japanese", "Chinese", "Korean", "Hindi", "Arabic", "Polish", "Russian", "Ukrainian", "Swedish"].concat(norwegian ? ["Norwegian"] : [])
                         currentIndex: root.draft ? codes.indexOf(root.draft.preferences.language) : 0
                         onActivated: root.edit("language", codes[currentIndex])
                     }
