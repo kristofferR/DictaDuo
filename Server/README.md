@@ -1,8 +1,8 @@
-# SottoDuo server
+# DictaDuo server
 
 The server is an independent TypeScript/Fastify HTTP process that owns models, shared preferences, recordings, and history. Bun manages its dependencies and compiles standalone executables with the runtime included. Native inference helpers run separately. This guide covers model installation and running the server separately.
 
-Linux desktop installations can optionally capture a server-connected microphone directly using [PipeWire capture](../docs/pipewire-capture.md). Enable it explicitly with `--capture-helper` and `--capture-host-id`; headless/client-uploaded operation is unchanged. Package the native helper with `SOTTODUO_BUILD_CAPTURE=1` when desired.
+Linux desktop installations can optionally capture a server-connected microphone directly using [PipeWire capture](../docs/pipewire-capture.md). Enable it explicitly with `--capture-helper` and `--capture-host-id`; headless/client-uploaded operation is unchanged. Package the native helper with `DICTADUO_BUILD_CAPTURE=1` when desired.
 
 | Server | Speech | Proofreading |
 | --- | --- | --- |
@@ -22,15 +22,15 @@ Run these commands from the repository root. Weights use about 4 GB of disk; run
 ### Whisper, on either platform
 
 ```sh
-SOTTODUO_MODEL_DIR="$PWD/.local/models" ./scripts/download-model.sh
+DICTADUO_MODEL_DIR="$PWD/.local/models" ./scripts/download-model.sh
 ```
 
-This installs and verifies `ggml-large-v3-turbo.bin`. The URL, revision, and checksum are pinned in `scripts/download-model.sh` and `Clients/macOS/Sources/SottoDuoCore/SpeechModel.swift`. The server build separately downloads the pinned Silero VAD model.
+This installs and verifies `ggml-large-v3-turbo.bin`. The URL, revision, and checksum are pinned in `scripts/download-model.sh` and `Clients/macOS/Sources/DictaDuoCore/SpeechModel.swift`. The server build separately downloads the pinned Silero VAD model.
 
 ### Parakeet, optional
 
 ```sh
-SOTTODUO_MODEL_DIR="$PWD/.local/models" ./scripts/download-model.sh parakeet
+DICTADUO_MODEL_DIR="$PWD/.local/models" ./scripts/download-model.sh parakeet
 ```
 
 This installs and verifies `ggml-parakeet-tdt-0.6b-v3-f16.bin`. Pass it with `--parakeet-model` and the server offers **Local engine** in shared preferences. Whisper stays installed and remains the default. Parakeet is faster and detects 25 European languages itself, but not Norwegian, and it ignores recognition vocabulary; dictionary replacements and Qwen cleanup still apply. Each take keeps the engine selected when it started; if Parakeet is later removed from the server, its takes and retries run on Whisper. The server warms the selected engine and keeps an engine loaded once it has been used, so switching costs one model load.
@@ -42,16 +42,16 @@ The MLX directory must contain exactly the six files listed below. Download the 
 ```sh
 (
   set -e
-  sottoduo_qwen_dir="$PWD/.local/models/Qwen3-4B-Instruct-2507-MLX-4bit"
-  sottoduo_qwen_url="https://huggingface.co/mlx-community/Qwen3-4B-Instruct-2507-4bit/resolve/50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
-  mkdir -p "$sottoduo_qwen_dir"
+  dictaduo_qwen_dir="$PWD/.local/models/Qwen3-4B-Instruct-2507-MLX-4bit"
+  dictaduo_qwen_url="https://huggingface.co/mlx-community/Qwen3-4B-Instruct-2507-4bit/resolve/50d427756c6b1b2fe0c0a10f67fbda1fc8e82c1b"
+  mkdir -p "$dictaduo_qwen_dir"
   for file in model.safetensors config.json tokenizer.json tokenizer_config.json generation_config.json chat_template.jinja; do
-    curl --fail --location --retry 3 --output "$sottoduo_qwen_dir/$file" "$sottoduo_qwen_url/$file"
+    curl --fail --location --retry 3 --output "$dictaduo_qwen_dir/$file" "$dictaduo_qwen_url/$file"
   done
 )
 ```
 
-`Clients/macOS/Sources/SottoDuoCore/TextModel.swift` defines the six-file size/hash manifest; the MLX helper verifies it before becoming ready. Use regular files, with no extra files or symlinks in the model directory.
+`Clients/macOS/Sources/DictaDuoCore/TextModel.swift` defines the six-file size/hash manifest; the MLX helper verifies it before becoming ready. Use regular files, with no extra files or symlinks in the model directory.
 
 ### Qwen on Linux
 
@@ -72,7 +72,7 @@ Linux requires Bun, a C/C++ toolchain, CMake, Git, curl, pkg-config, and libcurl
 
 ```sh
 ./scripts/build-server.sh                  # macOS Metal/MLX; Linux CPU
-SOTTODUO_CUDA=ON ./scripts/build-server.sh     # Linux with CUDA
+DICTADUO_CUDA=ON ./scripts/build-server.sh     # Linux with CUDA
 ```
 
 Output is `build/server`: executable, native helpers, VAD, notices, and resources. Keep the package together; the Mac proofreader requires the adjacent Metal library and bundles. Large model weights and user data live outside it.
@@ -91,20 +91,20 @@ The release workflow produces complete platform tarballs and SHA-256 checksums. 
 
 The archive lock uses Bun FFI to call libc `flock`, matching the reference Swift server. This dependency is tested from source and compiled executables on the supported platforms. A running Swift server and Bun server must never share a data directory.
 
-`SOTTODUO_BUILD_JOBS` controls build concurrency. For another CPU/GPU host, use `SOTTODUO_NATIVE=OFF` and set `SOTTODUO_CUDA_ARCHITECTURES` for the destination GPU. CPU support is useful for compatibility tests; validate CUDA support, memory, and dictation latency on the selected host.
+`DICTADUO_BUILD_JOBS` controls build concurrency. For another CPU/GPU host, use `DICTADUO_NATIVE=OFF` and set `DICTADUO_CUDA_ARCHITECTURES` for the destination GPU. CPU support is useful for compatibility tests; validate CUDA support, memory, and dictation latency on the selected host.
 
 ## Run
 
 From the repository root, with the models installed above:
 
 ```sh
-./build/server/sottoduo-server \
+./build/server/dictaduo-server \
   --host 127.0.0.1 --port 8391 \
   --data-dir "$PWD/.local/server" \
-  --speech-helper "$PWD/build/server/helpers/sottoduo-engine" \
+  --speech-helper "$PWD/build/server/helpers/dictaduo-engine" \
   --speech-model "$PWD/.local/models/ggml-large-v3-turbo.bin" \
   --vad-model "$PWD/build/server/resources/silero-vad.bin" \
-  --proof-helper "$PWD/build/server/helpers/sottoduo-text-engine" \
+  --proof-helper "$PWD/build/server/helpers/dictaduo-text-engine" \
   --proof-model "$PWD/.local/models/Qwen3-4B-Instruct-2507-MLX-4bit"
 ```
 
@@ -112,30 +112,30 @@ On Linux, replace the last path with the GGUF file. Add `--dev` for a developmen
 
 Check `curl http://localhost:8391/v1/health`; HTTP reachability alone does not mean the models are ready. The `ready` field means the server can accept a recording. Quitting a client does not stop this process. Use launchd, systemd, or container supervision for boot/restart behavior; the scripts do not install a service.
 
-Long recordings use `/v2/recordings` and an authenticated WebSocket with subprotocol `sottoduo.recording.v1`. Configure a reverse proxy to forward WebSocket upgrades as well as HTTP. The client negotiates capabilities before capture; legacy/reference servers cannot silently accept and clip a long recording. See the [recording protocol](../docs/recording-protocol.md).
+Long recordings use `/v2/recordings` and an authenticated WebSocket with subprotocol `dictaduo.recording.v1`. Configure a reverse proxy to forward WebSocket upgrades as well as HTTP. The client negotiates capabilities before capture; legacy/reference servers cannot silently accept and clip a long recording. See the [recording protocol](../docs/recording-protocol.md).
 
 Keep the server data directory on persistent storage with room for audio, receipt journals, bounded processing windows, and optional exports. V2 sessions preserve acknowledged audio across disconnects/restarts and process bounded windows during capture. Idle socket leases can end without deleting audio. Failed speech work remains recoverable; rejected proofreading retains deterministic text. Original PCM retention defaults on and can use several hundred MiB per half hour. There is no duration cutoff or automatic archive expiry; explicit discard removes session audio.
 
-For server-only development alongside an installed SottoDuo instance, use `--port 8392 --data-dir "$PWD/.local/typescript-server" --dev` with your helper/model arguments. Start the executable directly or use `bun run dev:server` with those arguments. The client dev runner starts the app and defaults to port 8391; avoid it when preserving a running installation.
+For server-only development alongside an installed DictaDuo instance, use `--port 8392 --data-dir "$PWD/.local/typescript-server" --dev` with your helper/model arguments. Start the executable directly or use `bun run dev:server` with those arguments. The client dev runner starts the app and defaults to port 8391; avoid it when preserving a running installation.
 
 | Argument | Environment variable |
 | --- | --- |
-| `--host`, `--port` | `SOTTODUO_SERVER_HOST`, `SOTTODUO_SERVER_PORT` |
-| `--data-dir`, `--token-file` | `SOTTODUO_SERVER_DATA_DIR`, `SOTTODUO_SERVER_TOKEN_FILE` |
-| `--speech-helper`, `--speech-model` | `SOTTODUO_ENGINE_PATH`, `SOTTODUO_SPEECH_MODEL` |
-| `--parakeet-model` (optional) | `SOTTODUO_PARAKEET_MODEL` |
-| `--vad-model` | `SOTTODUO_VAD_PATH` |
-| `--proof-helper`, `--proof-model` | `SOTTODUO_TEXT_ENGINE_PATH`, `SOTTODUO_TEXT_MODEL` |
-| `--dev` | `SOTTODUO_DEV=1` |
+| `--host`, `--port` | `DICTADUO_SERVER_HOST`, `DICTADUO_SERVER_PORT` |
+| `--data-dir`, `--token-file` | `DICTADUO_SERVER_DATA_DIR`, `DICTADUO_SERVER_TOKEN_FILE` |
+| `--speech-helper`, `--speech-model` | `DICTADUO_ENGINE_PATH`, `DICTADUO_SPEECH_MODEL` |
+| `--parakeet-model` (optional) | `DICTADUO_PARAKEET_MODEL` |
+| `--vad-model` | `DICTADUO_VAD_PATH` |
+| `--proof-helper`, `--proof-model` | `DICTADUO_TEXT_ENGINE_PATH`, `DICTADUO_TEXT_MODEL` |
+| `--dev` | `DICTADUO_DEV=1` |
 
-The dev runner fixes its host to loopback and defaults to port 8391, `.local/server` for data, and `.local/server.log` for logs. Set `SOTTODUO_SPEECH_MODEL` and `SOTTODUO_TEXT_MODEL` when using the paths above. Without those overrides, macOS searches the existing locations `~/Library/Application Support/Murmur/Models/ggml-large-v3-turbo.bin` and `~/.murmur/models/Qwen3-4B-Instruct-2507-MLX-4bit`.
+The dev runner fixes its host to loopback and defaults to port 8391, `.local/server` for data, and `.local/server.log` for logs. Set `DICTADUO_SPEECH_MODEL` and `DICTADUO_TEXT_MODEL` when using the paths above. Without those overrides, macOS searches the existing locations `~/Library/Application Support/Murmur/Models/ggml-large-v3-turbo.bin` and `~/.murmur/models/Qwen3-4B-Instruct-2507-MLX-4bit`.
 
 ## Remote access
 
 Bind to a reachable address and pass `--token-file /absolute/path/to/token`. Nonloopback listeners require a token of at least 32 characters with no internal whitespace. In the Mac app, enter the endpoint and token under **This Mac**; tokens are stored in Keychain.
 
 - Use an HTTPS reverse proxy for hosted servers and hostnames, including Tailscale MagicDNS names. The runner itself serves HTTP. The proxy must send `X-Forwarded-For` (Caddy does by default; in nginx add `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`): requests without it from this computer count as local and may use and change unshared microphones.
-- HTTP is accepted for localhost and literal Tailscale IPs in `100.64.0.0/10` or `fd7a:115c:a1e0::/48` on your connected tailnet. SottoDuo checks the address range, not routing; use HTTPS if that private route cannot be assured.
+- HTTP is accepted for localhost and literal Tailscale IPs in `100.64.0.0/10` or `fd7a:115c:a1e0::/48` on your connected tailnet. DictaDuo checks the address range, not routing; use HTTPS if that private route cannot be assured.
 - Ordinary LAN IPs require HTTPS. Endpoints cannot contain credentials, queries, or fragments. Credential-bearing redirects are not followed.
 
 Keep the data directory on persistent storage and back it up. Only one runner can own it. See [storage](../docs/architecture.md#storage) and the [HTTP API](../docs/client-server-contract.md).
@@ -145,8 +145,8 @@ Keep the data directory on persistent storage and back it up. Only one runner ca
 Build from the repository root with initialized submodules:
 
 ```sh
-docker build -f Server/Dockerfile --target cpu -t sottoduo-server:cpu .
-docker build -f Server/Dockerfile --target cuda -t sottoduo-server:cuda .
+docker build -f Server/Dockerfile --target cpu -t dictaduo-server:cpu .
+docker build -f Server/Dockerfile --target cuda -t dictaduo-server:cuda .
 ```
 
 `CUDA_ARCHITECTURES`, `CUDA_IMAGE`, `BUN_IMAGE`, `UBUNTU_IMAGE`, and `BUILD_JOBS` are build arguments. Choose CUDA architectures/toolkit/driver versions for your GPU. GPU containers require NVIDIA Container Toolkit and `--gpus all`; Linux containers on a Mac do not have Metal access.
@@ -154,15 +154,15 @@ docker build -f Server/Dockerfile --target cuda -t sottoduo-server:cuda .
 Mount a directory containing the Whisper `.bin` and Qwen `.gguf` files, plus a token file:
 
 ```sh
-docker run --rm --name sottoduo-server \
+docker run --rm --name dictaduo-server \
   -p 127.0.0.1:8391:8391 \
-  --mount type=volume,source=sottoduo-data,target=/data \
+  --mount type=volume,source=dictaduo-data,target=/data \
   --mount type=bind,source=/absolute/path/to/models,target=/models,readonly \
-  --mount type=bind,source=/absolute/path/to/token,target=/run/secrets/sottoduo-token,readonly \
-  sottoduo-server:cpu
+  --mount type=bind,source=/absolute/path/to/token,target=/run/secrets/dictaduo-token,readonly \
+  dictaduo-server:cpu
 ```
 
-For a GPU server, use `sottoduo-server:cuda` and add `--gpus all`. The example exposes only host loopback; use the remote-access setup above for clients on other machines. The container runs as UID 10001, which must be able to read model/token files and write `/data`. The named volume preserves history across container replacement.
+For a GPU server, use `dictaduo-server:cuda` and add `--gpus all`. The example exposes only host loopback; use the remote-access setup above for clients on other machines. The container runs as UID 10001, which must be able to read model/token files and write `/data`. The named volume preserves history across container replacement.
 
 ## Verify
 
@@ -175,7 +175,7 @@ bun run test
 bun run generate:api --check
 swift test
 ./scripts/smoke-test.sh
-SOTTODUO_TEXT_MODEL=/absolute/path/to/qwen ./scripts/test-corrections.sh
+DICTADUO_TEXT_MODEL=/absolute/path/to/qwen ./scripts/test-corrections.sh
 ```
 
 API generation/Swift checks need Swift 6.2+. Linux-only development can check TypeScript bindings with `bun run generate:api --check --typescript-only`. The reference Swift server/domain remain as a parity oracle; packaged server builds use TypeScript. See the [contract guide](api/README.md) for generated bindings and the [implementation plan](../docs/typescript-server-plan.md) for the migration.

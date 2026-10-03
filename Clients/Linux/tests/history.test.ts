@@ -15,7 +15,7 @@ afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
 async function fixture() {
-  const directory = await mkdtemp(join(tmpdir(), "sottoduo-history-"));
+  const directory = await mkdtemp(join(tmpdir(), "dictaduo-history-"));
   const runtime = join(directory, "runtime");
   await mkdir(runtime, { mode: 0o700 });
   const previous = process.env.XDG_RUNTIME_DIR;
@@ -68,7 +68,7 @@ test("history reads stay scoped, saved audio is private, and explicit deletion r
     "Finish or cancel",
   );
   await complete();
-  const page = await tools.list(undefined, "sottoduo", "query-1");
+  const page = await tools.list(undefined, "dictaduo", "query-1");
   expect(page).toMatchObject({ server: address, queryID: "query-1" });
   expect(page.items.map((r) => r.id)).toEqual([record.id]);
   expect((await tools.list(undefined, "wispr-flow", "query-2")).items).toEqual([]);
@@ -79,7 +79,7 @@ test("history reads stay scoped, saved audio is private, and explicit deletion r
   });
   if (typeof result.url !== "string") throw Error("Expected local audio");
   const path = fileURLToPath(result.url);
-  expect(path.startsWith(join(runtime, "sottoduo-client", "history-audio"))).toBe(true);
+  expect(path.startsWith(join(runtime, "dictaduo-client", "history-audio"))).toBe(true);
   expect((await stat(path)).mode & 0o777).toBe(0o600);
   expect((await readFile(path)).subarray(0, 4).toString()).toBe("RIFF");
   expect(JSON.stringify(result)).not.toContain("history-fixture-token");
@@ -92,7 +92,7 @@ test("history reads stay scoped, saved audio is private, and explicit deletion r
   expect((await api.get(record.id)).status).toBe("completed");
   await tools.action("deleteHistory", { id: record.id, server: address });
   expect((await tools.list(undefined, undefined, "query-3")).items).toEqual([]);
-  expect(await readdir(join(runtime, "sottoduo-client", "history-audio"))).toEqual([]);
+  expect(await readdir(join(runtime, "dictaduo-client", "history-audio"))).toEqual([]);
   await expect(api.get(record.id)).rejects.toMatchObject({ status: 404 });
 });
 test("history actions reject wrong servers, paths, missing audio and untrusted download contents", async () => {
@@ -121,9 +121,9 @@ test("history actions reject wrong servers, paths, missing audio and untrusted d
   await expect(
     tools.action("historyAudio", { id: record.id, kind: "inference", server: address }),
   ).rejects.toThrow("too large");
-  expect(await readdir(join(runtime, "sottoduo-client", "history-audio"))).toEqual([]);
-  await rm(join(runtime, "sottoduo-client", "history-audio"), { recursive: true });
-  await symlink(runtime, join(runtime, "sottoduo-client", "history-audio"));
+  expect(await readdir(join(runtime, "dictaduo-client", "history-audio"))).toEqual([]);
+  await rm(join(runtime, "dictaduo-client", "history-audio"), { recursive: true });
+  await symlink(runtime, join(runtime, "dictaduo-client", "history-audio"));
   await expect(
     tools.action("historyAudio", { id: record.id, kind: "inference", server: address }),
   ).rejects.toThrow("private audio folder");
@@ -179,11 +179,11 @@ test("saved Wispr Flow source files can be opened without a Linux importer", asy
     }),
   ).rejects.toThrow("PNG screenshot");
   await tools.action("deleteHistory", { id: record.id, server: address });
-  expect(await readdir(join(runtime, "sottoduo-client", "history-audio"))).toEqual([]);
+  expect(await readdir(join(runtime, "dictaduo-client", "history-audio"))).toEqual([]);
 });
 
 test("recording sessions join legacy history and are opened and deleted on their own routes", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "sottoduo-history-sessions-"));
+  const directory = await mkdtemp(join(tmpdir(), "dictaduo-history-sessions-"));
   const runtime = join(directory, "runtime");
   await mkdir(runtime, { mode: 0o700 });
   const previous = process.env.XDG_RUNTIME_DIR;
@@ -333,7 +333,7 @@ test("merged pages never show an entry before a newer unfetched one", async () =
 });
 
 test("original runs recorded in different formats open one at a time", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "sottoduo-history-"));
+  const directory = await mkdtemp(join(tmpdir(), "dictaduo-history-"));
   const previous = process.env.XDG_RUNTIME_DIR;
   process.env.XDG_RUNTIME_DIR = directory;
   cleanup.push(async () => {
@@ -380,7 +380,7 @@ test("original runs recorded in different formats open one at a time", async () 
 });
 
 test("a paused long recording is labelled paused and can be deleted", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "sottoduo-history-"));
+  const directory = await mkdtemp(join(tmpdir(), "dictaduo-history-"));
   const previous = process.env.XDG_RUNTIME_DIR;
   process.env.XDG_RUNTIME_DIR = directory;
   cleanup.push(async () => {

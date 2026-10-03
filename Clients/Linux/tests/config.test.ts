@@ -6,7 +6,7 @@ test("endpoint changes cannot silently reuse another server's microphone prefere
   const value = {
     server: "http://localhost:8391",
     tokenFile: "/private/token",
-    destinationHelper: "/opt/sottoduo-destination",
+    destinationHelper: "/opt/dictaduo-destination",
     device: { id: "desktop", name: "Omarchy" },
     sources: {
       server: "http://localhost:8391",
@@ -27,16 +27,16 @@ test("endpoint changes cannot silently reuse another server's microphone prefere
 });
 
 test("an empty XDG config directory uses the home config path", () => {
-  const previousConfig = process.env.SOTTODUO_CLIENT_CONFIG;
+  const previousConfig = process.env.DICTADUO_CLIENT_CONFIG;
   const previousXDG = process.env.XDG_CONFIG_HOME;
   try {
-    delete process.env.SOTTODUO_CLIENT_CONFIG;
+    delete process.env.DICTADUO_CLIENT_CONFIG;
     process.env.XDG_CONFIG_HOME = "";
     const homeConfig = join(homedir(), ".config");
-    expect(configPath()).toBe(join(homeConfig, "sottoduo", "linux-client.json"));
+    expect(configPath()).toBe(join(homeConfig, "dictaduo", "linux-client.json"));
   } finally {
-    if (previousConfig === undefined) delete process.env.SOTTODUO_CLIENT_CONFIG;
-    else process.env.SOTTODUO_CLIENT_CONFIG = previousConfig;
+    if (previousConfig === undefined) delete process.env.DICTADUO_CLIENT_CONFIG;
+    else process.env.DICTADUO_CLIENT_CONFIG = previousConfig;
     if (previousXDG === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = previousXDG;
   }

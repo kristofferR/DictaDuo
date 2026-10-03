@@ -4,8 +4,8 @@ import Foundation
 let output = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
 
-// The SottoDuo ribbon icon, drawn directly with Core Graphics.
-// Keep these normalized ribbon curves in sync with SottoDuoBrand.ribbonPaths(in:).
+// The DictaDuo ribbon icon, drawn directly with Core Graphics.
+// Keep these normalized ribbon curves in sync with DictaDuoBrand.ribbonPaths(in:).
 func ribbonPaths() -> (upper: CGPath, lower: CGPath) {
     let upper = CGMutablePath()
     upper.move(to: CGPoint(x: 102, y: 18))

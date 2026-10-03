@@ -9,7 +9,7 @@ import { createInferenceConfiguration } from "../src/inference/native-inference.
 import { FakeInference } from "./support.ts";
 
 test("shutdown drains legacy inference while a recording is queued behind it", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "sottoduo-shutdown-"));
+  const directory = await mkdtemp(join(tmpdir(), "dictaduo-shutdown-"));
   let started = 0;
   class BlockedInference extends FakeInference {
     override async transcribe(

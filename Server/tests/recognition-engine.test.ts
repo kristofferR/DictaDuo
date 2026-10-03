@@ -68,7 +68,7 @@ class Engines extends FakeInference {
 }
 
 async function open(inference = new Engines()) {
-  const path = await mkdtemp(join(tmpdir(), "sottoduo-engine-"));
+  const path = await mkdtemp(join(tmpdir(), "dictaduo-engine-"));
   const service = await GenerationService.open(
     { dataDirectory: path, development: true },
     inference,
@@ -188,7 +188,7 @@ test("recording sessions recognize every window with the session's engine", asyn
 });
 
 test("a selection whose engine was uninstalled runs on Whisper and says so", async () => {
-  const path = await mkdtemp(join(tmpdir(), "sottoduo-engine-"));
+  const path = await mkdtemp(join(tmpdir(), "dictaduo-engine-"));
   cleanups.push(() => rm(path, { recursive: true, force: true }));
   const before = await GenerationService.open(
     { dataDirectory: path, development: true },
@@ -386,7 +386,7 @@ test("responses include engine fields only for clients that request them", async
     await app.close();
     await recordings.shutdown();
   });
-  const headers = { "x-sottoduo-recognition-engine": "engine-v1" };
+  const headers = { "x-dictaduo-recognition-engine": "engine-v1" };
   const legacy = await app.inject({ url: "/v1/preferences" });
   expect(legacy.body).not.toContain("recognitionEngine");
   expect((await app.inject({ url: "/v1/health" })).body).not.toContain("recognitionEngines");
@@ -406,7 +406,7 @@ test("responses include engine fields only for clients that request them", async
     (
       await app.inject({
         url: "/v1/health",
-        headers: { "x-sottoduo-cloud-recognition": "cloud-v1" },
+        headers: { "x-dictaduo-cloud-recognition": "cloud-v1" },
       })
     ).json(),
   );
@@ -416,7 +416,7 @@ test("responses include engine fields only for clients that request them", async
   const features = validateBody(
     "ServerHealth",
     (
-      await app.inject({ url: "/v1/health", headers: { "x-sottoduo-features": "features-v1" } })
+      await app.inject({ url: "/v1/health", headers: { "x-dictaduo-features": "features-v1" } })
     ).json(),
   );
   expect(features.features).toContain("retry-completed");

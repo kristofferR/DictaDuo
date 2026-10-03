@@ -7,7 +7,7 @@ import { send, serve } from "../src/ipc.ts";
 import { ClientNotice } from "../src/errors.ts";
 
 test("private IPC serializes commands, rejects a second daemon and releases its lock", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "sottoduo-ipc-"));
+  const dir = await mkdtemp(join(tmpdir(), "dictaduo-ipc-"));
   const previous = process.env.XDG_RUNTIME_DIR;
   process.env.XDG_RUNTIME_DIR = dir;
   let close: (() => Promise<void>) | undefined;
@@ -18,7 +18,7 @@ test("private IPC serializes commands, rejects a second daemon and releases its 
       await Bun.sleep(10);
       return "ok";
     });
-    expect((await stat(join(dir, "sottoduo-client", "control.sock"))).mode & 0o777).toBe(0o600);
+    expect((await stat(join(dir, "dictaduo-client", "control.sock"))).mode & 0o777).toBe(0o600);
     expect(await send("start")).toBe("ok\n");
     expect(await send("stop")).toBe("ok\n");
     expect(calls).toEqual(["start", "stop"]);
@@ -37,13 +37,13 @@ test("private IPC serializes commands, rejects a second daemon and releases its 
 
 test("GUI IPC accepts a newline without a half-close and rejects malformed JSON", async () => {
   const { connect } = await import("node:net");
-  const dir = await mkdtemp(join(tmpdir(), "sottoduo-gui-ipc-"));
+  const dir = await mkdtemp(join(tmpdir(), "dictaduo-gui-ipc-"));
   const previous = process.env.XDG_RUNTIME_DIR;
   process.env.XDG_RUNTIME_DIR = dir;
   let close: (() => Promise<void>) | undefined;
   const request = (input: string): Promise<string> =>
     new Promise((resolve, reject) => {
-      const socket = connect(join(dir, "sottoduo-client", "control.sock"));
+      const socket = connect(join(dir, "dictaduo-client", "control.sock"));
       const decoder = new StringDecoder("utf8");
       let data = "";
       socket.setTimeout(3000, () => socket.destroy(new Error("timeout")));

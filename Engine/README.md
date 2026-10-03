@@ -1,13 +1,13 @@
 # Speech helper
 
-`sottoduo-engine` is the server's persistent speech process. `--engine whisper` (the default) loads Whisper large-v3-turbo; `--engine parakeet` loads Parakeet TDT 0.6B v3 through the Parakeet implementation in the vendored whisper.cpp. The server runs one warm process per installed engine. It reads audio files supplied by the server; it never opens a microphone or network connection. Builds use Metal on macOS and CPU or CUDA on Linux. See [server setup](../Server/README.md) for packaging and models.
+`dictaduo-engine` is the server's persistent speech process. `--engine whisper` (the default) loads Whisper large-v3-turbo; `--engine parakeet` loads Parakeet TDT 0.6B v3 through the Parakeet implementation in the vendored whisper.cpp. The server runs one warm process per installed engine. It reads audio files supplied by the server; it never opens a microphone or network connection. Builds use Metal on macOS and CPU or CUDA on Linux. See [server setup](../Server/README.md) for packaging and models.
 
 ## Protocol
 
 After loading its model and Silero VAD, the helper emits a `ready` JSON object with an `engineVersion` (`parakeet.cpp/…` for Parakeet). Send one UTF-8 JSON object per line on stdin; replies are flushed JSON lines on stdout. Diagnostics go to stderr without transcript text.
 
 ```json
-{"type":"transcribe","id":"request-1","path":"/absolute/path/to/recording.wav","language":"en","vocabularyTerms":["SottoDuo","SwiftUI","Metal"]}
+{"type":"transcribe","id":"request-1","path":"/absolute/path/to/recording.wav","language":"en","vocabularyTerms":["DictaDuo","SwiftUI","Metal"]}
 ```
 
 - `language` defaults to `en`; `auto` enables language detection. Parakeet always detects the spoken language itself among its 25 European languages (not Norwegian) and returns `language: "auto"`, since it exposes no language ID.

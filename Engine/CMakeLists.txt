@@ -1,15 +1,15 @@
 cmake_minimum_required(VERSION 3.20)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    project(SottoDuoEngine LANGUAGES C CXX)
+    project(DictaDuoEngine LANGUAGES C CXX)
 endif()
 
 if(NOT APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    message(FATAL_ERROR "SottoDuo's server supports macOS and Linux.")
+    message(FATAL_ERROR "DictaDuo's server supports macOS and Linux.")
 endif()
 
 # Keep the speech runtime's ggml independent from the text helper's version.
-option(SOTTODUO_CUDA "Use CUDA for Linux inference" OFF)
+option(DICTADUO_CUDA "Use CUDA for Linux inference" OFF)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -28,7 +28,7 @@ else()
     set(GGML_METAL OFF CACHE BOOL "" FORCE)
     set(GGML_ACCELERATE OFF CACHE BOOL "" FORCE)
     set(GGML_BLAS OFF CACHE BOOL "" FORCE)
-    set(GGML_CUDA ${SOTTODUO_CUDA} CACHE BOOL "" FORCE)
+    set(GGML_CUDA ${DICTADUO_CUDA} CACHE BOOL "" FORCE)
 endif()
 find_package(Threads REQUIRED)
 
@@ -38,10 +38,10 @@ if(NOT EXISTS "${WHISPER_SOURCE}/include/whisper.h")
 endif()
 add_subdirectory("${WHISPER_SOURCE}" "${CMAKE_CURRENT_BINARY_DIR}/whisper")
 
-add_executable(sottoduo-engine worker.cpp)
-target_compile_features(sottoduo-engine PRIVATE cxx_std_17)
-target_compile_options(sottoduo-engine PRIVATE -Wall -Wextra -Wpedantic)
-target_include_directories(sottoduo-engine SYSTEM PRIVATE "${WHISPER_SOURCE}/examples")
-target_link_libraries(sottoduo-engine PRIVATE parakeet whisper Threads::Threads)
-set_target_properties(sottoduo-engine PROPERTIES
+add_executable(dictaduo-engine worker.cpp)
+target_compile_features(dictaduo-engine PRIVATE cxx_std_17)
+target_compile_options(dictaduo-engine PRIVATE -Wall -Wextra -Wpedantic)
+target_include_directories(dictaduo-engine SYSTEM PRIVATE "${WHISPER_SOURCE}/examples")
+target_link_libraries(dictaduo-engine PRIVATE parakeet whisper Threads::Threads)
+set_target_properties(dictaduo-engine PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/Engine")

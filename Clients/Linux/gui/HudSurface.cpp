@@ -9,7 +9,7 @@ void HudSurface::configure(QWindow *window) {
   // Attach before QML can show the window. Only the HUD gets a layer surface;
   // the settings window keeps its ordinary desktop window role.
   auto *layer = LayerShellQt::Window::get(window);
-  layer->setScope("sottoduo-dictation");
+  layer->setScope("dictaduo-dictation");
   layer->setLayer(LayerShellQt::Window::LayerOverlay);
   layer->setAnchors(LayerShellQt::Window::AnchorBottom);
   layer->setMargins(QMargins(0, 0, 0, 80));

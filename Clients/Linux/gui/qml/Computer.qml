@@ -34,7 +34,7 @@ ScrollView {
                 detail: "Only this computer. All themes use the same layout."
                 ComboBox {
                     implicitWidth: 245
-                    model: ["Follow system", "SottoDuo · Warm light", "SottoDuo · Glacier dark", "Omarchy · Active theme"]
+                    model: ["Follow system", "DictaDuo · Warm light", "DictaDuo · Glacier dark", "Omarchy · Active theme"]
                     currentIndex: ["system", "light", "dark", "omarchy"].indexOf(bridge.theme)
                     onActivated: bridge.theme = ["system", "light", "dark", "omarchy"][currentIndex]
                 }
@@ -84,7 +84,7 @@ ScrollView {
             Setting {
                 ui: root.ui
                 title: "Shortcuts and text insertion"
-                detail: portalShortcuts.plasma ? "Use your Plasma shortcut while a text field is focused." : "Use your SottoDuo shortcut while a text field is focused."
+                detail: portalShortcuts.plasma ? "Use your Plasma shortcut while a text field is focused." : "Use your DictaDuo shortcut while a text field is focused."
             }
             Setting {
                 ui: root.ui
@@ -116,7 +116,7 @@ ScrollView {
                 detail: "Keep dictation feedback ready without opening this window. Your background dictation service must already be set up."
                 Switch {
                     objectName: "launchAtLoginSwitch"
-                    Accessible.name: "Launch SottoDuo at login"
+                    Accessible.name: "Launch DictaDuo at login"
                     checked: bridge.desktop.launchAtLogin
                     enabled: !bridge.preview
                     onClicked: {
@@ -136,7 +136,7 @@ ScrollView {
             Setting {
                 ui: root.ui
                 title: "Background dictation"
-                detail: bridge.desktop.clientService === "Running" ? portalShortcuts.plasma ? "Running. Keep SottoDuo feedback open in the background for Plasma shortcuts; the DJI button works through the service." : "Running. Shortcuts and the DJI button keep working when this window closes." : bridge.desktop.clientService === "Systemd user service unavailable" ? "This desktop does not provide a systemd user service. Start the SottoDuo client with your desktop's startup tools." : "Install and start the background client for keyboard and DJI button dictation."
+                detail: bridge.desktop.clientService === "Running" ? portalShortcuts.plasma ? "Running. Keep DictaDuo feedback open in the background for Plasma shortcuts; the DJI button works through the service." : "Running. Shortcuts and the DJI button keep working when this window closes." : bridge.desktop.clientService === "Systemd user service unavailable" ? "This desktop does not provide a systemd user service. Start the DictaDuo client with your desktop's startup tools." : "Install and start the background client for keyboard and DJI button dictation."
                 SLabel {
                     ui: root.ui
                     text: bridge.desktop.clientService
@@ -152,8 +152,8 @@ ScrollView {
             }
             Setting {
                 ui: root.ui
-                title: "Quit SottoDuo feedback"
-                detail: portalShortcuts.plasma ? "Hides the live indicator and disables the Plasma keyboard shortcut until you reopen SottoDuo. The DJI button keeps working." : "Hides the live indicator until you reopen SottoDuo. The keyboard shortcut and DJI button keep working."
+                title: "Quit DictaDuo feedback"
+                detail: portalShortcuts.plasma ? "Hides the live indicator and disables the Plasma keyboard shortcut until you reopen DictaDuo. The DJI button keeps working." : "Hides the live indicator until you reopen DictaDuo. The keyboard shortcut and DJI button keep working."
                 SButton {
                     ui: root.ui
                     text: "Quit"

@@ -75,7 +75,7 @@ async function setup(
   provider = new FakeLiveProvider(),
   inference = new CountingInference(),
 ) {
-  const path = await mkdtemp(join(tmpdir(), "sottoduo-live-test-"));
+  const path = await mkdtemp(join(tmpdir(), "dictaduo-live-test-"));
   const preferences = defaultPreferences();
   preferences.preferences.keepOriginalAudio = false;
   preferences.preferences.textCorrectionEnabled = false;

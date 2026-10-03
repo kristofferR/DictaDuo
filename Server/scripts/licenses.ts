@@ -74,7 +74,7 @@ for (const dependency of dependencyNames(root.dependencies))
   await visit(dependency, serverDirectory);
 
 const notices = [
-  "SottoDuo server JavaScript runtime dependency licenses",
+  "DictaDuo server JavaScript runtime dependency licenses",
   "Installed versions are pinned by bun.lock. Development-only packages are excluded.",
 ];
 for (const package_ of [...packages.values()].sort(

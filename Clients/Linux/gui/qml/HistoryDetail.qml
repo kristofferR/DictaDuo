@@ -156,7 +156,7 @@ ColumnLayout {
                     visible: !root.interrupted && root.history.canRetry(root.record)
                     enabled: root.canRetry
                     ToolTip.visible: hovered && !root.history.retrySupported
-                    ToolTip.text: "Update SottoDuo on the server to transcribe recordings again."
+                    ToolTip.text: "Update DictaDuo on the server to transcribe recordings again."
                     onClicked: root.history.transcribeAgain()
                 }
 
@@ -369,7 +369,7 @@ ColumnLayout {
             visible: !root.problem && root.history.canRetry(root.record)
             enabled: root.canRetry
             ToolTip.visible: hovered
-            ToolTip.text: root.history.retrySupported ? "Transcribe the saved audio again. Nothing is pasted." : "Update SottoDuo on the server to transcribe recordings again."
+            ToolTip.text: root.history.retrySupported ? "Transcribe the saved audio again. Nothing is pasted." : "Update DictaDuo on the server to transcribe recordings again."
             onClicked: root.history.transcribeAgain()
         }
 

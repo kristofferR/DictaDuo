@@ -97,7 +97,7 @@ Group {
     Setting {
         ui: root.ui
         title: "Check shortcut"
-        detail: root.check.active ? root.check.message + " · " + root.check.remainingSeconds + " seconds left" : root.check.held ? "Release the key to resume dictation. If a release was missed, press and release it once." : "Detect presses and releases for 30 seconds. SottoDuo recording and clipboard actions are paused during the check."
+        detail: root.check.active ? root.check.message + " · " + root.check.remainingSeconds + " seconds left" : root.check.held ? "Release the key to resume dictation. If a release was missed, press and release it once." : "Detect presses and releases for 30 seconds. DictaDuo recording and clipboard actions are paused during the check."
         SButton {
             objectName: "checkShortcutButton"
             ui: root.ui
@@ -127,7 +127,7 @@ Group {
     Setting {
         ui: root.ui
         title: "Shortcut diagnostics"
-        detail: "Shows only SottoDuo shortcut commands received during the last check."
+        detail: "Shows only DictaDuo shortcut commands received during the last check."
         SButton {
             ui: root.ui
             objectName: "shortcutDiagnosticsToggle"

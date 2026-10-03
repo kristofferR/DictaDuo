@@ -20,12 +20,12 @@ COPY vendor ./vendor
 COPY Resources ./Resources
 COPY scripts ./scripts
 COPY Server ./Server
-ENV SOTTODUO_NATIVE=OFF
+ENV DICTADUO_NATIVE=OFF
 ARG BUILD_JOBS=4
-ENV SOTTODUO_BUILD_JOBS=${BUILD_JOBS}
+ENV DICTADUO_BUILD_JOBS=${BUILD_JOBS}
 
 FROM sources AS cpu-build
-RUN SOTTODUO_CUDA=OFF ./scripts/build-server.sh
+RUN DICTADUO_CUDA=OFF ./scripts/build-server.sh
 
 FROM ${CUDA_IMAGE} AS cuda-toolkit
 FROM sources AS cuda-build
@@ -35,29 +35,29 @@ ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64
 # Override for the target GPU. Both 12.x Blackwell and older GPUs need a
 # matching CUDA toolkit/driver; never infer architectures from the build host.
 ARG CUDA_ARCHITECTURES=80;86;89;90;120;121
-RUN SOTTODUO_CUDA=ON SOTTODUO_CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" ./scripts/build-server.sh
+RUN DICTADUO_CUDA=ON DICTADUO_CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" ./scripts/build-server.sh
 
 FROM ${UBUNTU_IMAGE} AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl libstdc++6 \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --uid 10001 sottoduo \
-    && mkdir -p /data /models && chown sottoduo:sottoduo /data
-ENV SOTTODUO_SERVER_HOST=0.0.0.0 SOTTODUO_SERVER_PORT=8391 SOTTODUO_SERVER_DATA_DIR=/data
-ENV SOTTODUO_ENGINE_PATH=/opt/sottoduo/helpers/sottoduo-engine
-ENV SOTTODUO_TEXT_ENGINE_PATH=/opt/sottoduo/helpers/sottoduo-text-engine
-ENV SOTTODUO_VAD_PATH=/opt/sottoduo/resources/silero-vad.bin
-ENV SOTTODUO_SPEECH_MODEL=/models/ggml-large-v3-turbo.bin
-ENV SOTTODUO_TEXT_MODEL=/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
-ENV SOTTODUO_SERVER_TOKEN_FILE=/run/secrets/sottoduo-token
-USER sottoduo
-WORKDIR /opt/sottoduo
+    && useradd --create-home --uid 10001 dictaduo \
+    && mkdir -p /data /models && chown dictaduo:dictaduo /data
+ENV DICTADUO_SERVER_HOST=0.0.0.0 DICTADUO_SERVER_PORT=8391 DICTADUO_SERVER_DATA_DIR=/data
+ENV DICTADUO_ENGINE_PATH=/opt/dictaduo/helpers/dictaduo-engine
+ENV DICTADUO_TEXT_ENGINE_PATH=/opt/dictaduo/helpers/dictaduo-text-engine
+ENV DICTADUO_VAD_PATH=/opt/dictaduo/resources/silero-vad.bin
+ENV DICTADUO_SPEECH_MODEL=/models/ggml-large-v3-turbo.bin
+ENV DICTADUO_TEXT_MODEL=/models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+ENV DICTADUO_SERVER_TOKEN_FILE=/run/secrets/dictaduo-token
+USER dictaduo
+WORKDIR /opt/dictaduo
 EXPOSE 8391
 HEALTHCHECK --interval=30s --timeout=3s --start-period=120s \
     CMD curl --fail --silent http://127.0.0.1:8391/v1/health > /dev/null || exit 1
-ENTRYPOINT ["/opt/sottoduo/sottoduo-server"]
+ENTRYPOINT ["/opt/dictaduo/dictaduo-server"]
 
 FROM runtime AS cuda
-COPY --from=cuda-build /src/build/server/ /opt/sottoduo/
+COPY --from=cuda-build /src/build/server/ /opt/dictaduo/
 COPY --from=cuda-toolkit /usr/local/cuda-13.0/ /usr/local/cuda/
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64
 ENV NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility
@@ -65,4 +65,4 @@ ENV NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility
 # CPU is the default target, useful for a portable build/smoke check. Use the
 # cuda target for a GPU server and install NVIDIA Container Toolkit on its host.
 FROM runtime AS cpu
-COPY --from=cpu-build /src/build/server/ /opt/sottoduo/
+COPY --from=cpu-build /src/build/server/ /opt/dictaduo/

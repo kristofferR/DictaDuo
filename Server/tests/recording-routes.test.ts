@@ -28,7 +28,7 @@ afterEach(async () => {
 });
 
 async function fixture() {
-  const directory = await mkdtemp(join(tmpdir(), "sottoduo-recording-routes-"));
+  const directory = await mkdtemp(join(tmpdir(), "dictaduo-recording-routes-"));
   const generations = await GenerationService.open(
     { dataDirectory: directory, development: true },
     new FakeInference(),
@@ -158,7 +158,7 @@ async function rejected(
 
 describe("durable recording routes", () => {
   test("production standalone server handles binary WebSocket recording and finalization", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "sottoduo-recording-standalone-"));
+    const directory = await mkdtemp(join(tmpdir(), "dictaduo-recording-standalone-"));
     try {
       const executable = join(directory, "recording-server-probe");
       const built = await Bun.build({

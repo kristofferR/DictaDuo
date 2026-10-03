@@ -15,7 +15,7 @@ afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
 async function fixture() {
-  const dir = await mkdtemp(join(tmpdir(), "sottoduo-processing-"));
+  const dir = await mkdtemp(join(tmpdir(), "dictaduo-processing-"));
   const service = await GenerationService.open(
     { dataDirectory: dir, development: true },
     new FakeInference(),
@@ -45,8 +45,8 @@ test("shared processing saves preserve settings and dictionary metadata, and rej
             name: "Names",
             entries: [
               {
-                id: "sottoduo",
-                term: "SottoDuo",
+                id: "dictaduo",
+                term: "DictaDuo",
                 aliases: ["so toe", "so, too"],
                 isPriority: true,
               },
@@ -86,7 +86,7 @@ test("dictionary validation and request size failures do not write, and errors n
             {
               id: "l",
               name: "Names",
-              entries: [{ id: "e", term: "SottoDuo", aliases: ["sottoduo"] }],
+              entries: [{ id: "e", term: "DictaDuo", aliases: ["dictaduo"] }],
             },
           ],
         },

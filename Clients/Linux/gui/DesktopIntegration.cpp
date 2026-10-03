@@ -10,8 +10,8 @@
 #include <functional>
 
 namespace {
-const QByteArray marker = "# Managed by SottoDuo\n";
-const QByteArray serviceMarker = "# Managed by SottoDuo Linux GUI\n";
+const QByteArray marker = "# Managed by DictaDuo\n";
+const QByteArray serviceMarker = "# Managed by DictaDuo Linux GUI\n";
 
 struct ServiceUnit {
   bool available = false;
@@ -93,10 +93,10 @@ QString quotedServiceExecutable(QString path) {
 
 QString defaultClientExecutable(const QString &guiDirectory) {
   const QDir guiDir(guiDirectory);
-  const QString besideGui = guiDir.filePath("sottoduo");
+  const QString besideGui = guiDir.filePath("dictaduo");
   if (QFileInfo(besideGui).isExecutable() || guiDir.dirName() != "linux-gui")
     return besideGui;
-  const QString buildOutput = QDir::cleanPath(guiDir.filePath("../linux-client/sottoduo"));
+  const QString buildOutput = QDir::cleanPath(guiDir.filePath("../linux-client/dictaduo"));
   return QFileInfo(buildOutput).isExecutable() ? buildOutput : besideGui;
 }
 
@@ -110,20 +110,20 @@ DesktopIntegration::DesktopIntegration(bool preview, QObject *parent,
 QString DesktopIntegration::entryPath() const {
   return QStandardPaths::writableLocation(
              QStandardPaths::GenericConfigLocation) +
-         "/autostart/org.sottoduo.Gui.desktop";
+         "/autostart/org.dictaduo.Gui.desktop";
 }
 
 QString DesktopIntegration::servicePath() const {
   return QStandardPaths::writableLocation(
              QStandardPaths::GenericConfigLocation) +
-         "/systemd/user/sottoduo-client.service";
+         "/systemd/user/dictaduo-client.service";
 }
 
 void DesktopIntegration::refreshClientService() {
   if (m_preview || m_clientServiceBusy)
     return;
   const auto refresh = ++m_serviceRefresh;
-  runSystemctl(this, {"--user", "is-active", "sottoduo-client.service"},
+  runSystemctl(this, {"--user", "is-active", "dictaduo-client.service"},
                [this, refresh](ProcessResult result) {
                  if (refresh != m_serviceRefresh || m_clientServiceBusy)
                    return;
@@ -135,7 +135,7 @@ void DesktopIntegration::refreshClientService() {
                    m_clientService = "Running";
                    emit changed();
                  } else {
-                   serviceUnit(this, "sottoduo-client.service",
+                   serviceUnit(this, "dictaduo-client.service",
                                [this, refresh](ServiceUnit unit) {
                      if (refresh != m_serviceRefresh || m_clientServiceBusy)
                        return;
@@ -171,7 +171,7 @@ void DesktopIntegration::configureClientService(bool restartRunning) {
     emit changed();
     refreshClientService();
   };
-  serviceUnit(this, "sottoduo-client.service",
+  serviceUnit(this, "dictaduo-client.service",
               [this, fail, restartRunning](ServiceUnit loaded) {
     const QString path = servicePath();
     QFileInfo unit(path);
@@ -184,7 +184,7 @@ void DesktopIntegration::configureClientService(bool restartRunning) {
         (loaded.fragment.isEmpty() ||
          QFileInfo(loaded.fragment).absoluteFilePath() !=
              unit.absoluteFilePath())) {
-      fail("An existing background service is managed outside SottoDuo. Update it "
+      fail("An existing background service is managed outside DictaDuo. Update it "
            "through your desktop setup.");
       return;
     }
@@ -201,7 +201,7 @@ void DesktopIntegration::configureClientService(bool restartRunning) {
       if (unit.exists()) {
         if (!existing.open(QIODevice::ReadOnly) ||
             !(previous = existing.readAll()).startsWith(serviceMarker)) {
-          fail("An existing background service is managed outside SottoDuo. "
+          fail("An existing background service is managed outside DictaDuo. "
                "Update it through your desktop setup.");
           return;
         }
@@ -210,13 +210,13 @@ void DesktopIntegration::configureClientService(bool restartRunning) {
       if (!executable.isFile() || !executable.isExecutable() ||
           m_clientExecutable.contains(QChar('\n')) ||
           m_clientExecutable.contains(QChar('\r'))) {
-        fail("Install the SottoDuo background client beside this GUI, then try "
+        fail("Install the DictaDuo background client beside this GUI, then try "
              "again.");
         return;
       }
       const QByteArray data =
           serviceMarker +
-          ("[Unit]\nDescription=SottoDuo desktop dictation client\n"
+          ("[Unit]\nDescription=DictaDuo desktop dictation client\n"
            "PartOf=graphical-session.target\nAfter=graphical-session.target\n\n"
            "[Service]\nType=simple\nExecStart=" +
            quotedServiceExecutable(executable.absoluteFilePath()) +
@@ -250,11 +250,11 @@ void DesktopIntegration::configureClientService(bool restartRunning) {
     };
     auto enable = [this, complete, updated, created, restartRunning] {
       runSystemctl(
-          this, {"--user", "enable", "--now", "sottoduo-client.service"},
+          this, {"--user", "enable", "--now", "dictaduo-client.service"},
           [this, complete, updated, created, restartRunning](ProcessResult result) {
             if (result.available && result.exitCode == 0 &&
                 (restartRunning || (created && updated))) {
-              runSystemctl(this, {"--user", "restart", "sottoduo-client.service"},
+              runSystemctl(this, {"--user", "restart", "dictaduo-client.service"},
                            complete, 10000);
             } else {
               complete(result);
@@ -300,7 +300,7 @@ void DesktopIntegration::setLaunchAtLogin(bool enabled) {
   QFile existing(entryPath());
   if (existing.exists() && (!existing.open(QIODevice::ReadOnly) ||
                             !existing.readAll().startsWith(marker))) {
-    fail("An existing login entry is managed outside SottoDuo. Update it in your "
+    fail("An existing login entry is managed outside DictaDuo. Update it in your "
          "desktop’s startup settings.");
     return;
   }
@@ -315,7 +315,7 @@ void DesktopIntegration::setLaunchAtLogin(bool enabled) {
       (executable.isEmpty() || executable.contains(QChar('\n')) ||
        executable.contains(QChar('\r')) || executable.contains(QChar('\t')) ||
        executable.contains('=') || !QFileInfo(executable).isExecutable())) {
-    fail("Launch SottoDuo from its installed application before enabling login "
+    fail("Launch DictaDuo from its installed application before enabling login "
          "startup.");
     return;
   }
@@ -323,8 +323,8 @@ void DesktopIntegration::setLaunchAtLogin(bool enabled) {
       marker + "[Desktop Entry]\n" +
       (enabled
            ? QByteArray(
-                 "Type=Application\nName=SottoDuo\n"
-                 "Comment=Keep dictation feedback available\nIcon=sottoduo\n"
+                 "Type=Application\nName=DictaDuo\n"
+                 "Comment=Keep dictation feedback available\nIcon=dictaduo\n"
                  "Terminal=false\nHidden=false\n") +
                  ("Exec=" + quotedExecutable(executable) + " --background\n")
                      .toUtf8()

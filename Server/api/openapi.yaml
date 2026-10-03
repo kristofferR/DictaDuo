@@ -1,7 +1,7 @@
 # Generated language bindings use this file as their source of truth.
 openapi: "3.1.0"
 info:
-  title: "SottoDuo API"
+  title: "DictaDuo API"
   version: "2.0.0"
   description: "Shared transport contract for the Swift client and TypeScript server. Optional properties are omitted rather than encoded as null. Dates use whole-second ISO8601 UTC timestamps."
 servers:
@@ -10,13 +10,13 @@ servers:
 security:
   -
     bearerAuth: []
-x-sottoduo-apiVersion: 3
-x-sottoduo-recordingProtocol: "sottoduo.recording.v1"
-x-sottoduo-defaultPort: 8391
-x-sottoduo-maximumRecordingSeconds: 180
-x-sottoduo-maximumChunkBytes: 1048576
-x-sottoduo-maximumArtifactBytes: 8388608
-x-sottoduo-maximumDictionaryBytes: 8388608
+x-dictaduo-apiVersion: 3
+x-dictaduo-recordingProtocol: "dictaduo.recording.v1"
+x-dictaduo-defaultPort: 8391
+x-dictaduo-maximumRecordingSeconds: 180
+x-dictaduo-maximumChunkBytes: 1048576
+x-dictaduo-maximumArtifactBytes: 8388608
+x-dictaduo-maximumDictionaryBytes: 8388608
 paths:
   /v1/button-destinations:
     get:
@@ -36,7 +36,7 @@ paths:
       operationId: registerButtonDestination
       parameters:
         - &a1
-          name: X-SottoDuo-Destination-Owner
+          name: X-DictaDuo-Destination-Owner
           in: header
           required: true
           schema:
@@ -383,7 +383,7 @@ paths:
           schema:
             type: "string"
             enum:
-              - "sottoduo"
+              - "dictaduo"
               - "wispr-flow"
     post:
       operationId: "createGeneration"
@@ -978,7 +978,7 @@ paths:
   /v2/recordings/{id}/stream:
     get:
       operationId: streamRecording
-      description: Upgrade to WebSocket subprotocol sottoduo.recording.v1. Binary audio is UInt32BE JSON
+      description: Upgrade to WebSocket subprotocol dictaduo.recording.v1. Binary audio is UInt32BE JSON
         header length, UTF8 RecordingAudioHeader, then little-endian float32 PCM. Text controls
         resume, context, pause, stop and ping; server sends snapshots, acknowledgments, progress and
         errors. See docs/recording-protocol.md for durable ACK, fencing and resume semantics.
@@ -1181,10 +1181,10 @@ components:
           "$ref": "#/components/schemas/RecognitionMode"
         recognitionEngine:
           "$ref": "#/components/schemas/RecognitionEngine"
-          description: "Request this field with X-SottoDuo-Recognition-Engine: engine-v1. Missing values select Whisper; updates that omit it keep the server's selection."
+          description: "Request this field with X-DictaDuo-Recognition-Engine: engine-v1. Missing values select Whisper; updates that omit it keep the server's selection."
         language:
           type: "string"
-          description: "Norwegian (no) is sent only to clients that send X-SottoDuo-Language: language-v2; others see auto, and saving auto keeps Norwegian."
+          description: "Norwegian (no) is sent only to clients that send X-DictaDuo-Language: language-v2; others see auto, and saving auto keeps Norwegian."
           enum:
             - "en"
             - "auto"
@@ -1268,20 +1268,20 @@ components:
           type: "boolean"
         generationRetry:
           type: "boolean"
-          description: "Whether failed or cancelled generations with sealed audio can be retried. Request this field with X-SottoDuo-Generation-Retry: retry-v1. An omitted value means unsupported."
+          description: "Whether failed or cancelled generations with sealed audio can be retried. Request this field with X-DictaDuo-Generation-Retry: retry-v1. An omitted value means unsupported."
         cloudRecognition:
           type: "boolean"
-          description: "Whether cloud recognition (Soniox) is configured on this server. Request this field with X-SottoDuo-Cloud-Recognition: cloud-v1. An omitted value means unknown."
+          description: "Whether cloud recognition (Soniox) is configured on this server. Request this field with X-DictaDuo-Cloud-Recognition: cloud-v1. An omitted value means unknown."
         features:
           type: "array"
-          description: "Additions to API version 3 this server supports, such as retry-completed (finished takes can be transcribed again) and language-no (Norwegian). Request this field with X-SottoDuo-Features: features-v1. An omitted value means none."
+          description: "Additions to API version 3 this server supports, such as retry-completed (finished takes can be transcribed again) and language-no (Norwegian). Request this field with X-DictaDuo-Features: features-v1. An omitted value means none."
           items:
             type: "string"
             maxLength: 64
           maxItems: 32
         recognitionEngines:
           type: "array"
-          description: "Local recognition engines installed on this server. Request this field with X-SottoDuo-Recognition-Engine: engine-v1. An omitted value means Whisper only."
+          description: "Local recognition engines installed on this server. Request this field with X-DictaDuo-Recognition-Engine: engine-v1. An omitted value means Whisper only."
           items:
             "$ref": "#/components/schemas/RecognitionEngine"
         speech:
@@ -2083,7 +2083,7 @@ components:
         protocol:
           type: string
           enum:
-            - sottoduo.recording.v1
+            - dictaduo.recording.v1
         maximumPCMBytes:
           type: integer
           minimum: 0
@@ -2412,7 +2412,7 @@ components:
         - runTimings
   parameters:
     CaptureView:
-      name: "X-SottoDuo-Capture"
+      name: "X-DictaDuo-Capture"
       in: "header"
       required: false
       description: "Opt in to remote capture source/state fields; omit for the legacy generation shape."
@@ -2420,7 +2420,7 @@ components:
         type: "string"
         enum: [capture-v1]
     CaptureMutationOwner:
-      name: "X-SottoDuo-Capture-Owner"
+      name: "X-DictaDuo-Capture-Owner"
       in: "header"
       required: false
       description: "Required for remote-capture cancellation and delivery; omitted by local-upload clients."
@@ -2428,7 +2428,7 @@ components:
         type: "string"
         pattern: "^[0-9a-f]{64}$"
     CaptureOwner:
-      name: "X-SottoDuo-Capture-Owner"
+      name: "X-DictaDuo-Capture-Owner"
       in: "header"
       required: true
       description: "Client-generated 256-bit lowercase hexadecimal secret, unique per capture request. Required in addition to server authorization for remote recording control and delivery. Never put it in URLs or history."

@@ -23,7 +23,7 @@ class Local extends FakeInference {
   }
 }
 async function setup(mode: "automatic" | "cloud" | "local" = "automatic", configured = true) {
-  const path = await mkdtemp(join(tmpdir(), "sottoduo-recognition-"));
+  const path = await mkdtemp(join(tmpdir(), "dictaduo-recognition-"));
   const local = new Local();
   const chunks: Buffer[] = [];
   let starts = 0,

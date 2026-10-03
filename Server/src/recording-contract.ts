@@ -9,7 +9,7 @@ import type {
   RemoteCapture,
 } from "./api.ts";
 
-export const RECORDING_WS_PROTOCOL = "sottoduo.recording.v1";
+export const RECORDING_WS_PROTOCOL = "dictaduo.recording.v1";
 export const MAXIMUM_RECORDING_PCM_BYTES = 1_048_576;
 export const MAXIMUM_RECORDING_HEADER_BYTES = 16_384;
 export const MAXIMUM_RECORDING_MESSAGE_BYTES =

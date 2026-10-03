@@ -8,20 +8,20 @@ import { isPlasmaDesktop, PlasmaDesktop } from "./plasma.ts";
 import { ClientRuntime } from "./runtime.ts";
 import { ShortcutSettings } from "./shortcuts.ts";
 
-const help = `SottoDuo for Linux
-  sottoduo init SERVER_ORIGIN CAPTURE_HOST_ID TOKEN_FILE [DESTINATION_HELPER]
-  sottoduo sources          List available server capture inputs (no microphone opened)
-  sottoduo daemon           Run the desktop client in the graphical session
-  sottoduo start|stop        Hold-to-talk press/release commands
-  sottoduo toggle|cancel    Toggle recording or cancel this desktop's take
-  sottoduo undo             Insert a just-cancelled take after all (4 seconds)
-  sottoduo status|result    Show state or the current process's last result
-  sottoduo arm|disarm       Point the DJI button at this computer, or away from it
-  sottoduo button-status    Show button destination and receiver availability
-  sottoduo copy             Explicitly copy that result; never inject paste keys
+const help = `DictaDuo for Linux
+  dictaduo init SERVER_ORIGIN CAPTURE_HOST_ID TOKEN_FILE [DESTINATION_HELPER]
+  dictaduo sources          List available server capture inputs (no microphone opened)
+  dictaduo daemon           Run the desktop client in the graphical session
+  dictaduo start|stop        Hold-to-talk press/release commands
+  dictaduo toggle|cancel    Toggle recording or cancel this desktop's take
+  dictaduo undo             Insert a just-cancelled take after all (4 seconds)
+  dictaduo status|result    Show state or the current process's last result
+  dictaduo arm|disarm       Point the DJI button at this computer, or away from it
+  dictaduo button-status    Show button destination and receiver availability
+  dictaduo copy             Explicitly copy that result; never inject paste keys
 
 Config: ${configPath()}
-Configure the connection and microphones in SottoDuo → This computer.
+Configure the connection and microphones in DictaDuo → This computer.
 No recording, insertion, or device ownership resumes after restart.`;
 
 try {
@@ -35,7 +35,7 @@ try {
       server,
       hostID,
       resolve(tokenFile),
-      resolve(helper ?? `${dirname(process.execPath)}/sottoduo-destination`),
+      resolve(helper ?? `${dirname(process.execPath)}/dictaduo-destination`),
     );
     console.log(`Created ${configPath()}`);
   } else if (isCommand(action)) process.stdout.write(await send(action));
@@ -44,7 +44,7 @@ try {
     const api = new API(config.server, await token(config));
     console.log(JSON.stringify(await api.sources(), null, 2));
   } else if (action === "daemon") {
-    const helper = resolve(`${dirname(process.execPath)}/sottoduo-destination`);
+    const helper = resolve(`${dirname(process.execPath)}/dictaduo-destination`);
     const settings = await ConnectionSettings.open(helper);
     const plasma = isPlasmaDesktop([
       process.env.XDG_CURRENT_DESKTOP,
@@ -95,8 +95,8 @@ try {
       }
       console.log(
         settings.api
-          ? "SottoDuo is ready. Waiting for a shortcut."
-          : "Open SottoDuo → This computer to set up the server connection.",
+          ? "DictaDuo is ready. Waiting for a shortcut."
+          : "Open DictaDuo → This computer to set up the server connection.",
       );
     } catch (error) {
       await runtime.close();
@@ -104,9 +104,9 @@ try {
       await close?.();
       throw error;
     }
-  } else throw new Error("Unknown command. Use sottoduo --help.");
+  } else throw new Error("Unknown command. Use dictaduo --help.");
 } catch (error) {
   // Do not dump request objects, headers, server response text or credentials.
-  console.error(error instanceof Error ? error.message : "SottoDuo failed.");
+  console.error(error instanceof Error ? error.message : "DictaDuo failed.");
   process.exitCode = 1;
 }

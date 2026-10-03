@@ -228,18 +228,18 @@ export class ClientRuntime {
       return "Shortcut detected. No recording or clipboard action was performed.";
     if (this.changing) return "The connection is changing. Try again in a moment.";
     const current = this.current;
-    if (!current) return "Set up your server connection in SottoDuo → This computer first.";
+    if (!current) return "Set up your server connection in DictaDuo → This computer first.";
     const { controller, buttons } = current;
     this.mutations++;
     try {
       switch (action) {
         case "arm": {
           if (!buttons.enabled)
-            return "Let the DJI button type here in SottoDuo → Microphone first.";
+            return "Let the DJI button type here in DictaDuo → Microphone first.";
           // Arming only moves the button in "Last computer I dictated on" mode.
           const target = buttons.state?.buttonTarget;
           if (target && target.mode !== "lastDictated")
-            return `The DJI button is set to ${target.mode === "off" ? "Nowhere" : `always type into ${target.device?.name ?? "another computer"}`}. Change it in SottoDuo → Microphone.`;
+            return `The DJI button is set to ${target.mode === "off" ? "Nowhere" : `always type into ${target.device?.name ?? "another computer"}`}. Change it in DictaDuo → Microphone.`;
           await buttons.select();
           return "The DJI button now types into this computer.";
         }
@@ -248,7 +248,7 @@ export class ClientRuntime {
           // A pinned computer is selected again on its next registration.
           const target = buttons.state?.buttonTarget;
           if (target?.mode === "device" && target.device?.id === this.settings.config?.device.id)
-            return "The DJI button is set to always type here. Change it in SottoDuo → Microphone.";
+            return "The DJI button is set to always type here. Change it in DictaDuo → Microphone.";
           await buttons.disarm();
           return "The DJI button no longer types into this computer.";
         }

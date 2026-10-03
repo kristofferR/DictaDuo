@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=SottoDuo
-Comment=Dictation across your computers
-Exec=sottoduo-gui
-Icon=sottoduo
-Terminal=false
-Categories=AudioVideo;Utility;

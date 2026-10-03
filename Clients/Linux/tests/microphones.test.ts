@@ -68,7 +68,7 @@ test("legacy priorities migrate without changing selection and profile metadata 
 });
 
 test("named lists persist atomically, reject stale/active/locked edits and retain unavailable names", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "sottoduo-profiles-"));
+  const dir = await mkdtemp(join(tmpdir(), "dictaduo-profiles-"));
   const file = join(dir, "client.json");
   let unlocked = true;
   const desktop: Desktop = {

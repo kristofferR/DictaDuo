@@ -579,7 +579,7 @@ int main(int argc, char **argv) {
     std::string vadModel;
     std::string engine = "whisper";
     int threads = static_cast<int>(std::clamp(std::thread::hardware_concurrency(), 1u, 8u));
-    constexpr auto usage = "Usage: sottoduo-engine --model PATH --vad-model PATH [--engine whisper|parakeet] [--threads 1..32]";
+    constexpr auto usage = "Usage: dictaduo-engine --model PATH --vad-model PATH [--engine whisper|parakeet] [--threads 1..32]";
     for (int i = 1; i < argc; ++i) {
         const std::string argument = argv[i];
         if (argument == "--help") {
@@ -649,7 +649,7 @@ int main(int argc, char **argv) {
     const std::unique_ptr<whisper_vad_context, decltype(&whisper_vad_free)> vad(
         whisper_vad_init_from_file_with_params(vadModel.c_str(), vadParameters), whisper_vad_free);
     if (!vad) {
-        emitError("The local speech detector could not load. Rebuild SottoDuo to restore it.");
+        emitError("The local speech detector could not load. Rebuild DictaDuo to restore it.");
         return 1;
     }
     emit({{"type", "ready"}, {"engineVersion", engineVersion}});

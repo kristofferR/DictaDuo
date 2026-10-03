@@ -259,7 +259,7 @@ Group {
         Layout.margins: 12
         visible: root.showHelp
         font.pixelSize: 12
-        text: "Focus a text field, then tap the transmitter's button to start dictating and again to stop. The text goes to the computer the button types into. The button always records from the DJI receiver.\n\nPlug the receiver into the computer running the SottoDuo server, turn on the transmitter, and check that they are linked. On Linux, that computer needs the DJI receiver access rules and an active local login. If recording works but the button does nothing, check the button permission in the server setup.\n\nChecking the receiver only reads its status. It never records, resets the receiver or changes Bluetooth connections."
+        text: "Focus a text field, then tap the transmitter's button to start dictating and again to stop. The text goes to the computer the button types into. The button always records from the DJI receiver.\n\nPlug the receiver into the computer running the DictaDuo server, turn on the transmitter, and check that they are linked. On Linux, that computer needs the DJI receiver access rules and an active local login. If recording works but the button does nothing, check the button permission in the server setup.\n\nChecking the receiver only reads its status. It never records, resets the receiver or changes Bluetooth connections."
     }
     SLabel {
         ui: root.ui

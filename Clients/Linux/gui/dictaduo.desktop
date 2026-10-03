@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=DictaDuo
+Comment=Dictation across your computers
+Exec=dictaduo-gui
+Icon=dictaduo
+Terminal=false
+Categories=AudioVideo;Utility;

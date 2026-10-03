@@ -10,12 +10,12 @@ afterEach(async () => {
     await rm(directory, { recursive: true, force: true });
 });
 const environment = {
-  SOTTODUO_SERVER_DATA_DIR: "/tmp/sottoduo-config",
-  SOTTODUO_ENGINE_PATH: "/tmp/speech",
-  SOTTODUO_SPEECH_MODEL: "/tmp/speech-model",
-  SOTTODUO_VAD_PATH: "/tmp/vad",
-  SOTTODUO_TEXT_ENGINE_PATH: "/tmp/proof",
-  SOTTODUO_TEXT_MODEL: "/tmp/proof-model",
+  DICTADUO_SERVER_DATA_DIR: "/tmp/dictaduo-config",
+  DICTADUO_ENGINE_PATH: "/tmp/speech",
+  DICTADUO_SPEECH_MODEL: "/tmp/speech-model",
+  DICTADUO_VAD_PATH: "/tmp/vad",
+  DICTADUO_TEXT_ENGINE_PATH: "/tmp/proof",
+  DICTADUO_TEXT_MODEL: "/tmp/proof-model",
 };
 
 test("PipeWire capture is opt-in and requires a stable host identity", async () => {
@@ -42,13 +42,13 @@ test("PipeWire capture is opt-in and requires a stable host identity", async () 
 test("CLI overrides environment and uses independent explicit model/data paths", async () => {
   const configuration = await parseConfiguration(["--port", "8392", "--dev"], {
     ...environment,
-    SOTTODUO_SERVER_PORT: "8391",
+    DICTADUO_SERVER_PORT: "8391",
   });
   expect(configuration).toMatchObject({
     host: "127.0.0.1",
     port: 8392,
     development: true,
-    dataDirectory: "/tmp/sottoduo-config",
+    dataDirectory: "/tmp/dictaduo-config",
     inference: { speechHelper: "/tmp/speech", proofModel: "/tmp/proof-model" },
   });
   for (const port of ["0", "65536", "12oops", "1.2", "NaN"])
@@ -61,7 +61,7 @@ test("remote listeners require a bounded regular UTF8 token file", async () => {
   await expect(parseConfiguration(["--host", "0.0.0.0"], environment)).rejects.toThrow(
     "requires a token",
   );
-  const directory = await mkdtemp(join(tmpdir(), "sottoduo-config-"));
+  const directory = await mkdtemp(join(tmpdir(), "dictaduo-config-"));
   directories.push(directory);
   const file = join(directory, "token");
   await writeFile(file, `${"x".repeat(32)}\n`);
@@ -94,7 +94,7 @@ test("Soniox credentials are optional, bounded, server-only, and may come from a
     model: "stt-rt-v5",
     endpoint: "wss://stt-rt.soniox.com/transcribe-websocket",
   });
-  const directory = await mkdtemp(join(tmpdir(), "sottoduo-soniox-config-"));
+  const directory = await mkdtemp(join(tmpdir(), "dictaduo-soniox-config-"));
   directories.push(directory);
   const file = join(directory, "key");
   await writeFile(file, "file-secret\n", { mode: 0o600 });

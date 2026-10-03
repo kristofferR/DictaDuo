@@ -1,21 +1,21 @@
 # Architecture
 
-SottoDuo's native Swift macOS client handles microphone capture, shortcuts, and cursor insertion. An independent TypeScript/Fastify server, compiled with Bun, owns inference, shared settings, and history. HTTP uses the shared OpenAPI contract; long recordings use the versioned v2 recording routes and `sottoduo.recording.v1` WebSocket protocol on localhost or a remote server. Existing v1 generations remain readable.
+DictaDuo's native Swift macOS client handles microphone capture, shortcuts, and cursor insertion. An independent TypeScript/Fastify server, compiled with Bun, owns inference, shared settings, and history. HTTP uses the shared OpenAPI contract; long recordings use the versioned v2 recording routes and `dictaduo.recording.v1` WebSocket protocol on localhost or a remote server. Existing v1 generations remain readable.
 
 ## Code map
 
 | Component | Responsibility |
 | --- | --- |
-| `Clients/macOS/Sources/SottoDuo` | SwiftUI/AppKit app, device settings, HTTP client, capture, and guarded delivery. |
-| `Clients/macOS/Sources/SottoDuoCore` | Mac configuration, audio metering, microphone selection, and model manifests. |
+| `Clients/macOS/Sources/DictaDuo` | SwiftUI/AppKit app, device settings, HTTP client, capture, and guarded delivery. |
+| `Clients/macOS/Sources/DictaDuoCore` | Mac configuration, audio metering, microphone selection, and model manifests. |
 | `Clients/Linux` | Bun dictation client, Qt Quick GUI, desktop integration, and tests. |
-| `Shared/Sources/SottoDuoAPI` | Shared wire types and limits. |
-| `Shared/Sources/SottoDuoAPIWire` | Generated Swift transport types used through the API facade. |
+| `Shared/Sources/DictaDuoAPI` | Shared wire types and limits. |
+| `Shared/Sources/DictaDuoAPIWire` | Generated Swift transport types used through the API facade. |
 | `Server/api/openapi.yaml` | Language-neutral HTTP and wire-model contract. |
 | `Server/src` | Packaged TypeScript HTTP server, durable coordinator, text pipeline, and helper management. |
-| `Shared/Sources/SottoDuoDomain` | Dictionary, list formatting, rewrite validation, and composition. |
-| `Server/Swift/Sources/SottoDuoServerKit` | Reference Swift server retained for migration parity tests. |
-| `Server/Swift/Sources/SottoDuoServer` | Reference Swift server command-line entry point. |
+| `Shared/Sources/DictaDuoDomain` | Dictionary, list formatting, rewrite validation, and composition. |
+| `Server/Swift/Sources/DictaDuoServerKit` | Reference Swift server retained for migration parity tests. |
+| `Server/Swift/Sources/DictaDuoServer` | Reference Swift server command-line entry point. |
 | `Engine` | Persistent whisper.cpp speech helper; Metal on Mac, CPU/CUDA on Linux. |
 | `TextEngine` | Persistent Qwen helper; Swift MLX on Mac, llama.cpp on Linux. |
 
@@ -51,7 +51,7 @@ Admitted audio survives network outages, app interruptions, and server restarts.
 
 On the Mac, a released take keeps its own connection, destination, and delivery receipt, so a new hold can start while earlier takes upload and process. Deliveries run in recording order and wait while a hold is in progress. Escape cancels the take the HUD shows until its text is inserted; earlier takes keep running.
 
-Cancelling a take with at least 0.25 seconds of audio does not discard it. The server still transcribes it, and for 4 seconds Undo or the dictation key inserts it as usual (`sottoduo undo` on Linux). Otherwise it is saved to history as **Not pasted** with a `cancelled` delivery receipt. Device-initiated cancels, lock, and shutdown still discard. The TypeScript server's `POST /v1/generations/{id}/retry` re-transcribes a failed or cancelled recording's sealed audio with local Whisper. Mac history offers it as **Transcribe again** when server health advertises `generationRetry: true`; the Swift reference server and Linux history do not offer transcription retry.
+Cancelling a take with at least 0.25 seconds of audio does not discard it. The server still transcribes it, and for 4 seconds Undo or the dictation key inserts it as usual (`dictaduo undo` on Linux). Otherwise it is saved to history as **Not pasted** with a `cancelled` delivery receipt. Device-initiated cancels, lock, and shutdown still discard. The TypeScript server's `POST /v1/generations/{id}/retry` re-transcribes a failed or cancelled recording's sealed audio with local Whisper. Mac history offers it as **Transcribe again** when server health advertises `generationRetry: true`; the Swift reference server and Linux history do not offer transcription retry.
 
 ## Text delivery
 
@@ -61,7 +61,7 @@ The Mac rechecks destination, selection, protected fields, modifiers, and clipbo
 
 Microphone capture uses input-only Core Audio without changing system routing or playback volume. A bounded writer queue and missing-frame watchdog stop safely on capture/storage failure and preserve the committed prefix. A scoped power assertion prevents idle system sleep during active capture. Real sleep, device loss, lock, and app quit preserve interrupted audio; resumed capture uses a new run and records the gap.
 
-With **Mute system audio while recording** enabled under **This Mac** (or **This computer** on Linux, through PipeWire's `wpctl`), the default output device is muted when a take starts and restored when capture ends. Only mute controls SottoDuo changed are restored, so output that was already muted stays muted. A client crash during a take can leave output muted.
+With **Mute system audio while recording** enabled under **This Mac** (or **This computer** on Linux, through PipeWire's `wpctl`), the default output device is muted when a take starts and restored when capture ends. Only mute controls DictaDuo changed are restored, so output that was already muted stays muted. A client crash during a take can leave output muted.
 
 ## Settings
 
@@ -73,7 +73,7 @@ With **Mute system audio while recording** enabled under **This Mac** (or **This
 
 Shared saves use revisions to reject stale concurrent edits. Settings are snapshotted when the server accepts a take; changes affect future recordings. Update shared settings through the UI/API rather than editing files while the server runs.
 
-The regular app uses `~/Library/Application Support/SottoDuo`; Dev uses `~/Library/Application Support/SottoDuo Dev`. `SOTTODUO_CLIENT_DATA_DIR` overrides either, and the dev runner selects `.local/client`. `config.json` stores shortcut/microphone settings; `client.json` stores endpoint/device identity. Tokens live in separate release/Dev Keychain services, scoped to the endpoint and client directory. `SOTTODUO_SERVER_URL` overrides the saved endpoint for a run. Valid manual `config.json` edits are reloaded; invalid files leave the last good configuration active.
+The regular app uses `~/Library/Application Support/DictaDuo`; Dev uses `~/Library/Application Support/DictaDuo Dev`. `DICTADUO_CLIENT_DATA_DIR` overrides either, and the dev runner selects `.local/client`. `config.json` stores shortcut/microphone settings; `client.json` stores endpoint/device identity. Tokens live in separate release/Dev Keychain services, scoped to the endpoint and client directory. `DICTADUO_SERVER_URL` overrides the saved endpoint for a run. Valid manual `config.json` edits are reloaded; invalid files leave the last good configuration active.
 
 ## Storage
 
@@ -101,6 +101,6 @@ All clients read shared, paginated history. V2 history uses compact snapshots an
 
 Client spools live under `Recordings/` in the client data directory until server finalization or explicit discard. Credentials stay in Keychain. Capture batches coalesce up to 250 ms per stream and publish an atomic, aligned original/inference checkpoint. An abrupt process/power loss can additionally lose the bounded writer queue and converter tail. Orderly interruptions drain them. Server startup reconciles receipt and window journals, resumes pending work, and preserves acknowledged audio.
 
-Only one server may own a data directory. Back up preferences, generation directories, and session directories together. SottoDuo does not add filesystem encryption; protect this directory as you would the recordings it contains. Authentication and remote transport are described in the [server guide](../Server/README.md#remote-access).
+Only one server may own a data directory. Back up preferences, generation directories, and session directories together. DictaDuo does not add filesystem encryption; protect this directory as you would the recordings it contains. Authentication and remote transport are described in the [server guide](../Server/README.md#remote-access).
 
 See the [HTTP contract](client-server-contract.md) for request details and [text correction](text-correction.md) for behavior and limitations.

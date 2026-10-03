@@ -30,11 +30,11 @@ static gboolean input(GIOChannel *channel, GIOCondition condition, gpointer unus
 int main(int argc, char **argv) {
   gtk_init(&argc, &argv);
   GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-  gtk_window_set_title(GTK_WINDOW(window), "SottoDuo insertion safety test");
+  gtk_window_set_title(GTK_WINDOW(window), "DictaDuo insertion safety test");
   gtk_window_set_default_size(GTK_WINDOW(window), 440, 160);
   GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
   gtk_container_add(GTK_CONTAINER(window), box);
-  gtk_box_pack_start(GTK_BOX(box), gtk_label_new("Temporary SottoDuo test fields. No microphone is open."), FALSE, FALSE, 0);
+  gtk_box_pack_start(GTK_BOX(box), gtk_label_new("Temporary DictaDuo test fields. No microphone is open."), FALSE, FALSE, 0);
   entry = gtk_entry_new(); other = gtk_entry_new();
   gtk_box_pack_start(GTK_BOX(box), entry, FALSE, FALSE, 0);
   gtk_box_pack_start(GTK_BOX(box), other, FALSE, FALSE, 0);

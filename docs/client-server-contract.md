@@ -1,6 +1,6 @@
 # HTTP API
 
-API version 3, default port **8391**. [`Server/api/openapi.yaml`](../Server/api/openapi.yaml) defines the HTTP contract and generates TypeScript and Swift types. [`Sources/SottoDuoAPI/API.swift`](../Shared/Sources/SottoDuoAPI/API.swift) preserves the legacy client facade; `RecordingAPI.swift` defines the v2 recording messages. V1 dates use whole-second ISO-8601 UTC; v2 accepts fractional seconds and preserves capture timestamps. macOS and Linux expose the same packaged API. See [server setup](../Server/README.md#remote-access) for authentication and endpoint configuration.
+API version 3, default port **8391**. [`Server/api/openapi.yaml`](../Server/api/openapi.yaml) defines the HTTP contract and generates TypeScript and Swift types. [`Sources/DictaDuoAPI/API.swift`](../Shared/Sources/DictaDuoAPI/API.swift) preserves the legacy client facade; `RecordingAPI.swift` defines the v2 recording messages. V1 dates use whole-second ISO-8601 UTC; v2 accepts fractional seconds and preserves capture timestamps. macOS and Linux expose the same packaged API. See [server setup](../Server/README.md#remote-access) for authentication and endpoint configuration.
 
 The current native client negotiates `/v2/recordings/capabilities` and uses durable recording admission, resumable WebSocket audio, during-capture processing, and one final delivery. The complete [recording protocol](recording-protocol.md) defines pause/stop, checksums, durable ACKs, connection fencing, recovery, paginated history, and per-run audio exports. Legacy v1 routes and semantics below remain available for old clients/imports. The reference Swift server implements v1 only and does not advertise long-recording capability.
 
@@ -39,7 +39,7 @@ Errors are `APIErrorResponse`; relevant codes 400 invalid input, 401 auth, 404 m
 
 ## Generation semantics
 
-Server-attached microphones record durable recording sessions through the [remote capture session contract](remote-capture.md): source discovery, owned start/heartbeat/context/stop controls, capture readiness and bounded cleanup. Remote recording control, delivery and discard of an unsettled or still-recording session additionally require their session-specific `X-SottoDuo-Capture-Owner` secret; the upload WebSocket rejects remote sessions. Legacy generations created before this change keep their `capture` object, returned when a client sends `X-SottoDuo-Capture: capture-v1`.
+Server-attached microphones record durable recording sessions through the [remote capture session contract](remote-capture.md): source discovery, owned start/heartbeat/context/stop controls, capture readiness and bounded cleanup. Remote recording control, delivery and discard of an unsettled or still-recording session additionally require their session-specific `X-DictaDuo-Capture-Owner` secret; the upload WebSocket rejects remote sessions. Legacy generations created before this change keep their `capture` object, returned when a client sends `X-DictaDuo-Capture: capture-v1`.
 
 - Server owns settings/dictionary, inference, formatting, proofreading, rewrite guards, composition, artifacts and history. Client owns only ephemeral capture/AX anchors and device preferences.
 - Inference audio is mono 16k float32. Original is input microphone format normalized to interleaved float32, retained/uploaded only if the accepted settings snapshot says keepOriginalAudio. Both audio intervals must match. Min take 0.25 s, max 180 s. Soniox recognition runs during upload; only sealed complete uploads can complete a generation or run Whisper fallback.
@@ -52,7 +52,7 @@ Server-attached microphones record durable recording sessions through the [remot
 
 ## Shared preferences
 
-Send `X-SottoDuo-Recognition: streaming-v1` to receive the optional recognition fields in JSON and NDJSON. Without this header, responses retain the legacy v1 shape for strict older clients. Likewise, send `X-SottoDuo-Recognition-Engine: engine-v1` to receive `recognitionEngine` in preferences and `recognitionEngines` in health. Recording session responses, events and WebSocket snapshots negotiate this header too.
+Send `X-DictaDuo-Recognition: streaming-v1` to receive the optional recognition fields in JSON and NDJSON. Without this header, responses retain the legacy v1 shape for strict older clients. Likewise, send `X-DictaDuo-Recognition-Engine: engine-v1` to receive `recognitionEngine` in preferences and `recognitionEngines` in health. Recording session responses, events and WebSocket snapshots negotiate this header too.
 
 GET/PUT use `{ "revision": N, "preferences": { ... } }`. A save must include the current revision; successful validation returns the incremented snapshot. Active generations keep their admission-time snapshot.
 

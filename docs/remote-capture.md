@@ -1,6 +1,6 @@
 # Remote capture sessions
 
-Ref [#5](https://github.com/kristofferR/sottoduo/issues/5). This implements the session boundary for a microphone attached to the server's host. A trusted local `CaptureProvider` supplies audio; the optional [Linux PipeWire/DJI provider](pipewire-capture.md) implements that boundary for #6. With no provider, discovery returns an empty list and the existing local-upload API works unchanged.
+Ref [#5](https://github.com/kristofferR/dictaduo/issues/5). This implements the session boundary for a microphone attached to the server's host. A trusted local `CaptureProvider` supplies audio; the optional [Linux PipeWire/DJI provider](pipewire-capture.md) implements that boundary for #6. With no provider, discovery returns an empty list and the existing local-upload API works unchanged.
 
 ## Source and destination
 
@@ -12,13 +12,13 @@ A remote take is a durable [recording session](recording-protocol.md) whose audi
 
 The computer running the server shares only the sources it chooses. A request that comes from that computer (loopback, or one of its own addresses) sees every source with its `shared` flag and may change sharing with `PUT /v1/audio-sources/sharing`. Every other computer only sees shared sources, and starting a capture of an unshared source from another computer fails with `source_unavailable`, so its client falls back to its next input. The choice is stored in `microphone-sharing.json` in the data directory. Sources present when sharing first runs stay shared, because every source was shared before the setting existed; sources discovered later start unshared. A damaged file shares nothing.
 
-Each source also reports `recordingFor`, the device whose take currently holds it, and the list reports `sharingHost` (the server computer's name and whether the request is local). These fields, and the button target below, are only sent to clients that send `X-SottoDuo-Microphone-Sharing: sharing-v1`; older clients still only see shared sources.
+Each source also reports `recordingFor`, the device whose take currently holds it, and the list reports `sharingHost` (the server computer's name and whether the request is local). These fields, and the button target below, are only sent to clients that send `X-DictaDuo-Microphone-Sharing: sharing-v1`; older clients still only see shared sources.
 
 Inference readiness remains `/v1/health` and recording admission. Shared preferences are frozen by that admission, including original-audio retention. Capture-provider audio is written into one capture run of the session through the same durable chunk receipts, checksums and limits as client uploads: a 16 kHz mono inference stream and an optional matching-interval original stream. Speech is recognized and committed while the take records, exactly as for client uploads. Audio never travels through the destination client just to return to the server.
 
 ## Control protocol
 
-All routes retain server bearer authentication and Host/Origin policy. The initiating client also generates a random 32-byte secret, encoded as 64 lowercase hexadecimal characters. Send it as `X-SottoDuo-Capture-Owner`, never in a URL. Use a new secret for every new request ID and retain it for retries and delivery. Device IDs and names are attribution, not authorization.
+All routes retain server bearer authentication and Host/Origin policy. The initiating client also generates a random 32-byte secret, encoded as 64 lowercase hexadecimal characters. Send it as `X-DictaDuo-Capture-Owner`, never in a URL. Use a new secret for every new request ID and retain it for retries and delivery. Device IDs and names are attribution, not authorization.
 
 | Operation | Behavior |
 | --- | --- |

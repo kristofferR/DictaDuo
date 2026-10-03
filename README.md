@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="Clients/Linux/gui/mark.svg" width="128" height="128" alt="SottoDuo app icon">
+  <img src="Clients/Linux/gui/mark.svg" width="128" height="128" alt="DictaDuo app icon">
 </p>
 
-<h1 align="center">SottoDuo</h1>
+<h1 align="center">DictaDuo</h1>
 
 <p align="center">
   <strong>Dictation for macOS and Linux.</strong><br>
@@ -10,39 +10,37 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kristofferR/SottoDuo/actions/workflows/server.yml"><img src="https://github.com/kristofferR/SottoDuo/actions/workflows/server.yml/badge.svg" alt="Build and test status"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/kristofferR/SottoDuo?style=flat-square" alt="MIT license"></a>
+  <a href="https://github.com/kristofferR/DictaDuo/actions/workflows/server.yml"><img src="https://github.com/kristofferR/DictaDuo/actions/workflows/server.yml/badge.svg" alt="Build and test status"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/kristofferR/DictaDuo?style=flat-square" alt="MIT license"></a>
 </p>
 
 <p align="center">
   <a href="#build-from-source">Build from source</a> ·
-  <a href="#changes-from-upstream-sotto">Changes from upstream Sotto</a> ·
+  <a href="#features">Features</a> ·
   <a href="#documentation">Documentation</a>
 </p>
 
 ---
 
-SottoDuo is an fork of [Sotto](https://github.com/davis7dotsh/sotto)
-with a Linux desktop client, Soniox streaming (with local Whisper fallback),
-and shared microphone support.
+DictaDuo is a dictation app for macOS and Linux with Soniox streaming (with
+local Whisper fallback) and shared microphone support.
 
 [Voxtype](https://github.com/peteonrails/voxtype) and
 [HyperWhisper](https://github.com/ray-amjad/hyperwhisper-app) already offer local
-transcription and text processing. Sotto gives this fork a shared dictation
+transcription and text processing. DictaDuo instead uses a shared dictation
 server: the models, correction rules, settings, and history live together, with
 desktop clients handling recording and insertion. A laptop can use the desktop's
 GPU without keeping its own models loaded, and both computers use the same
 dictionary and cleanup behavior.
 
-SottoDuo extends that design across Mac and Linux with native Swift and Qt Quick
-clients. A microphone connected to the Linux server can serve either computer;
+DictaDuo spans Mac and Linux with native Swift and Qt Quick clients. A microphone connected to the Linux server can serve either computer;
 the DJI button follows your selected destination. Switching computers does not
 mean moving the receiver or maintaining a second dictation setup.
 
-## Changes from upstream Sotto
+## Features
 
-The Mac app, Whisper/Qwen pipeline, Mac/Linux server, dictionaries, shared
-history, and Wispr Flow import come from upstream. SottoDuo adds:
+Besides the Mac app, Whisper/Qwen pipeline, Mac/Linux server, dictionaries,
+shared history, and Wispr Flow import, DictaDuo includes:
 
 | Addition | What it does |
 | --- | --- |
@@ -59,9 +57,9 @@ imported records.
 
 ## Recognition and privacy
 
-Sotto supplies a fully self-hosted Whisper and Qwen pipeline, with no required
-service account, subscription, or word quota. SottoDuo adds Soniox as an optional
-recognition provider while retaining that local pipeline.
+DictaDuo has a fully self-hosted Whisper and Qwen pipeline, with no required
+service account, subscription, or word quota. Soniox is an optional recognition
+provider alongside that local pipeline.
 
 | Mode | How speech is recognized |
 | --- | --- |
@@ -76,18 +74,18 @@ Optional Qwen proofreading runs on your own server in every mode, so using cloud
 recognition does not require cloud cleanup too.
 
 Where [Voxtype's advanced cleanup](https://github.com/peteonrails/voxtype#post-processing-command-advanced)
-runs an external command, Sotto includes proofreading and validation in the
+runs an external command, DictaDuo includes proofreading and validation in the
 pipeline. Qwen's output is checked for altered quantities, negations, list
 markers, and excessive rewriting. A response can be rejected even if the model
 completed successfully; the text from before proofreading is kept instead.
-These inherited checks provide more control over unintended edits than a cleanup
+These checks provide more control over unintended edits than a cleanup
 prompt alone. The full prompt and phrase replacements are editable, and Qwen can
 be disabled without losing dictionary corrections.
 
-Sotto's shared history also carries across to both desktops. For comparison,
+The shared history also carries across to both desktops. For comparison,
 [HyperWhisper's vocabulary sync](https://github.com/ray-amjad/hyperwhisper-app/blob/main/mintlify-help/vocabulary-cloud-sync.mdx)
 uses iCloud for vocabulary while leaving transcripts, recordings, and other
-settings on each device. SottoDuo clients read the same server archive, including
+settings on each device. DictaDuo clients read the same server archive, including
 original text, cleanup outcomes, model details, and retained audio, across Mac
 and Linux.
 
@@ -110,20 +108,20 @@ See [Soniox setup and fallback behavior](docs/soniox-streaming.md) and
 ### On one Mac
 
 ```sh
-git clone --recurse-submodules https://github.com/kristofferR/SottoDuo.git
-cd SottoDuo
+git clone --recurse-submodules https://github.com/kristofferR/DictaDuo.git
+cd DictaDuo
 ```
 
 [Download the Whisper and Qwen models](Server/README.md#models) into `.local/models`,
 then build and start:
 
 ```sh
-export SOTTODUO_SPEECH_MODEL="$PWD/.local/models/ggml-large-v3-turbo.bin"
-export SOTTODUO_TEXT_MODEL="$PWD/.local/models/Qwen3-4B-Instruct-2507-MLX-4bit"
+export DICTADUO_SPEECH_MODEL="$PWD/.local/models/ggml-large-v3-turbo.bin"
+export DICTADUO_TEXT_MODEL="$PWD/.local/models/Qwen3-4B-Instruct-2507-MLX-4bit"
 ./scripts/run-dev.sh
 ```
 
-This starts the server at **http://localhost:8391** and opens **SottoDuo Dev**,
+This starts the server at **http://localhost:8391** and opens **DictaDuo Dev**,
 which has separate settings from the regular app.
 
 Grant **Microphone** and **Accessibility** permissions. The default hold-to-dictate
@@ -132,7 +130,7 @@ key is <kbd>Right Option</kbd>, configurable under **This Mac**. Inputs are unde
 Recordings are limited to three minutes. For Fn/Globe shortcuts, set macOS
 **Keyboard → Press Globe key to → Do Nothing** if its action conflicts.
 
-For the regular app, run `./scripts/build-app.sh` and move `build/SottoDuo.app`
+For the regular app, run `./scripts/build-app.sh` and move `build/DictaDuo.app`
 to Applications. It still needs the independently running server.
 
 ### On Linux
@@ -145,7 +143,7 @@ server. From a cloned repository with those dependencies installed:
 bun install --frozen-lockfile
 bash scripts/build-linux-client.sh
 bash scripts/build-linux-gui.sh
-build/linux-gui/sottoduo-gui
+build/linux-gui/dictaduo-gui
 ```
 
 Under **This computer**, set up **Background dictation**, enter your server
@@ -180,7 +178,7 @@ Bluetooth-only connections do not provide these button events.
 
 The destination stays fixed throughout a recording. Server-button selection
 clears when the selected client locks, sleeps, or disconnects. Microphone
-priorities apply to new recordings; SottoDuo does not switch inputs mid-sentence
+priorities apply to new recordings; DictaDuo does not switch inputs mid-sentence
 or automatically hand off between USB and Bluetooth.
 
 See [DJI button routing and setup](docs/dji-button-routing.md) and
@@ -243,7 +241,7 @@ workspaces. Build outputs stay in `build/` and `.build/`.
 
 ## Support and contributing
 
-[Open an issue](https://github.com/kristofferR/SottoDuo/issues) for bugs or ideas.
+[Open an issue](https://github.com/kristofferR/DictaDuo/issues) for bugs or ideas.
 For a dictation problem, include your desktop environment, server platform,
 recognition mode, and microphone setup.
 
@@ -252,6 +250,6 @@ contributor PR requirements.
 
 ## License and credits
 
-[MIT](LICENSE). Forked from [Sotto](https://github.com/davis7dotsh/sotto) by
-davis7dotsh. See [third-party notices](THIRD_PARTY_NOTICES.md) for bundled
+[MIT](LICENSE). Originally based on [Sotto](https://github.com/davis7dotsh/sotto)
+by davis7dotsh. See [third-party notices](THIRD_PARTY_NOTICES.md) for bundled
 dependencies and model licenses.

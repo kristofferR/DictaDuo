@@ -42,22 +42,22 @@ jobs:
         run: bun test Server/tests/correction-worker-standalone.test.ts
       - name: Build complete platform package
         env:
-          SOTTODUO_NATIVE: "OFF"
-          SOTTODUO_CUDA: "OFF"
-          SOTTODUO_BUILD_JOBS: "4"
+          DICTADUO_NATIVE: "OFF"
+          DICTADUO_CUDA: "OFF"
+          DICTADUO_BUILD_JOBS: "4"
         run: ./scripts/build-server.sh
-      - run: ./build/server/sottoduo-server --help
+      - run: ./build/server/dictaduo-server --help
       - name: Test packaged HTTP server
-        run: bun Server/scripts/smoke.ts --executable ./build/server/sottoduo-server
+        run: bun Server/scripts/smoke.ts --executable ./build/server/dictaduo-server
       - name: Package and checksum
         run: |
           cd build
-          tar -czf sottoduo-server-${{ matrix.platform }}.tar.gz server
-          shasum -a 256 sottoduo-server-${{ matrix.platform }}.tar.gz > sottoduo-server-${{ matrix.platform }}.tar.gz.sha256
+          tar -czf dictaduo-server-${{ matrix.platform }}.tar.gz server
+          shasum -a 256 dictaduo-server-${{ matrix.platform }}.tar.gz > dictaduo-server-${{ matrix.platform }}.tar.gz.sha256
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: sottoduo-server-${{ matrix.platform }}
+          name: dictaduo-server-${{ matrix.platform }}
           path: |
-            build/sottoduo-server-${{ matrix.platform }}.tar.gz
-            build/sottoduo-server-${{ matrix.platform }}.tar.gz.sha256
+            build/dictaduo-server-${{ matrix.platform }}.tar.gz
+            build/dictaduo-server-${{ matrix.platform }}.tar.gz.sha256
           if-no-files-found: error

@@ -59,7 +59,7 @@ async function fixture(inference = new FakeInference()) {
       };
     },
   };
-  const directory = await mkdtemp(join(tmpdir(), "sottoduo-linux-test-"));
+  const directory = await mkdtemp(join(tmpdir(), "dictaduo-linux-test-"));
   const services = await openCaptureServices(directory, provider, inference);
   const service = services.service;
   const app = createHTTPServer(service, "fixture-token", undefined, services.recordings);
@@ -1478,7 +1478,7 @@ test("an earlier preview notifies about recovery while the newer take owns the o
   await f.controller.settled();
   expect(f.notices).toContainEqual({
     title: "Not pasted",
-    body: "Earlier dictation: Your text is ready. Copy it from the tray or SottoDuo.",
+    body: "Earlier dictation: Your text is ready. Copy it from the tray or DictaDuo.",
   });
   expect(ids.delivered).toEqual(ids.started);
 });

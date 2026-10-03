@@ -219,7 +219,7 @@
       "recognitionMode": "automatic",
       "recognitionEngine": "parakeet",
       "language": "auto",
-      "vocabulary": "SottoDuo\nPipeWire\nKubernetes\nFjord",
+      "vocabulary": "DictaDuo\nPipeWire\nKubernetes\nFjord",
       "dictionary": {
         "lists": [
           {
@@ -227,8 +227,8 @@
             "name": "Personal",
             "entries": [
               {
-                "id": "sottoduo",
-                "term": "SottoDuo",
+                "id": "dictaduo",
+                "term": "DictaDuo",
                 "aliases": [
                   "so toe"
                 ],

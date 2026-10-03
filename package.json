@@ -1,5 +1,5 @@
 {
-  "name": "sottoduo",
+  "name": "dictaduo",
   "private": true,
   "packageManager": "bun@1.4.2",
   "workspaces": [

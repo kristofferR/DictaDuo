@@ -9,7 +9,7 @@ import { PipeWireCaptureProvider } from "../src/capture/pipewire-provider.ts";
 import { openCaptureServices } from "./support.ts";
 
 // Explicit opt-in: a private PipeWire daemon with a tone generator, never desktop audio.
-const helper = process.env.SOTTODUO_TEST_CAPTURE_HELPER;
+const helper = process.env.DICTADUO_TEST_CAPTURE_HELPER;
 const nativeTest = test.skipIf(!helper || process.platform !== "linux");
 const exec = promisify(execFile);
 let directory: string,
@@ -43,34 +43,34 @@ const configure = (id: number, direction: "Input" | "Output") =>
   ]);
 async function connect() {
   const node = await until(async () =>
-    (await graph()).find((x) => x.info?.props?.["media.name"] === "SottoDuo capture"),
+    (await graph()).find((x) => x.info?.props?.["media.name"] === "DictaDuo capture"),
   );
   await configure(node.id, "Input");
   for (const channel of ["FL", "FR"])
     await command("pw-link", [
-      `sottoduo-test-source:capture_${channel}`,
-      `sottoduo-capture:input_${channel}`,
+      `dictaduo-test-source:capture_${channel}`,
+      `dictaduo-capture:input_${channel}`,
     ]);
 }
 async function noCapture() {
   await until(async () =>
-    (await graph()).some((x) => x.info?.props?.["media.name"] === "SottoDuo capture")
+    (await graph()).some((x) => x.info?.props?.["media.name"] === "DictaDuo capture")
       ? undefined
       : true,
   );
 }
 beforeEach(async () => {
   if (!helper || process.platform !== "linux") return;
-  directory = await mkdtemp(join(tmpdir(), "sottoduo-pw-"));
+  directory = await mkdtemp(join(tmpdir(), "dictaduo-pw-"));
   previous = { runtime: process.env.PIPEWIRE_RUNTIME_DIR, remote: process.env.PIPEWIRE_REMOTE };
   process.env.PIPEWIRE_RUNTIME_DIR = directory;
-  process.env.PIPEWIRE_REMOTE = "sottoduo-test";
+  process.env.PIPEWIRE_REMOTE = "dictaduo-test";
   daemon = spawn("pipewire", ["-c", resolve(import.meta.dir, "fixtures/pipewire.conf")], {
     stdio: "ignore",
   });
   const source = await until(async () => {
     try {
-      return (await graph()).find((x) => x.info?.props?.["node.name"] === "sottoduo-test-source");
+      return (await graph()).find((x) => x.info?.props?.["node.name"] === "dictaduo-test-source");
     } catch {
       return undefined;
     }
@@ -179,11 +179,11 @@ nativeTest("wrong target cannot silently attach to another source", async () => 
   });
   const completion = new Promise((resolve) => child.once("close", resolve));
   const node = await until(async () =>
-    (await graph()).find((x) => x.info?.props?.["media.name"] === "SottoDuo capture"),
+    (await graph()).find((x) => x.info?.props?.["media.name"] === "DictaDuo capture"),
   );
   await configure(node.id, "Input");
   // Force an incorrect link, as a misbehaving session manager might. The helper must reject it.
-  await command("pw-link", ["sottoduo-test-source:capture_FL", "sottoduo-capture:input_FL"]);
+  await command("pw-link", ["dictaduo-test-source:capture_FL", "dictaduo-capture:input_FL"]);
   const code = await completion;
   expect(code).not.toBe(0);
   expect(bytes).toBe(0);
@@ -191,7 +191,7 @@ nativeTest("wrong target cannot silently attach to another source", async () => 
 });
 nativeTest("parent crash kills its native helper", async () => {
   const source = (await graph()).find(
-    (x) => x.info?.props?.["node.name"] === "sottoduo-test-source",
+    (x) => x.info?.props?.["node.name"] === "dictaduo-test-source",
   );
   const serial = source?.info?.props?.["object.serial"];
   if (typeof serial !== "number" || !Number.isSafeInteger(serial) || serial <= 0)
@@ -200,7 +200,7 @@ nativeTest("parent crash kills its native helper", async () => {
     process.execPath,
     [
       "-e",
-      `const p=Bun.spawn([process.argv[1],"capture","${serial}","48000","2","0"],{stdin:"pipe",stdout:"ignore",stderr:"ignore",env:{...process.env,SOTTODUO_CAPTURE_PARENT_PID:String(process.pid)}}); console.log(p.pid); setInterval(()=>{},1000);`,
+      `const p=Bun.spawn([process.argv[1],"capture","${serial}","48000","2","0"],{stdin:"pipe",stdout:"ignore",stderr:"ignore",env:{...process.env,DICTADUO_CAPTURE_PARENT_PID:String(process.pid)}}); console.log(p.pid); setInterval(()=>{},1000);`,
       helper!,
     ],
     { stdio: ["ignore", "pipe", "ignore"] },
@@ -242,7 +242,7 @@ nativeTest("service shutdown releases capture and restart permits a fresh take",
 nativeTest("target removal cancels an active take without substituting audio", async () => {
   const { record } = await begin();
   const source = (await graph()).find(
-    (x) => x.info?.props?.["node.name"] === "sottoduo-test-source",
+    (x) => x.info?.props?.["node.name"] === "dictaduo-test-source",
   )!;
   await command("pw-cli", ["destroy", String(source.id)]);
   await noCapture();

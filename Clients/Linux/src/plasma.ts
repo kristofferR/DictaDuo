@@ -49,7 +49,7 @@ export class PlasmaDesktop implements Desktop {
 
   async monitorSession(unsafe: () => void): Promise<void> {
     if (process.env.XDG_SESSION_TYPE !== "wayland")
-      throw new Error("Start SottoDuo inside a Plasma Wayland session.");
+      throw new Error("Start DictaDuo inside a Plasma Wayland session.");
     const sessionID = (
       await command(["loginctl", "show-session", "auto", "-p", "Id", "--value"])
     ).trim();

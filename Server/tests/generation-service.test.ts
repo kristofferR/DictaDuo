@@ -75,7 +75,7 @@ afterEach(async () => {
   }
 });
 async function setup(inference = new FakeInference()) {
-  const path = await mkdtemp(join(tmpdir(), "sottoduo-generation-test-"));
+  const path = await mkdtemp(join(tmpdir(), "dictaduo-generation-test-"));
   const service = await GenerationService.open(
     { dataDirectory: path, development: true },
     inference,
@@ -130,7 +130,7 @@ test("older clients see Norwegian as automatic and cannot overwrite it", async (
   const preferences = await service.getPreferences();
   preferences.preferences.language = "no";
   await service.updatePreferences(preferences);
-  const v2 = { "x-sottoduo-language": "language-v2" };
+  const v2 = { "x-dictaduo-language": "language-v2" };
   expect(
     (await app.inject({ url: "/v1/preferences", headers: v2 })).json().preferences.language,
   ).toBe("no");
@@ -304,10 +304,10 @@ test("history pagination and source filters remain stable", async () => {
   await service.cancel(first.id);
   const second = await service.create(request());
   await service.cancel(second.id);
-  const page = await service.history(1, undefined, "sottoduo");
+  const page = await service.history(1, undefined, "dictaduo");
   expect(page.items).toHaveLength(1);
   expect(page.nextCursor).toBeDefined();
-  expect((await service.history(1, page.nextCursor, "sottoduo")).items[0]?.id).not.toBe(
+  expect((await service.history(1, page.nextCursor, "dictaduo")).items[0]?.id).not.toBe(
     page.items[0]?.id,
   );
   expect((await service.history(50, undefined, "wispr-flow")).items).toHaveLength(0);

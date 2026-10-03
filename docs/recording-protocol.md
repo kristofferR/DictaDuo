@@ -7,7 +7,7 @@ delivery code, but does not write that facade into legacy generation storage.
 The reference Swift server does not implement this capability.
 
 The authoritative transport models are `Server/src/recording-contract.ts` and
-`Sources/SottoDuoAPI/RecordingAPI.swift`. Recording codecs are standalone; the v1
+`Sources/DictaDuoAPI/RecordingAPI.swift`. Recording codecs are standalone; the v1
 generated Swift wire adapters do not own these models.
 
 ## HTTP
@@ -17,7 +17,7 @@ is required before capture starts. Tokenless localhost remains supported.
 
 | Request | Response |
 | --- | --- |
-| `GET /v2/recordings/capabilities` | `{ "protocol": "sottoduo.recording.v1", "maximumPCMBytes": 1048576 }` |
+| `GET /v2/recordings/capabilities` | `{ "protocol": "dictaduo.recording.v1", "maximumPCMBytes": 1048576 }` |
 | `POST /v2/recordings` | `RecordingSnapshot`; body is the existing `CreateGenerationRequest` |
 | `GET /v2/recordings?limit=50&before=cursor` | `RecordingPage` with compact snapshots and optional `nextCursor` |
 | `GET /v2/recordings/:id` | `RecordingDetail`: `{snapshot,result?}` |
@@ -27,7 +27,7 @@ is required before capture starts. Tokenless localhost remains supported.
 | `POST /v2/recordings/:id/discard` | Explicit discard; separate from connection/capture interruption |
 | `POST /v2/recordings/:id/retry` | 202 `RecordingSnapshot`; resumes a failed stopped session from its committed text with local recognition. The result lands in history only. |
 | `POST /v2/recordings/:id/delivery` | Existing `DeliveryReceipt` body, recording delivery outcome |
-| `GET /v2/recordings/:id/stream` | WebSocket upgrade using `sottoduo.recording.v1` |
+| `GET /v2/recordings/:id/stream` | WebSocket upgrade using `dictaduo.recording.v1` |
 | `GET /v2/recordings/:id/events` | NDJSON `RecordingSnapshot` lines until the session settles |
 
 A microphone attached to the server records the same sessions through

@@ -396,7 +396,7 @@ ScrollView {
                 ui: root.ui
                 visible: root.draft.mode === "fixed"
                 title: root.draft.fixed ? root.nameFor(root.draft.fixed) : "Choose a fixed input below"
-                detail: root.draft.fixed ? root.detailFor(root.draft.fixed) + " · " + root.sourceStatus(root.liveSource(root.draft.fixed)) + ". If it can't start, SottoDuo uses another ready mic." : "If the fixed input can't start, SottoDuo uses another ready mic."
+                detail: root.draft.fixed ? root.detailFor(root.draft.fixed) + " · " + root.sourceStatus(root.liveSource(root.draft.fixed)) + ". If it can't start, DictaDuo uses another ready mic." : "If the fixed input can't start, DictaDuo uses another ready mic."
             }
         }
         Group {
@@ -516,7 +516,7 @@ ScrollView {
                                 }
                             }
                             Drag.source: priorityRow
-                            Drag.keys: ["sottoduo/microphone-priority"]
+                            Drag.keys: ["dictaduo/microphone-priority"]
                             Drag.hotSpot.x: width / 2
                             Drag.hotSpot.y: height / 2
                         }
@@ -569,7 +569,7 @@ ScrollView {
                     DropArea {
                         id: dropArea
                         anchors.fill: parent
-                        keys: ["sottoduo/microphone-priority"]
+                        keys: ["dictaduo/microphone-priority"]
                         onDropped: drop => {
                             if (root.editable && drop.source && drop.source !== priorityRow) {
                                 root.movePriority(drop.source.identity, priorityRow.identity);
@@ -628,7 +628,7 @@ ScrollView {
         }
         SLabel {
             ui: root.ui
-            text: "Drag a handle to reorder. Disconnected microphones keep their place. If none in the list is ready, SottoDuo uses any other ready mic" + (root.fallbackPlace ? " on " + root.fallbackPlace + ", which records one take at a time" : "") + "."
+            text: "Drag a handle to reorder. Disconnected microphones keep their place. If none in the list is ready, DictaDuo uses any other ready mic" + (root.fallbackPlace ? " on " + root.fallbackPlace + ", which records one take at a time" : "") + "."
             color: root.ui.c.muted
             font.pixelSize: 13
             Layout.fillWidth: true

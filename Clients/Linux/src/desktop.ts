@@ -21,7 +21,7 @@ export async function command(args: string[], timeout = 1500, input?: string): P
   }
 }
 /**
- * Posts SottoDuo's notifications through notify-send, each replacing the
+ * Posts DictaDuo's notifications through notify-send, each replacing the
  * previous one instead of stacking. Sends are serialized so every one knows the ID.
  */
 export class Notifier {
@@ -33,7 +33,7 @@ export class Notifier {
       try {
         const output = await this.run([
           "notify-send",
-          "--app-name=SottoDuo",
+          "--app-name=DictaDuo",
           "--expire-time=6000",
           "--print-id",
           ...(this.id ? [`--replace-id=${this.id}`] : []),
@@ -87,7 +87,7 @@ export class HyprlandDesktop implements Desktop {
     const runtime = process.env.XDG_RUNTIME_DIR;
     const signature = process.env.HYPRLAND_INSTANCE_SIGNATURE;
     if (!runtime || !signature || signature.includes("/"))
-      throw new Error("Start SottoDuo inside the Hyprland session.");
+      throw new Error("Start DictaDuo inside the Hyprland session.");
     let buffer = "";
     this.socket = connect(join(runtime, "hypr", signature, ".socket2.sock"));
     await new Promise<void>((resolve, reject) => {
@@ -253,7 +253,7 @@ export class HyprlandDesktop implements Desktop {
 }
 
 export function shortcutEvent(line: string): "start" | "stop" | "cancel" | "copy" | undefined {
-  const prefix = "custom>>sottoduo:";
+  const prefix = "custom>>dictaduo:";
   if (!line.startsWith(prefix)) return undefined;
   const action = line.slice(prefix.length);
   return action === "start" || action === "stop" || action === "cancel" || action === "copy"

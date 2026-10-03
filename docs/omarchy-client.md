@@ -1,14 +1,14 @@
 # Essential Omarchy client
 
-Ref #8, #11. `Clients/Linux` adds a small Bun executable and an AT-SPI destination helper. It uses the capture API from #5/#6 and can run independently of the later Linux GUI (#10). It is stacked on PR #12. Installation and the daily app/microphone trial are still pending; the existing SottoDuo server and Voxtype bindings have not been changed.
+Ref #8, #11. `Clients/Linux` adds a small Bun executable and an AT-SPI destination helper. It uses the capture API from #5/#6 and can run independently of the later Linux GUI (#10). It is stacked on PR #12. Installation and the daily app/microphone trial are still pending; the existing DictaDuo server and Voxtype bindings have not been changed.
 
 ## Everyday workflow
 
-Start the daemon in your graphical session. Hold the configured key, wait for the **recording** notification, speak, then release. A short tap released before admission does not start a recording. `sottoduo toggle` supports a second shortcut if preferred; `sottoduo cancel` cancels the take the overlay shows. Once the server seals a take, the next one can start while the earlier one processes; insertions happen in recording order and wait until the newer take is released. To dictate hands-free, set **Trigger** under **This computer** to **Double tap to toggle**: two taps of the dictation key within 0.45 seconds start recording, and another double tap stops it. A single tap or a longer press does nothing. The compositor only reports the dictation key, so unlike on the Mac, typing between the two taps does not break the pair. The DJI button is not claimed by this client.
+Start the daemon in your graphical session. Hold the configured key, wait for the **recording** notification, speak, then release. A short tap released before admission does not start a recording. `dictaduo toggle` supports a second shortcut if preferred; `dictaduo cancel` cancels the take the overlay shows. Once the server seals a take, the next one can start while the earlier one processes; insertions happen in recording order and wait until the newer take is released. To dictate hands-free, set **Trigger** under **This computer** to **Double tap to toggle**: two taps of the dictation key within 0.45 seconds start recording, and another double tap stops it. A single tap or a longer press does nothing. The compositor only reports the dictation key, so unlike on the Mac, typing between the two taps does not break the pair. The DJI button is not claimed by this client.
 
-A completed take inserts once into the original accessible field only when the destination checks succeed. Otherwise a notification says the text is ready: `sottoduo result` prints it; `sottoduo copy` explicitly replaces the clipboard so you can paste it yourself. An uncertain insertion is identified separately; check the field before copying. Notifications never display dictated text. The last result lives only in this process and is cleared when starting a new take. Older results remain in shared server history.
+A completed take inserts once into the original accessible field only when the destination checks succeed. Otherwise a notification says the text is ready: `dictaduo result` prints it; `dictaduo copy` explicitly replaces the clipboard so you can paste it yourself. An uncertain insertion is identified separately; check the field before copying. Notifications never display dictated text. The last result lives only in this process and is cleared when starting a new take. Older results remain in shared server history.
 
-No key injection, automatic clipboard replacement, clipboard restoration, or automatic Enter is involved. Keyboard modifiers therefore cannot turn delivery into a different paste shortcut. Explicit copying intentionally replaces the clipboard; SottoDuo never restores old clipboard data over newer user content. Terminals use the manual-copy path, so their paste conventions and shell command execution remain under the user's control.
+No key injection, automatic clipboard replacement, clipboard restoration, or automatic Enter is involved. Keyboard modifiers therefore cannot turn delivery into a different paste shortcut. Explicit copying intentionally replaces the clipboard; DictaDuo never restores old clipboard data over newer user content. Terminals use the manual-copy path, so their paste conventions and shell command execution remain under the user's control.
 
 ## Build and setup
 
@@ -17,22 +17,22 @@ Requires Linux, Bun for development, a C compiler, pkg-config, `at-spi2-core`, a
 ```sh
 bun install --frozen-lockfile
 bash scripts/build-linux-client.sh
-./build/linux-client/sottoduo --help
+./build/linux-client/dictaduo --help
 
 # HOST must match the server's --capture-host-id on this desktop.
 # The token file is an existing private bearer-token file, not its literal contents.
-./build/linux-client/sottoduo init http://127.0.0.1:8391 HOST "/absolute/path/server-token" "/absolute/path/build/linux-client/sottoduo-destination"
-./build/linux-client/sottoduo sources
-./build/linux-client/sottoduo daemon
+./build/linux-client/dictaduo init http://127.0.0.1:8391 HOST "/absolute/path/server-token" "/absolute/path/build/linux-client/dictaduo-destination"
+./build/linux-client/dictaduo sources
+./build/linux-client/dictaduo daemon
 ```
 
-`init` creates `~/.config/sottoduo/linux-client.json` once, with a persistent device UUID; it never overwrites an existing configuration. `SOTTODUO_CLIENT_CONFIG` selects an isolated configuration for a test. The token file must be a regular file owned by the user with no group/other permissions. Tokens never appear in command arguments, notifications, history, or IPC responses.
+`init` creates `~/.config/dictaduo/linux-client.json` once, with a persistent device UUID; it never overwrites an existing configuration. `DICTADUO_CLIENT_CONFIG` selects an isolated configuration for a test. The token file must be a regular file owned by the user with no group/other permissions. Tokens never appear in command arguments, notifications, history, or IPC responses.
 
 The server must already be deployed with the optional PipeWire capture provider enabled. This client does not install the provider, grant USB access, pair Bluetooth devices, or change the daily server. A server with no registered sources cannot record from this client. Desktop inputs are captured by the same provider, with no second local capture path.
 
-For autostart, first place the executable and helper in `~/.local/opt/sottoduo-linux/current/` and put `sottoduo` on PATH. Configure the helper's installed absolute path, then adapt/install [the user service](../Clients/Linux/integration/sottoduo-client.service). Enable it only after the desktop trial. It requires the graphical session's `WAYLAND_DISPLAY`, `HYPRLAND_INSTANCE_SIGNATURE`, `XDG_RUNTIME_DIR`, and session D-Bus environment. The installed Omarchy session already exports these to systemd. Restart begins idle; it never reloads old takes for insertion. If desktop monitoring fails, stop/restart the client before trying again.
+For autostart, first place the executable and helper in `~/.local/opt/dictaduo-linux/current/` and put `dictaduo` on PATH. Configure the helper's installed absolute path, then adapt/install [the user service](../Clients/Linux/integration/dictaduo-client.service). Enable it only after the desktop trial. It requires the graphical session's `WAYLAND_DISPLAY`, `HYPRLAND_INSTANCE_SIGNATURE`, `XDG_RUNTIME_DIR`, and session D-Bus environment. The installed Omarchy session already exports these to systemd. Restart begins idle; it never reloads old takes for insertion. If desktop monitoring fails, stop/restart the client before trying again.
 
-[The Lua binding example](../Clients/Linux/integration/bindings.lua) uses Menu for press/release, Super+Menu to cancel, and Super+Shift+Menu to copy the last result. Kris chose to replace the existing Menu → Voxtype toggle; the example explicitly unbinds it before adding SottoDuo. F9 remains assigned to Voxtype. Recheck bindings before installation. Release ignores modifiers, so pressing another modifier while speaking still stops the take. Recording is not enabled on the lock screen. Validate changes with `hyprctl reload` followed by `hyprctl configerrors`.
+[The Lua binding example](../Clients/Linux/integration/bindings.lua) uses Menu for press/release, Super+Menu to cancel, and Super+Shift+Menu to copy the last result. Kris chose to replace the existing Menu → Voxtype toggle; the example explicitly unbinds it before adding DictaDuo. F9 remains assigned to Voxtype. Recheck bindings before installation. Release ignores modifiers, so pressing another modifier while speaking still stops the take. Recording is not enabled on the lock screen. Validate changes with `hyprctl reload` followed by `hyprctl configerrors`.
 
 The example follows the installed Omarchy `o.bind` helper and the [Hyprland bind flags](https://wiki.hypr.land/configuring/core/binds/flags/). No user desktop configuration is installed by the build.
 
@@ -45,7 +45,7 @@ Edit this desktop's configuration and restart the daemon. `sources` contains:
   "server": "http://127.0.0.1:8391",
   "hostID": "omarchy",
   "mode": "automatic",
-  "priority": [{ "hostID": "omarchy", "id": "STABLE_SOURCE_ID_FROM_SOTTODUO_SOURCES" }]
+  "priority": [{ "hostID": "omarchy", "id": "STABLE_SOURCE_ID_FROM_DICTADUO_SOURCES" }]
 }
 ```
 
@@ -89,14 +89,14 @@ bun run fmt:check
 # Supervised native test: briefly opens and closes disposable GTK windows.
 mkdir -p .local
 cc -Wall -Wextra -Werror Clients/Linux/tests/entry-fixture.c $(pkg-config --cflags --libs gtk+-3.0) -o .local/entry-fixture
-SOTTODUO_TEST_DESKTOP=1 bun test Clients/Linux/tests/native-destination.test.ts
+DICTADUO_TEST_DESKTOP=1 bun test Clients/Linux/tests/native-destination.test.ts
 ```
 
 Remaining #8/#11 trials: chosen shortcut press/release including modifiers; daily terminal/browser/editor matrix; explicit clipboard copy while clipboard ownership changes; real lock/unlock and suspend/resume; server/provider stop and unplug; source fallback with actual desktop microphones; two-computer ownership; and a complete spoken DJI take. Those checks need the capture-enabled server deployment and user interaction. The earlier DJI range/dropout findings and the user's decision to skip receiver-placement testing remain unchanged.
 
 ## Mac UI continuity
 
-Kris selected the Mac app as the visual reference, particularly its settings arrangement and live dictation UI. The final Linux experience should preserve the Dictation/History/Microphone/Server preferences/This computer navigation, familiar settings sections, source/fallback controls, and compact floating recording capsule. Match `SottoDuoWindowView.swift`, `PreferencesPage.swift`, `MicrophonePage.swift`, `MenuHUDViews.swift`, `RecordingFeedback.swift`, and the existing warm-light/Glacier-dark theme. No unrelated redesign is intended. The overlay must not steal keyboard focus; current CLI and notification feedback are testing scaffolding. Full implementation and visual acceptance remain #10.
+Kris selected the Mac app as the visual reference, particularly its settings arrangement and live dictation UI. The final Linux experience should preserve the Dictation/History/Microphone/Server preferences/This computer navigation, familiar settings sections, source/fallback controls, and compact floating recording capsule. Match `DictaDuoWindowView.swift`, `PreferencesPage.swift`, `MicrophonePage.swift`, `MenuHUDViews.swift`, `RecordingFeedback.swift`, and the existing warm-light/Glacier-dark theme. No unrelated redesign is intended. The overlay must not steal keyboard focus; current CLI and notification feedback are testing scaffolding. Full implementation and visual acceptance remain #10.
 
 The binding integration uses `hl.dsp.event` through Hyprland's ordered event socket rather than starting a CLI process for each edge. This prevents fast press/release commands being reordered by process startup. The installed Hyprland 0.56.2 parser accepted the Menu bindings in an isolated `--verify-config` check; the daily configuration has not been edited.
 

@@ -6,7 +6,7 @@ import type { CaptureProvider } from "../../src/capture-sessions.ts";
 import { createHTTPServer } from "../../src/http-server.ts";
 import { FakeInference, openCaptureServices } from "../support.ts";
 
-const directory = await mkdtemp(join(tmpdir(), "sottoduo-capture-client-"));
+const directory = await mkdtemp(join(tmpdir(), "dictaduo-capture-client-"));
 /** Every admitted take, including discarded ones that history omits. */
 const started: string[] = [];
 const provider: CaptureProvider = {
@@ -91,7 +91,7 @@ let discoveryUnavailable = false;
 const droppedHeartbeats = new Set<string>();
 const app = createHTTPServer(
   service,
-  "sottoduo-native-capture-test-token-2026",
+  "dictaduo-native-capture-test-token-2026",
   (app) => {
     app.addHook("onRequest", async (request, reply) => {
       if (request.url === "/v1/audio-sources" && discoveryUnavailable)
@@ -126,7 +126,7 @@ app.post<{ Body: { unavailable: boolean } }>("/fixture/discovery", async (reques
   discoveryUnavailable = request.body.unavailable === true;
   return reply.code(204).send();
 });
-console.log(await app.listen({ host: process.env.SOTTODUO_TEST_HOST ?? "127.0.0.1", port: 0 }));
+console.log(await app.listen({ host: process.env.DICTADUO_TEST_HOST ?? "127.0.0.1", port: 0 }));
 for (const signal of ["SIGTERM", "SIGINT"] as const)
   process.once(signal, () => {
     void (async () => {

@@ -210,7 +210,7 @@ ColumnLayout {
 
     SLabel {
         ui: root.ui
-        text: "SottoDuo · Server preferences"
+        text: "DictaDuo · Server preferences"
         font.pixelSize: 18
         font.weight: Font.DemiBold
     }
@@ -594,7 +594,7 @@ ColumnLayout {
 
                         objectName: "recognitionVocabulary"
                         text: root.draft ? root.draft.preferences.vocabulary : ""
-                        placeholderText: "SottoDuo, PipeWire, names you use often…"
+                        placeholderText: "DictaDuo, PipeWire, names you use often…"
                         placeholderTextColor: root.ui.c.muted
                         color: root.ui.c.ink
                         selectionColor: root.ui.c.accent

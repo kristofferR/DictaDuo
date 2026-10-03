@@ -56,7 +56,7 @@ ColumnLayout {
         return values;
     }
     readonly property var filtered: records.filter((r) => {
-        return (!deviceID || r.device.id === deviceID) && (!source || (source === "sottoduo" ? !r.importedSource : r.importedSource?.provider === "wispr-flow"));
+        return (!deviceID || r.device.id === deviceID) && (!source || (source === "dictaduo" ? !r.importedSource : r.importedSource?.provider === "wispr-flow"));
     })
     readonly property var selected: filtered.find((r) => {
         return r.id === selectedID;
@@ -309,7 +309,7 @@ ColumnLayout {
                         root.retriedRead = true;
                         root.load(false, true);
                     } else {
-                        root.message = "History could not be matched to this server. Update SottoDuo's background client, then refresh history.";
+                        root.message = "History could not be matched to this server. Update DictaDuo's background client, then refresh history.";
                     }
                     return ;
                 }
@@ -467,11 +467,11 @@ ColumnLayout {
         ComboBox {
             objectName: "historySourceFilter"
             Layout.preferredWidth: 146
-            model: ["All sources", "SottoDuo", "Wispr Flow"]
-            currentIndex: ["", "sottoduo", "wispr-flow"].indexOf(root.source)
+            model: ["All sources", "DictaDuo", "Wispr Flow"]
+            currentIndex: ["", "dictaduo", "wispr-flow"].indexOf(root.source)
             enabled: !root.loading && !root.acting && root.available
             Accessible.name: "History source"
-            onActivated: root.filterSource(["", "sottoduo", "wispr-flow"][currentIndex])
+            onActivated: root.filterSource(["", "dictaduo", "wispr-flow"][currentIndex])
         }
 
         SButton {

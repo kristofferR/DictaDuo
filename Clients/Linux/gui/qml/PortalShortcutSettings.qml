@@ -34,6 +34,6 @@ Group {
     Setting {
         ui: root.ui
         title: "At login"
-        detail: "Keep SottoDuo open in the background to use the Plasma shortcut. The dictation service also runs at login."
+        detail: "Keep DictaDuo open in the background to use the Plasma shortcut. The dictation service also runs at login."
     }
 }

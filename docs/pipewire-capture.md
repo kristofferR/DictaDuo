@@ -1,35 +1,35 @@
 # Linux microphone capture
 
-Ref #6, using the [owned session contract](remote-capture.md). Capture is optional and runs in the same **user session** as PipeWire. The TypeScript provider lives in the existing server; a small `sottoduo-capture` subprocess owns each audio stream, and separate read-only helpers observe DJI status. No additional network endpoint, audio relay through the Mac, virtual driver, Bluetooth connection manager, or privileged server is needed. Client-uploaded audio remains usable with no provider or an unavailable PipeWire session. Container/system inference installations need a future authenticated user-agent bridge; this implementation does not expose the desktop socket to a container.
+Ref #6, using the [owned session contract](remote-capture.md). Capture is optional and runs in the same **user session** as PipeWire. The TypeScript provider lives in the existing server; a small `dictaduo-capture` subprocess owns each audio stream, and separate read-only helpers observe DJI status. No additional network endpoint, audio relay through the Mac, virtual driver, Bluetooth connection manager, or privileged server is needed. Client-uploaded audio remains usable with no provider or an unavailable PipeWire session. Container/system inference installations need a future authenticated user-agent bridge; this implementation does not expose the desktop socket to a container.
 
 ## Build and enable
 
 The optional Linux helper dynamically links PipeWire, libusb and libsamplerate. On Arch, build dependencies are `base-devel`, `pkgconf`, `pipewire`, `libusb`, and `libsamplerate`. On Ubuntu 24.04 they are `build-essential`, `pkg-config`, `libpipewire-0.3-dev`, `libusb-1.0-0-dev`, and `libsamplerate0-dev`. Runtime needs PipeWire with WirePlumber and `pw-dump`, plus these shared libraries. The ordinary inference package does not acquire these dependencies unless capture packaging is enabled.
 
 ```sh
-bash scripts/build-capture.sh                 # build/capture/sottoduo-capture
+bash scripts/build-capture.sh                 # build/capture/dictaduo-capture
 bash scripts/test-capture.sh                  # DSP checks + isolated PipeWire integration
-SOTTODUO_BUILD_CAPTURE=1 ./scripts/build-server.sh # include helper + service/rule templates
+DICTADUO_BUILD_CAPTURE=1 ./scripts/build-server.sh # include helper + service/rule templates
 ```
 
-Add `--capture-helper /absolute/path/to/sottoduo-capture --capture-host-id omarchy-desktop` to the existing server arguments, or set `SOTTODUO_CAPTURE_HELPER` and `SOTTODUO_CAPTURE_HOST_ID`. Choose a unique, stable host ID and preserve it across upgrades. This is an explicit opt-in; it is not enabled by building or installing a package. Start only one server against a given data directory.
+Add `--capture-helper /absolute/path/to/dictaduo-capture --capture-host-id omarchy-desktop` to the existing server arguments, or set `DICTADUO_CAPTURE_HELPER` and `DICTADUO_CAPTURE_HOST_ID`. Choose a unique, stable host ID and preserve it across upgrades. This is an explicit opt-in; it is not enabled by building or installing a package. Start only one server against a given data directory.
 
-The example [user service](../Server/packaging/sottoduo-server.service) reads `%h/.config/sottoduo/server.env`. Supply the `SOTTODUO_SERVER_*`, model/helper paths, optional Soniox key-file path, and the two capture variables there, using absolute paths. Environment files do not expand `$HOME`. Keep token/key values in private credential files. Review/adapt the template before installing it as `~/.config/systemd/user/sottoduo-server.service`; do not overwrite an existing unit blindly.
+The example [user service](../Server/packaging/dictaduo-server.service) reads `%h/.config/dictaduo/server.env`. Supply the `DICTADUO_SERVER_*`, model/helper paths, optional Soniox key-file path, and the two capture variables there, using absolute paths. Environment files do not expand `$HOME`. Keep token/key values in private credential files. Review/adapt the template before installing it as `~/.config/systemd/user/dictaduo-server.service`; do not overwrite an existing unit blindly.
 
 ```sh
 systemctl --user daemon-reload
-systemctl --user enable --now sottoduo-server.service
-systemctl --user status sottoduo-server.service
-journalctl --user -u sottoduo-server.service
-systemctl --user restart sottoduo-server.service
-systemctl --user stop sottoduo-server.service
+systemctl --user enable --now dictaduo-server.service
+systemctl --user status dictaduo-server.service
+journalctl --user -u dictaduo-server.service
+systemctl --user restart dictaduo-server.service
+systemctl --user stop dictaduo-server.service
 ```
 
 The service's control group and the helper's Linux parent-death signal release capture even if the coordinator crashes. On a normal shutdown the server cancels the take and waits for helper cleanup. A missing/restarted PipeWire session is retried automatically; ordinary graph discovery runs about once per second, without opening microphones. There is no need to restart the server after a receiver replug. New takes use its new PipeWire serial; a take already recording is cancelled.
 
 ## DJI permissions and status
 
-The Mic Mini receiver `2ca3:4011` exposes unsolicited status on USB interface 6, endpoint `0x86`. A user must have permission to open that USB device. The optional [udev rule](../Server/packaging/70-sottoduo-dji.rules) grants local-seat access to this receiver only. Installing it under `/etc/udev/rules.d/` requires administrator authorization; reload udev rules and replug the receiver afterward. Never run the server as root, add blanket input-device permissions, detach audio drivers, or reset/pair the receiver to obtain status. `uaccess` is intended for a logged-in local user, not an unattended system account. Another program claiming interface 6 makes the source unavailable.
+The Mic Mini receiver `2ca3:4011` exposes unsolicited status on USB interface 6, endpoint `0x86`. A user must have permission to open that USB device. The optional [udev rule](../Server/packaging/70-dictaduo-dji.rules) grants local-seat access to this receiver only. Installing it under `/etc/udev/rules.d/` requires administrator authorization; reload udev rules and replug the receiver afterward. Never run the server as root, add blanket input-device permissions, detach audio drivers, or reset/pair the receiver to obtain status. `uaccess` is intended for a logged-in local user, not an unattended system account. Another program claiming interface 6 makes the source unavailable.
 
 For a one-off test, an administrator can instead add a temporary per-user ACL on the verified `/dev/bus/usb/BBB/DDD` receiver node and remove that exact ACL afterward. Device numbers change on replug; verify the VID/PID before touching a node. Building the code does not install either permission change.
 
@@ -41,14 +41,14 @@ Only CRC-checked V2 full-status frames validated on the Mini 2S are accepted. St
 
 Already-connected Bluetooth microphones can occupy a client's fallback priority list. Capture eligibility requires an associated PipeWire BlueZ device reporting `api.bluez5.connection=connected`, an exposed mono/stereo input, and a usable capture format. Missing connection state, mute, node errors and unsupported formats remain unavailable. Internal BlueZ sources are omitted to avoid duplicating WirePlumber's user-facing microphone.
 
-WirePlumber's headset auto-switch loopback can advertise channels without a fixed rate. SottoDuo requests 48 kHz PCM from that source; WirePlumber negotiates the headset profile when capture starts. This is the delivered loopback format, not the Bluetooth codec's native rate. Direct BlueZ sources use their reported rate. Discovery does not pair, connect, open a stream or change profile policy. Audio readiness still requires the native helper's first valid buffer within the existing startup deadline.
+WirePlumber's headset auto-switch loopback can advertise channels without a fixed rate. DictaDuo requests 48 kHz PCM from that source; WirePlumber negotiates the headset profile when capture starts. This is the delivered loopback format, not the Bluetooth codec's native rate. Direct BlueZ sources use their reported rate. Discovery does not pair, connect, open a stream or change profile policy. Audio readiness still requires the native helper's first valid buffer within the existing startup deadline.
 
 AirPods Pro 3 were observed switching from A2DP to mSBC headset mode with a 16 kHz mono radio source, delivering 48 kHz mono through the loopback and stopping cleanly. This capture probe does not establish end-to-end fallback, reconnect reliability or range. Track those physical tests in #11. No mid-take handoff is implemented.
 
 ## Audio and lifecycle guarantees
 
 - Stable source identity hashes the PipeWire node name and physical bus path under the configured host ID. It does not publish receiver serials or persist numeric node IDs. Identical ambiguous identities are omitted. Changing USB ports can produce a new identity, requiring preference selection again.
-- This version captures ALSA and connected Bluetooth mono/stereo sources with a usable format. A take pins the current PipeWire object serial, capture rate/channels, retention setting and DJI transmitter mask. Registry removal, unexpected relinking, mute, connection loss, status expiry or transmitter-mask changes cancel it. WirePlumber fallback, moving and reconnecting are disabled for SottoDuo's capture stream. No global routing, playback volume or device gains are changed.
+- This version captures ALSA and connected Bluetooth mono/stereo sources with a usable format. A take pins the current PipeWire object serial, capture rate/channels, retention setting and DJI transmitter mask. Registry removal, unexpected relinking, mute, connection loss, status expiry or transmitter-mask changes cancel it. WirePlumber fallback, moving and reconnecting are disabled for DictaDuo's capture stream. No global routing, playback volume or device gains are changed.
 - Readiness follows the first valid buffer from the selected stream. Audio is interleaved float32 at the selected capture rate/channels. Inference is an equal-weight mono mix resampled to 16 kHz with libsamplerate's stateful anti-alias filter. Original retention uses those same input samples/interval and is omitted when the admitted preference is off. For a Bluetooth loopback this retains the delivered PCM, not raw radio-codec samples. The helper closes hardware before flushing its final filter tail; the coordinator drains acknowledged writes before sealing.
 - Streams feed the existing archives and Soniox/Whisper pipeline directly. Native output is nonblocking: saturation fails the take. The coordinator batches approximately 100 ms of audio, caps queued writes at 2 MiB and validates frame sizes/finite samples. Meter updates use inference peaks; the session layer limits publication to 10 Hz. There is no unbounded queue or silent sample loss on backpressure.
 - Abort kills the helper immediately, escalating to SIGKILL after 500 ms. Unexpected exit, corrupt/truncated output or write failure cannot seal a take. The helper detects target removal, known buffer discontinuity and a one-second audio-delivery stall. Its boot-time watchdog rejects host-suspend/long scheduling gaps and bounds capture to 181 seconds independently of the coordinator. These are known path failures, not RF silence heuristics.

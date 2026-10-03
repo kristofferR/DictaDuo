@@ -131,7 +131,7 @@ afterEach(async () => {
   for (const f of cleanup.splice(0).reverse()) await f();
 });
 async function recording(serial: string, retain = true, block = false) {
-  const directory = await mkdtemp(join(tmpdir(), "sottoduo-pipewire-"));
+  const directory = await mkdtemp(join(tmpdir(), "dictaduo-pipewire-"));
   const service = await GenerationService.open(
     { dataDirectory: directory, development: true },
     new FakeInference(),
@@ -215,7 +215,7 @@ test.skipIf(process.platform !== "linux")(
   "missing optional native helper keeps discovery empty and shutdown usable",
   async () => {
     const provider = await PipeWireCaptureProvider.open({
-      helper: "/missing/sottoduo-capture",
+      helper: "/missing/dictaduo-capture",
       hostID: "desktop",
     });
     try {

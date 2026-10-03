@@ -17,7 +17,7 @@ afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
 async function fixture() {
-  const dir = await mkdtemp(join(tmpdir(), "sottoduo-connection-"));
+  const dir = await mkdtemp(join(tmpdir(), "dictaduo-connection-"));
   cleanup.push(() => rm(dir, { recursive: true, force: true }));
   let starts = 0;
   let reportedHost = "desktop";
@@ -85,7 +85,7 @@ async function until(predicate: () => Promise<boolean>) {
 
 test("first setup tests without recording, saves private credentials and starts a usable runtime", async () => {
   const f = await fixture();
-  const settings = await ConnectionSettings.open("/sottoduo-destination", f.file);
+  const settings = await ConnectionSettings.open("/dictaduo-destination", f.file);
   const runtime = new ClientRuntime(settings, f.desktop);
   cleanup.push(() => runtime.close());
   runtime.start();
@@ -150,7 +150,7 @@ test("first setup tests without recording, saves private credentials and starts 
 
 test("runtime serializes a delayed press, key release, and GUI shutdown release while locked", async () => {
   const f = await fixture();
-  const settings = await ConnectionSettings.open("/sottoduo-destination", f.file);
+  const settings = await ConnectionSettings.open("/dictaduo-destination", f.file);
   const checked = await settings.test({
     server: f.server,
     name: "Desktop",
@@ -195,7 +195,7 @@ test("runtime serializes a delayed press, key release, and GUI shutdown release 
 
 test("double-tap mode toggles on a double tap from either shortcut source, never on the test's Stop", async () => {
   const f = await fixture();
-  const settings = await ConnectionSettings.open("/sottoduo-destination", f.file);
+  const settings = await ConnectionSettings.open("/dictaduo-destination", f.file);
   const checked = await settings.test({
     server: f.server,
     name: "Desktop",
@@ -252,7 +252,7 @@ test("double-tap mode toggles on a double tap from either shortcut source, never
 
 test("failed authentication and edited or expired proposals preserve config; new origins require a new token", async () => {
   const f = await fixture();
-  const settings = await ConnectionSettings.open("/sottoduo-destination", f.file);
+  const settings = await ConnectionSettings.open("/dictaduo-destination", f.file);
   const proposed = { server: f.server, name: "Desktop", accessToken: "fixture-secret" };
   const tested = await settings.test(proposed);
   settings.commit(tested.ticket, "desktop");
@@ -284,7 +284,7 @@ test("failed authentication and edited or expired proposals preserve config; new
   expect(await readdir(join(f.dir, "client"))).toEqual(files);
   const fresh = await settings.test({ ...proposed, accessToken: "" });
   await writeFile(f.file, before + "\n");
-  expect(() => settings.commit(fresh.ticket, "desktop")).toThrow("outside SottoDuo");
+  expect(() => settings.commit(fresh.ticket, "desktop")).toThrow("outside DictaDuo");
 });
 
 test("switching servers resets scoped inputs and never replaces a shared token", async () => {
@@ -295,7 +295,7 @@ test("switching servers resets scoped inputs and never replaces a shared token",
   const config = parseConfig({
     server: f.server,
     tokenFile: sharedToken,
-    destinationHelper: "/sottoduo-destination",
+    destinationHelper: "/dictaduo-destination",
     device: { id: "stable", name: "Old name" },
     sources: {
       server: f.server,
@@ -310,7 +310,7 @@ test("switching servers resets scoped inputs and never replaces a shared token",
   });
   const file = join(f.dir, "config.json");
   await writeFile(file, JSON.stringify(config), { mode: 0o600 });
-  const settings = await ConnectionSettings.open("/sottoduo-destination", file);
+  const settings = await ConnectionSettings.open("/dictaduo-destination", file);
   f.reportHost("temporary");
   const same = await settings.test({ server: f.server, name: "Renamed", accessToken: "" });
   expect(same.hosts).toEqual(["desktop", "temporary"]);
@@ -337,7 +337,7 @@ test("switching servers resets scoped inputs and never replaces a shared token",
 test("connection switch drains old button registration and rejects stale server replies", async () => {
   const f = await fixture();
   const nextServer = await fixture();
-  const settings = await ConnectionSettings.open("/sottoduo-destination", f.file);
+  const settings = await ConnectionSettings.open("/dictaduo-destination", f.file);
   const initial = await settings.test({
     server: f.server,
     name: "Desktop",
@@ -414,7 +414,7 @@ test("an incompatible server and missing credentials remain repairable without l
   cleanup.push(async () => {
     await incompatible.stop(true);
   });
-  const settings = await ConnectionSettings.open("/sottoduo-destination", f.file);
+  const settings = await ConnectionSettings.open("/dictaduo-destination", f.file);
   await expect(
     settings.test({
       server: incompatible.url.origin,
@@ -430,7 +430,7 @@ test("an incompatible server and missing credentials remain repairable without l
   });
   settings.commit(checked.ticket, "desktop");
   await rm(settings.config!.tokenFile);
-  const repaired = await ConnectionSettings.open("/sottoduo-destination", f.file);
+  const repaired = await ConnectionSettings.open("/dictaduo-destination", f.file);
   expect(repaired.api).toBeUndefined();
   expect(repaired.config?.server).toBe(f.server);
   await expect(
@@ -450,7 +450,7 @@ test("repair retains an invalid configuration in a private backup", async () => 
   const file = join(f.dir, "invalid.json");
   const original = '{"server":"unfinished';
   await writeFile(file, original, { mode: 0o600 });
-  const settings = await ConnectionSettings.open("/sottoduo-destination", file);
+  const settings = await ConnectionSettings.open("/dictaduo-destination", file);
   expect(settings.setupMessage).toContain("private backup");
   const checked = await settings.test({
     server: f.server,

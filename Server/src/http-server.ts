@@ -62,7 +62,7 @@ const artifactName = (value: string) => {
 
 type IDParams = { id: string };
 export const languageV2 = (request: FastifyRequest) =>
-  request.headers["x-sottoduo-language"] === "language-v2";
+  request.headers["x-dictaduo-language"] === "language-v2";
 // v1 clients generated before streaming reject unknown fields, even optional ones.
 const encodeFor = (request: FastifyRequest) => {
   const path = request.url.split("?")[0]!;
@@ -70,12 +70,12 @@ const encodeFor = (request: FastifyRequest) => {
     JSON.stringify(value, (key, item) => {
       if (
         key === "generationRetry" &&
-        request.headers["x-sottoduo-generation-retry"] !== "retry-v1"
+        request.headers["x-dictaduo-generation-retry"] !== "retry-v1"
       )
         return undefined;
       if (
         (key === "recognitionEngine" || key === "recognitionEngines") &&
-        request.headers["x-sottoduo-recognition-engine"] !== "engine-v1"
+        request.headers["x-dictaduo-recognition-engine"] !== "engine-v1"
       )
         return undefined;
       if (
@@ -83,27 +83,27 @@ const encodeFor = (request: FastifyRequest) => {
           key === "recordingFor" ||
           key === "sharingHost" ||
           key === "buttonTarget") &&
-        request.headers["x-sottoduo-microphone-sharing"] !== "sharing-v1"
+        request.headers["x-dictaduo-microphone-sharing"] !== "sharing-v1"
       )
         return undefined;
       if (
         key === "cloudRecognition" &&
-        request.headers["x-sottoduo-cloud-recognition"] !== "cloud-v1"
+        request.headers["x-dictaduo-cloud-recognition"] !== "cloud-v1"
       )
         return undefined;
-      if (key === "features" && request.headers["x-sottoduo-features"] !== "features-v1")
+      if (key === "features" && request.headers["x-dictaduo-features"] !== "features-v1")
         return undefined;
       // Older clients decode the language list strictly and predate Norwegian.
       if (key === "language" && item === "no" && !languageV2(request)) return "auto";
       if (
         (key === "recognitionMode" || key === "recognition") &&
-        request.headers["x-sottoduo-recognition"] !== "streaming-v1"
+        request.headers["x-dictaduo-recognition"] !== "streaming-v1"
       )
         return undefined;
       if (
         key === "capture" &&
         typeof item === "object" &&
-        request.headers["x-sottoduo-capture"] !== "capture-v1" &&
+        request.headers["x-dictaduo-capture"] !== "capture-v1" &&
         path !== "/v1/captures" &&
         !path.includes("/capture/")
       )
@@ -120,7 +120,7 @@ export const compactFeedback = (record: GenerationRecord) => ({
   progress: record.progress ?? null,
 });
 const captureOwner = (request: FastifyRequest) => {
-  const value = request.headers["x-sottoduo-capture-owner"];
+  const value = request.headers["x-dictaduo-capture-owner"];
   return typeof value === "string" ? value : undefined;
 };
 export function createHTTPServer(
@@ -203,7 +203,7 @@ export function createHTTPServer(
     return service.captures.setSharing(body.source, body.shared, isLocal(request));
   });
   const destinationOwner = (request: FastifyRequest) => {
-    const value = request.headers["x-sottoduo-destination-owner"];
+    const value = request.headers["x-dictaduo-destination-owner"];
     return typeof value === "string" ? value : undefined;
   };
   app.get("/v1/button-destinations", () => service.buttons.state());
@@ -330,7 +330,7 @@ export function createHTTPServer(
   app.get<{ Params: IDParams }>("/v1/generations/:id/events", async (request, reply) => {
     const events = await service.events(identifier(request.params.id));
     const encode = encodeFor(request);
-    const compact = request.headers["x-sottoduo-feedback"] === "compact-v1";
+    const compact = request.headers["x-dictaduo-feedback"] === "compact-v1";
     const source = Readable.from(
       (async function* () {
         let first = true;

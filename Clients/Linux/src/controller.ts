@@ -16,7 +16,7 @@ const notices = {
     "Check the field",
     "The paste couldn't be confirmed. If it's missing, copy it from the tray.",
   ],
-  ready: ["Not pasted", "Your text is ready. Copy it from the tray or SottoDuo."],
+  ready: ["Not pasted", "Your text is ready. Copy it from the tray or DictaDuo."],
   transcription: [
     "Couldn't transcribe",
     "The audio is saved. Open History to transcribe it again.",
@@ -339,7 +339,7 @@ export class Controller {
   /**
    * Cancels the take the overlay shows; earlier takes keep processing. A take with
    * usable audio is still transcribed into history, and for a few seconds the
-   * dictation key or `sottoduo undo` inserts it after all. A second cancel closes
+   * dictation key or `dictaduo undo` inserts it after all. A second cancel closes
    * that window early.
    */
   async cancel(): Promise<void> {
@@ -829,7 +829,7 @@ export class Controller {
     else
       this.setState(
         take,
-        "Text ready. Use sottoduo result or sottoduo copy.",
+        "Text ready. Use dictaduo result or dictaduo copy.",
         "completed",
         notices.ready,
       );

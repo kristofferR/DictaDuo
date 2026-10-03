@@ -19,7 +19,7 @@ async function fixture(
   overrides: Partial<InferenceConfiguration> = {},
   pinned = false,
 ) {
-  const directory = await mkdtemp(join(tmpdir(), "sottoduo-native-inference-"));
+  const directory = await mkdtemp(join(tmpdir(), "dictaduo-native-inference-"));
   const model = join(directory, mode);
   const executable = join(directory, "helper");
   const source = await readFile(new URL("./fixtures/native-helper.ts", import.meta.url), "utf8");
@@ -99,7 +99,7 @@ describe("native inference subprocess protocol", () => {
     ]);
     expect(progress).toEqual([0, 0.5, 1]);
     expect(
-      await inference.correct(speech.text, ["SottoDuo"], "en", "Keep punctuation."),
+      await inference.correct(speech.text, ["DictaDuo"], "en", "Keep punctuation."),
     ).toMatchObject({ text: "Hello world.", engineVersion: "fixture-1" });
   });
 
@@ -326,7 +326,7 @@ describe("native inference subprocess protocol", () => {
 
   test("missing proof assets do not block speech-only readiness", async () => {
     const { inference, configuration } = await fixture("no-ready", {
-      proofModel: "/nonexistent/sottoduo-proof-model",
+      proofModel: "/nonexistent/dictaduo-proof-model",
     });
     expect((await inference.readiness(false)).available).toBe(true);
     expect((await inference.readiness(true)).available).toBe(false);

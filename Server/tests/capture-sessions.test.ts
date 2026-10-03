@@ -89,7 +89,7 @@ async function fixture(
   provider: FakeCapture | undefined = new FakeCapture(),
   inference = new FakeInference(),
 ) {
-  const directory = await mkdtemp(join(tmpdir(), "sottoduo-capture-"));
+  const directory = await mkdtemp(join(tmpdir(), "dictaduo-capture-"));
   const services = await openCaptureServices(directory, provider, inference);
   const app = createHTTPServer(services.service, "server-access", undefined, services.recordings);
   cleanup.push(async () => {
@@ -98,7 +98,7 @@ async function fixture(
     await rm(directory, { recursive: true, force: true });
   });
   const owner = randomBytes(32).toString("hex");
-  const headers = { authorization: "Bearer server-access", "x-sottoduo-capture-owner": owner };
+  const headers = { authorization: "Bearer server-access", "x-dictaduo-capture-owner": owner };
   const request: components["schemas"]["StartCaptureRequest"] = {
     requestID: randomUUID(),
     device: { id: "mac", name: "Mac" },
@@ -175,7 +175,7 @@ test("remote capture pins destination and source, processes as a session, and ke
   expect(
     (
       await f.control(record.id, "delivery", receipt, {
-        "x-sottoduo-capture-owner": "e".repeat(64),
+        "x-dictaduo-capture-owner": "e".repeat(64),
       })
     ).statusCode,
   ).toBe(403);
@@ -197,7 +197,7 @@ test("one admission wins racing clients; device labels and request IDs do not gr
     f.app.inject({
       method: "POST",
       url: "/v2/captures",
-      headers: { ...f.headers, "x-sottoduo-capture-owner": "a".repeat(64) },
+      headers: { ...f.headers, "x-dictaduo-capture-owner": "a".repeat(64) },
       payload: {
         ...f.request,
         requestID: randomUUID(),
@@ -221,7 +221,7 @@ test("one admission wins racing clients; device labels and request IDs do not gr
   const forged = await f.app.inject({
     method: "POST",
     url: "/v2/captures",
-    headers: { ...f.headers, "x-sottoduo-capture-owner": "b".repeat(64) },
+    headers: { ...f.headers, "x-dictaduo-capture-owner": "b".repeat(64) },
     payload: f.request,
   });
   expect(forged.statusCode).toBe(403);
@@ -472,7 +472,7 @@ test("source loss stops without splicing another mic; stale ownership cannot con
   const next = await f.app.inject({
     method: "POST",
     url: "/v2/captures",
-    headers: { ...f.headers, "x-sottoduo-capture-owner": nextOwner },
+    headers: { ...f.headers, "x-dictaduo-capture-owner": nextOwner },
     payload: { ...f.request, requestID: randomUUID() },
   });
   expect(next.statusCode).toBe(201);
@@ -536,7 +536,7 @@ test("DJI destination owner gates capture, pins its source, and disarming aborts
   const f = await fixture();
   const id = randomUUID().toUpperCase();
   const destinationOwner = randomBytes(32).toString("hex");
-  const headers = { ...f.headers, "x-sottoduo-destination-owner": destinationOwner };
+  const headers = { ...f.headers, "x-dictaduo-destination-owner": destinationOwner };
   f.service.buttons.input(f.request.source, "input-epoch");
   const call = (suffix: string, payload: Record<string, unknown> = {}) =>
     f.app.inject({ method: "POST", url: `/v1/button-destinations${suffix}`, headers, payload });
@@ -692,7 +692,7 @@ test("the destination's continuation is fixed before processing, or the hold exp
 
 test("other computers only see and record shared microphones; sharing changes only locally", async () => {
   const f = await fixture();
-  const sharing = { "x-sottoduo-microphone-sharing": "sharing-v1" };
+  const sharing = { "x-dictaduo-microphone-sharing": "sharing-v1" };
   const list = (remoteAddress?: string, headers: Record<string, string> = sharing) =>
     f.app
       .inject({
@@ -743,7 +743,7 @@ test("other computers only see and record shared microphones; sharing changes on
     f.app.inject({
       method: "POST",
       url: "/v2/captures",
-      headers: { ...f.headers, "x-sottoduo-capture-owner": randomBytes(32).toString("hex") },
+      headers: { ...f.headers, "x-dictaduo-capture-owner": randomBytes(32).toString("hex") },
       payload: {
         ...f.request,
         requestID: randomUUID(),

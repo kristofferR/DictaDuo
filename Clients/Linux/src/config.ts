@@ -17,9 +17,9 @@ export interface Config {
   destinationHelper: string;
 }
 export const configPath = () => {
-  if (process.env.SOTTODUO_CLIENT_CONFIG !== undefined) return process.env.SOTTODUO_CLIENT_CONFIG;
+  if (process.env.DICTADUO_CLIENT_CONFIG !== undefined) return process.env.DICTADUO_CLIENT_CONFIG;
   const home = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
-  return join(home, "sottoduo", "linux-client.json");
+  return join(home, "dictaduo", "linux-client.json");
 };
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);

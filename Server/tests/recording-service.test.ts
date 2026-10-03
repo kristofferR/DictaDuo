@@ -49,7 +49,7 @@ const request = () => ({
   mode: "test" as const,
 });
 async function setup(inference = new CountingInference(), correction = false) {
-  const path = await mkdtemp(join(tmpdir(), "sottoduo-session-test-"));
+  const path = await mkdtemp(join(tmpdir(), "dictaduo-session-test-"));
   const preferences = defaultPreferences();
   preferences.preferences.keepOriginalAudio = false;
   preferences.preferences.textCorrectionEnabled = correction;

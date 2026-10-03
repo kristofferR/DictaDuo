@@ -56,11 +56,11 @@ int main(int argc, char **argv) {
 #pragma GCC diagnostic pop
 #endif
   QApplication app(argc, argv);
-  app.setOrganizationName("SottoDuo");
-  app.setApplicationName("SottoDuo");
-  app.setDesktopFileName("sottoduo");
+  app.setOrganizationName("DictaDuo");
+  app.setApplicationName("DictaDuo");
+  app.setDesktopFileName("dictaduo");
   QCommandLineParser parser;
-  parser.setApplicationDescription("SottoDuo for Linux");
+  parser.setApplicationDescription("DictaDuo for Linux");
   parser.addHelpOption();
   parser.addOption(
       {"preview", "Show sample data without connecting to a client."});
@@ -92,7 +92,7 @@ int main(int argc, char **argv) {
   }
   QQuickStyle::setStyle("Basic");
   qmlRegisterSingletonType<HudSurface>(
-      "SottoDuo.Native", 1, 0, "HudSurface",
+      "DictaDuo.Native", 1, 0, "HudSurface",
       [](QQmlEngine *, QJSEngine *) -> QObject * { return new HudSurface; });
   Bridge bridge(preview);
   PortalShortcuts portalShortcuts(!preview);
@@ -115,13 +115,13 @@ int main(int argc, char **argv) {
   QObject::connect(
       &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
       [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
-  engine.loadFromModule("SottoDuo", "Main");
+  engine.loadFromModule("DictaDuo", "Main");
   if (engine.rootObjects().isEmpty())
     return 1;
   auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
   if (!window)
     return 1;
-  const QIcon markIcon(":/qt/qml/SottoDuo/mark.svg");
+  const QIcon markIcon(":/qt/qml/DictaDuo/mark.svg");
   const QIcon recordingMark = recordingIcon(markIcon);
   QSystemTrayIcon tray(markIcon);
   QMenu menu;
@@ -147,7 +147,7 @@ int main(int argc, char **argv) {
     window->requestActivate();
   };
   QObject::connect(&instance, &GuiInstance::showRequested, &app, show);
-  menu.addAction("Open SottoDuo", &app, show);
+  menu.addAction("Open DictaDuo", &app, show);
   auto quit = [window, &app] {
     window->setProperty("quitRequested", true);
     if (window->close())
@@ -157,11 +157,11 @@ int main(int argc, char **argv) {
       window->requestActivate();
     }
   };
-  auto *quitAction = menu.addAction("Quit SottoDuo feedback", &app, quit);
+  auto *quitAction = menu.addAction("Quit DictaDuo feedback", &app, quit);
   quitAction->setToolTip(
       portalShortcuts.plasma()
           ? "Closes this window and the tray. The Plasma shortcut stops until "
-            "you open SottoDuo again."
+            "you open DictaDuo again."
           : "Closes this window and the tray. Dictation keeps running in the "
             "background.");
   // Icons are only replaced when they change, since each update reaches the tray host.
@@ -213,7 +213,7 @@ int main(int argc, char **argv) {
   updateTray();
   QObject::connect(bridge.desktop(), &DesktopIntegration::quitRequested, &app,
                    quit);
-  tray.setToolTip("SottoDuo");
+  tray.setToolTip("DictaDuo");
   tray.setContextMenu(&menu);
   QObject::connect(&tray, &QSystemTrayIcon::activated, &app,
                    [show](QSystemTrayIcon::ActivationReason reason) {

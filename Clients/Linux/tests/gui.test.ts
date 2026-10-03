@@ -111,9 +111,9 @@ test("GUI start, undo and copy-last requests reach the controller", async () => 
   await expect(gui({ version: 1, action: "copyLast" })).rejects.toThrow("no dictation to copy");
 });
 test("GUI requests are versioned and scoped; source preferences persist without losing private configuration", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "sottoduo-gui-"));
-  const previous = process.env.SOTTODUO_CLIENT_CONFIG;
-  process.env.SOTTODUO_CLIENT_CONFIG = join(dir, "client.json");
+  const dir = await mkdtemp(join(tmpdir(), "dictaduo-gui-"));
+  const previous = process.env.DICTADUO_CLIENT_CONFIG;
+  process.env.DICTADUO_CLIENT_CONFIG = join(dir, "client.json");
   const config = parseConfig({
     server: "http://localhost:8394",
     tokenFile: "/private/token",
@@ -167,7 +167,7 @@ test("GUI requests are versioned and scoped; source preferences persist without 
   );
   const gui = createGUIHandler(api, controller, desktop, config, buttons);
   try {
-    await writeFile(process.env.SOTTODUO_CLIENT_CONFIG, JSON.stringify(config), { mode: 0o600 });
+    await writeFile(process.env.DICTADUO_CLIENT_CONFIG, JSON.stringify(config), { mode: 0o600 });
     await expect(gui({ version: 2, action: "snapshot" })).rejects.toThrow();
     await expect(gui({ version: 1, action: "request", path: "/anything" })).rejects.toThrow();
     const snapshot = JSON.stringify(await gui({ version: 1, action: "snapshot" }));
@@ -187,7 +187,7 @@ test("GUI requests are versioned and scoped; source preferences persist without 
     );
     await gui({ version: 1, action: "saveButton", enabled: true });
     expect(buttons.enabled).toBe(true);
-    expect(JSON.parse(await readFile(process.env.SOTTODUO_CLIENT_CONFIG, "utf8"))).toEqual({
+    expect(JSON.parse(await readFile(process.env.DICTADUO_CLIENT_CONFIG, "utf8"))).toEqual({
       ...config,
       buttonEnabled: true,
     });
@@ -211,7 +211,7 @@ test("GUI requests are versioned and scoped; source preferences persist without 
     await gui({ version: 1, action: "saveButton", enabled: false });
     expect(buttons.enabled).toBe(false);
     expect(requests.at(-1)?.startsWith("DELETE")).toBe(true);
-    expect(JSON.parse(await readFile(process.env.SOTTODUO_CLIENT_CONFIG, "utf8"))).toEqual(config);
+    expect(JSON.parse(await readFile(process.env.DICTADUO_CLIENT_CONFIG, "utf8"))).toEqual(config);
     Object.defineProperty(controller, "busy", { configurable: true, get: () => true });
     await expect(gui({ version: 1, action: "saveButton", enabled: true })).rejects.toThrow(
       "Finish dictation",
@@ -220,7 +220,7 @@ test("GUI requests are versioned and scoped; source preferences persist without 
     Object.defineProperty(controller, "busy", { configurable: true, get: () => false });
     const sources = { ...config.sources, priority: [{ hostID: "desktop", id: "dji" }] };
     await gui({ version: 1, action: "saveSources", value: sources });
-    expect(JSON.parse(await readFile(process.env.SOTTODUO_CLIENT_CONFIG, "utf8"))).toEqual({
+    expect(JSON.parse(await readFile(process.env.DICTADUO_CLIENT_CONFIG, "utf8"))).toEqual({
       ...config,
       sources,
     });
@@ -233,7 +233,7 @@ test("GUI requests are versioned and scoped; source preferences persist without 
     );
     unlocked = true;
     await writeFile(
-      process.env.SOTTODUO_CLIENT_CONFIG,
+      process.env.DICTADUO_CLIENT_CONFIG,
       JSON.stringify({ ...config, device: { ...config.device, name: "External change" } }),
     );
     await expect(gui({ version: 1, action: "saveSources", value: config.sources })).rejects.toThrow(
@@ -245,8 +245,8 @@ test("GUI requests are versioned and scoped; source preferences persist without 
     expect(buttons.enabled).toBe(false);
   } finally {
     await buttons.close();
-    if (previous === undefined) delete process.env.SOTTODUO_CLIENT_CONFIG;
-    else process.env.SOTTODUO_CLIENT_CONFIG = previous;
+    if (previous === undefined) delete process.env.DICTADUO_CLIENT_CONFIG;
+    else process.env.DICTADUO_CLIENT_CONFIG = previous;
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -255,7 +255,7 @@ test("shared GUI settings preserve untouched preferences and reject a stale revi
   const { GenerationService } = await import("../../../Server/src/generation-service.ts");
   const { createHTTPServer } = await import("../../../Server/src/http-server.ts");
   const { FakeInference } = await import("../../../Server/tests/support.ts");
-  const dir = await mkdtemp(join(tmpdir(), "sottoduo-gui-prefs-"));
+  const dir = await mkdtemp(join(tmpdir(), "dictaduo-gui-prefs-"));
   const inference = Object.assign(new FakeInference(), {
     engines: ["whisper", "parakeet"] as const,
   });

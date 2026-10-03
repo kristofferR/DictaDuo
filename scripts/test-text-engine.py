@@ -21,7 +21,7 @@ from cleanup_prompt import add_prompt_arguments, load_cleanup_prompt
 @contextmanager
 def isolated_helper(root, helper):
     """Exercise only copied release resources, outside either build tree."""
-    with tempfile.TemporaryDirectory(prefix="sottoduo-text-isolated-", dir="/private/tmp") as directory:
+    with tempfile.TemporaryDirectory(prefix="dictaduo-text-isolated-", dir="/private/tmp") as directory:
         isolated = Path(directory).resolve()
         copied_helper = isolated / helper.name
         shutil.copy2(helper, copied_helper)
@@ -188,12 +188,12 @@ def run_checks(helper, model, prompt):
             assert_ready(process)
             print(f"Model ready in {time.monotonic() - started:.3f}s", flush=True)
 
-            names = correct("names", "i use mini max and code ex to build sottoduo.", ["MiniMax", "Codex", "SottoDuo"])
+            names = correct("names", "i use mini max and code ex to build dictaduo.", ["MiniMax", "Codex", "DictaDuo"])
             # The benchmarked MLX quantization sometimes retains the input's
             # lowercase "i". Track that known cosmetic limitation explicitly;
             # preferred-name spellings and all remaining words stay exact.
-            assert names in ["I use MiniMax and Codex to build SottoDuo.",
-                             "i use MiniMax and Codex to build SottoDuo."], names
+            assert names in ["I use MiniMax and Codex to build DictaDuo.",
+                             "i use MiniMax and Codex to build DictaDuo."], names
 
             items = "Here is my list.\n3. oranges\n4. a trip to the beach\n7. more syrup"
             formatted = correct("list-continuation", items)
@@ -280,7 +280,7 @@ def run_checks(helper, model, prompt):
 def main():
     root = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--helper", type=Path, default=root / ".build/text-native/sottoduo-text-engine")
+    parser.add_argument("--helper", type=Path, default=root / ".build/text-native/dictaduo-text-engine")
     parser.add_argument("--model", type=Path, default=Path.home() / ".murmur/models/Qwen3-4B-Instruct-2507-MLX-4bit")
     parser.add_argument("--isolated", action="store_true",
                         help="Copy the packaged helper/resources to a temporary directory and deny build-tree, network, and subprocess access")

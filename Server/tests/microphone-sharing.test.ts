@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { MicrophoneSharing } from "../src/microphone-sharing.ts";
 
 test("a sharing change that cannot be saved is reported and not applied", async () => {
-  const sharing = new MicrophoneSharing("/nonexistent-sottoduo-directory/microphone-sharing.json");
+  const sharing = new MicrophoneSharing("/nonexistent-dictaduo-directory/microphone-sharing.json");
   const source = { hostID: "desktop", id: "dji" };
   await expect(sharing.set(source, true)).rejects.toThrow();
   expect(sharing.isShared(source)).toBe(false);
@@ -12,7 +12,7 @@ test("overlapping sharing changes are all saved", async () => {
   const { mkdtemp, readFile, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  const directory = await mkdtemp(join(tmpdir(), "sottoduo-sharing-"));
+  const directory = await mkdtemp(join(tmpdir(), "dictaduo-sharing-"));
   try {
     const file = join(directory, "microphone-sharing.json");
     const sharing = new MicrophoneSharing(file);
@@ -31,7 +31,7 @@ test("a failed discovery write is retried on a later discovery", async () => {
   const { mkdtemp, mkdir, readFile, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  const directory = await mkdtemp(join(tmpdir(), "sottoduo-sharing-"));
+  const directory = await mkdtemp(join(tmpdir(), "dictaduo-sharing-"));
   try {
     const folder = join(directory, "data");
     const sharing = new MicrophoneSharing(join(folder, "microphone-sharing.json"));

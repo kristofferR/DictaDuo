@@ -13,7 +13,7 @@ import {
 import { FakeInference } from "../support.ts";
 
 assert.equal(Bun.isStandaloneExecutable, true);
-const directory = await mkdtemp(join(tmpdir(), "sottoduo-recording-compiled-runtime-"));
+const directory = await mkdtemp(join(tmpdir(), "dictaduo-recording-compiled-runtime-"));
 const missing = join(directory, "missing");
 const server = await startServer(
   {

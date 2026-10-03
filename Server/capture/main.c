@@ -170,7 +170,7 @@ static int capture(char **args) {
     pw_core_add_listener(core, &core_listener, &core_events, &c);
     struct pw_registry *registry = pw_core_get_registry(core, PW_VERSION_REGISTRY, 0);
     pw_registry_add_listener(registry, &registry_listener, &registry_events, &c);
-    c.stream = pw_stream_new(core, "SottoDuo capture", pw_properties_new(
+    c.stream = pw_stream_new(core, "DictaDuo capture", pw_properties_new(
         PW_KEY_MEDIA_TYPE, "Audio", PW_KEY_MEDIA_CATEGORY, "Capture", PW_KEY_MEDIA_ROLE, "Communication",
         PW_KEY_TARGET_OBJECT, args[0], PW_KEY_NODE_DONT_RECONNECT, "true",
         "node.dont-fallback", "true", "node.dont-move", "true", "resample.disable", "true",
@@ -243,7 +243,7 @@ static int status(char **args) {
 }
 int main(int argc, char **argv) {
     pid_t parent = getppid();
-    const char *expected = getenv("SOTTODUO_CAPTURE_PARENT_PID");
+    const char *expected = getenv("DICTADUO_CAPTURE_PARENT_PID");
     if (expected && number(expected, INT32_MAX) != (uint64_t)parent) return 1;
     if (parent <= 1 || prctl(PR_SET_PDEATHSIG, SIGKILL) || getppid() != parent) return 1;
     unsetenv("PIPEWIRE_PROPS");
@@ -253,6 +253,6 @@ int main(int argc, char **argv) {
     if (fcntl(STDOUT_FILENO, F_SETFL, fcntl(STDOUT_FILENO, F_GETFL) | O_NONBLOCK) < 0) return 1;
     if (argc == 6 && !strcmp(argv[1], "capture")) return capture(argv + 2);
     if (argc == 4 && !strcmp(argv[1], "status")) return status(argv + 2);
-    fputs("Usage: sottoduo-capture capture SERIAL RATE CHANNELS RETAIN | status USB_BUS USB_ADDRESS\n", stderr);
+    fputs("Usage: dictaduo-capture capture SERIAL RATE CHANNELS RETAIN | status USB_BUS USB_ADDRESS\n", stderr);
     return 2;
 }

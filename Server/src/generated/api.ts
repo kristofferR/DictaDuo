@@ -619,7 +619,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description Upgrade to WebSocket subprotocol sottoduo.recording.v1. Binary audio is UInt32BE JSON header length, UTF8 RecordingAudioHeader, then little-endian float32 PCM. Text controls resume, context, pause, stop and ping; server sends snapshots, acknowledgments, progress and errors. See docs/recording-protocol.md for durable ACK, fencing and resume semantics. */
+    /** @description Upgrade to WebSocket subprotocol dictaduo.recording.v1. Binary audio is UInt32BE JSON header length, UTF8 RecordingAudioHeader, then little-endian float32 PCM. Text controls resume, context, pause, stop and ping; server sends snapshots, acknowledgments, progress and errors. See docs/recording-protocol.md for durable ACK, fencing and resume semantics. */
     get: operations["streamRecording"];
     put?: never;
     post?: never;
@@ -715,10 +715,10 @@ export interface components {
     };
     ServerPreferences: {
       recognitionMode?: components["schemas"]["RecognitionMode"];
-      /** @description Request this field with X-SottoDuo-Recognition-Engine: engine-v1. Missing values select Whisper; updates that omit it keep the server's selection. */
+      /** @description Request this field with X-DictaDuo-Recognition-Engine: engine-v1. Missing values select Whisper; updates that omit it keep the server's selection. */
       recognitionEngine?: components["schemas"]["RecognitionEngine"];
       /**
-       * @description Norwegian (no) is sent only to clients that send X-SottoDuo-Language: language-v2; others see auto, and saving auto keeps Norwegian.
+       * @description Norwegian (no) is sent only to clients that send X-DictaDuo-Language: language-v2; others see auto, and saving auto keeps Norwegian.
        * @enum {string}
        */
       language:
@@ -763,13 +763,13 @@ export interface components {
       serverVersion: string;
       isDev: boolean;
       ready: boolean;
-      /** @description Whether failed or cancelled generations with sealed audio can be retried. Request this field with X-SottoDuo-Generation-Retry: retry-v1. An omitted value means unsupported. */
+      /** @description Whether failed or cancelled generations with sealed audio can be retried. Request this field with X-DictaDuo-Generation-Retry: retry-v1. An omitted value means unsupported. */
       generationRetry?: boolean;
-      /** @description Whether cloud recognition (Soniox) is configured on this server. Request this field with X-SottoDuo-Cloud-Recognition: cloud-v1. An omitted value means unknown. */
+      /** @description Whether cloud recognition (Soniox) is configured on this server. Request this field with X-DictaDuo-Cloud-Recognition: cloud-v1. An omitted value means unknown. */
       cloudRecognition?: boolean;
-      /** @description Additions to API version 3 this server supports, such as retry-completed (finished takes can be transcribed again) and language-no (Norwegian). Request this field with X-SottoDuo-Features: features-v1. An omitted value means none. */
+      /** @description Additions to API version 3 this server supports, such as retry-completed (finished takes can be transcribed again) and language-no (Norwegian). Request this field with X-DictaDuo-Features: features-v1. An omitted value means none. */
       features?: string[];
-      /** @description Local recognition engines installed on this server. Request this field with X-SottoDuo-Recognition-Engine: engine-v1. An omitted value means Whisper only. */
+      /** @description Local recognition engines installed on this server. Request this field with X-DictaDuo-Recognition-Engine: engine-v1. An omitted value means Whisper only. */
       recognitionEngines?: components["schemas"]["RecognitionEngine"][];
       speech: components["schemas"]["ModelRuntimeInfo"];
       proofreading: components["schemas"]["ModelRuntimeInfo"];
@@ -1060,7 +1060,7 @@ export interface components {
     };
     RecordingCapabilities: {
       /** @enum {string} */
-      protocol: "sottoduo.recording.v1";
+      protocol: "dictaduo.recording.v1";
       maximumPCMBytes: number;
     };
     RecordingRunEndpoint: {
@@ -1212,7 +1212,7 @@ export interface operations {
       query?: never;
       header: {
         /** @description Fresh 256-bit secret for this in-memory destination registration. Never persist or log it. */
-        "X-SottoDuo-Destination-Owner": string;
+        "X-DictaDuo-Destination-Owner": string;
       };
       path?: never;
       cookie?: never;
@@ -1240,7 +1240,7 @@ export interface operations {
       query?: never;
       header: {
         /** @description Fresh 256-bit secret for this in-memory destination registration. Never persist or log it. */
-        "X-SottoDuo-Destination-Owner": string;
+        "X-DictaDuo-Destination-Owner": string;
       };
       path: {
         id: components["schemas"]["UUID"];
@@ -1270,7 +1270,7 @@ export interface operations {
       query?: never;
       header: {
         /** @description Fresh 256-bit secret for this in-memory destination registration. Never persist or log it. */
-        "X-SottoDuo-Destination-Owner": string;
+        "X-DictaDuo-Destination-Owner": string;
       };
       path: {
         id: components["schemas"]["UUID"];
@@ -1300,7 +1300,7 @@ export interface operations {
       query?: never;
       header: {
         /** @description Fresh 256-bit secret for this in-memory destination registration. Never persist or log it. */
-        "X-SottoDuo-Destination-Owner": string;
+        "X-DictaDuo-Destination-Owner": string;
       };
       path: {
         id: components["schemas"]["UUID"];
@@ -1330,7 +1330,7 @@ export interface operations {
       query?: never;
       header: {
         /** @description Fresh 256-bit secret for this in-memory destination registration. Never persist or log it. */
-        "X-SottoDuo-Destination-Owner": string;
+        "X-DictaDuo-Destination-Owner": string;
       };
       path: {
         id: components["schemas"]["UUID"];
@@ -1427,7 +1427,7 @@ export interface operations {
       query?: never;
       header: {
         /** @description Client-generated 256-bit lowercase hexadecimal secret, unique per capture request. Required in addition to server authorization for remote recording control and delivery. Never put it in URLs or history. */
-        "X-SottoDuo-Capture-Owner": components["parameters"]["CaptureOwner"];
+        "X-DictaDuo-Capture-Owner": components["parameters"]["CaptureOwner"];
       };
       path?: never;
       cookie?: never;
@@ -1455,7 +1455,7 @@ export interface operations {
       query?: never;
       header: {
         /** @description Client-generated 256-bit lowercase hexadecimal secret, unique per capture request. Required in addition to server authorization for remote recording control and delivery. Never put it in URLs or history. */
-        "X-SottoDuo-Capture-Owner": components["parameters"]["CaptureOwner"];
+        "X-DictaDuo-Capture-Owner": components["parameters"]["CaptureOwner"];
       };
       path: {
         id: components["schemas"]["UUID"];
@@ -1479,7 +1479,7 @@ export interface operations {
       query?: never;
       header: {
         /** @description Client-generated 256-bit lowercase hexadecimal secret, unique per capture request. Required in addition to server authorization for remote recording control and delivery. Never put it in URLs or history. */
-        "X-SottoDuo-Capture-Owner": components["parameters"]["CaptureOwner"];
+        "X-DictaDuo-Capture-Owner": components["parameters"]["CaptureOwner"];
       };
       path: {
         id: components["schemas"]["UUID"];
@@ -1509,7 +1509,7 @@ export interface operations {
       query?: never;
       header: {
         /** @description Client-generated 256-bit lowercase hexadecimal secret, unique per capture request. Required in addition to server authorization for remote recording control and delivery. Never put it in URLs or history. */
-        "X-SottoDuo-Capture-Owner": components["parameters"]["CaptureOwner"];
+        "X-DictaDuo-Capture-Owner": components["parameters"]["CaptureOwner"];
       };
       path: {
         id: components["schemas"]["UUID"];
@@ -1629,11 +1629,11 @@ export interface operations {
       query?: {
         limit?: number;
         before?: string;
-        source?: "sottoduo" | "wispr-flow";
+        source?: "dictaduo" | "wispr-flow";
       };
       header?: {
         /** @description Opt in to remote capture source/state fields; omit for the legacy generation shape. */
-        "X-SottoDuo-Capture"?: components["parameters"]["CaptureView"];
+        "X-DictaDuo-Capture"?: components["parameters"]["CaptureView"];
       };
       path?: never;
       cookie?: never;
@@ -1682,7 +1682,7 @@ export interface operations {
       query?: never;
       header?: {
         /** @description Opt in to remote capture source/state fields; omit for the legacy generation shape. */
-        "X-SottoDuo-Capture"?: components["parameters"]["CaptureView"];
+        "X-DictaDuo-Capture"?: components["parameters"]["CaptureView"];
       };
       path: {
         id: components["schemas"]["UUID"];
@@ -1789,9 +1789,9 @@ export interface operations {
       query?: never;
       header?: {
         /** @description Opt in to remote capture source/state fields; omit for the legacy generation shape. */
-        "X-SottoDuo-Capture"?: components["parameters"]["CaptureView"];
+        "X-DictaDuo-Capture"?: components["parameters"]["CaptureView"];
         /** @description Required for remote-capture cancellation and delivery; omitted by local-upload clients. */
-        "X-SottoDuo-Capture-Owner"?: components["parameters"]["CaptureMutationOwner"];
+        "X-DictaDuo-Capture-Owner"?: components["parameters"]["CaptureMutationOwner"];
       };
       path: {
         id: components["schemas"]["UUID"];
@@ -1817,7 +1817,7 @@ export interface operations {
       query?: never;
       header?: {
         /** @description Opt in to remote capture source/state fields; omit for the legacy generation shape. */
-        "X-SottoDuo-Capture"?: components["parameters"]["CaptureView"];
+        "X-DictaDuo-Capture"?: components["parameters"]["CaptureView"];
       };
       path: {
         id: components["schemas"]["UUID"];
@@ -1843,9 +1843,9 @@ export interface operations {
       query?: never;
       header?: {
         /** @description Opt in to remote capture source/state fields; omit for the legacy generation shape. */
-        "X-SottoDuo-Capture"?: components["parameters"]["CaptureView"];
+        "X-DictaDuo-Capture"?: components["parameters"]["CaptureView"];
         /** @description Required for remote-capture cancellation and delivery; omitted by local-upload clients. */
-        "X-SottoDuo-Capture-Owner"?: components["parameters"]["CaptureMutationOwner"];
+        "X-DictaDuo-Capture-Owner"?: components["parameters"]["CaptureMutationOwner"];
       };
       path: {
         id: components["schemas"]["UUID"];
@@ -1875,7 +1875,7 @@ export interface operations {
       query?: never;
       header?: {
         /** @description Opt in to remote capture source/state fields; omit for the legacy generation shape. */
-        "X-SottoDuo-Capture"?: components["parameters"]["CaptureView"];
+        "X-DictaDuo-Capture"?: components["parameters"]["CaptureView"];
       };
       path: {
         id: components["schemas"]["UUID"];
@@ -2229,7 +2229,7 @@ export interface operations {
       query?: never;
       header?: {
         /** @description Required for remote-capture cancellation and delivery; omitted by local-upload clients. */
-        "X-SottoDuo-Capture-Owner"?: components["parameters"]["CaptureMutationOwner"];
+        "X-DictaDuo-Capture-Owner"?: components["parameters"]["CaptureMutationOwner"];
       };
       path: {
         id: components["schemas"]["UUID"];
@@ -2278,7 +2278,7 @@ export interface operations {
       query?: never;
       header?: {
         /** @description Required for remote-capture cancellation and delivery; omitted by local-upload clients. */
-        "X-SottoDuo-Capture-Owner"?: components["parameters"]["CaptureMutationOwner"];
+        "X-DictaDuo-Capture-Owner"?: components["parameters"]["CaptureMutationOwner"];
       };
       path: {
         id: components["schemas"]["UUID"];

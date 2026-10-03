@@ -62,7 +62,7 @@ test("streams PCM before release; replaces interim tails, filters markers and dr
   const stream = startSonioxStream(
     config,
     "auto",
-    ["SottoDuo"],
+    ["DictaDuo"],
     "generation-id",
     (text) => {
       previews.push(text);
@@ -82,7 +82,7 @@ test("streams PCM before release; replaces interim tails, filters markers and dr
     audio_format: "pcm_f32le",
     sample_rate: 16000,
     num_channels: 1,
-    context: { terms: ["SottoDuo"] },
+    context: { terms: ["DictaDuo"] },
   });
   expect(configuration.language_hints).toBeUndefined();
   const result = await stream.finish();

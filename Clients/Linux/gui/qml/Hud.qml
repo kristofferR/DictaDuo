@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import SottoDuo.Native 1.0
+import DictaDuo.Native 1.0
 
 Window {
     id: hud
@@ -71,7 +71,7 @@ Window {
                     ui: hud.ui
                     objectName: "hudSubtitle"
                     // The cloud fallback takes the source's place, since the title already says what is listening.
-                    text: hud.ui.undoSeconds > 0 ? "Press " + (hud.ui.dictationKey || "the dictation key") + " again to paste · " + hud.ui.undoSeconds + "s" : [hud.ui.feedback.elapsedSeconds !== undefined ? hud.ui.duration(hud.ui.feedback.elapsedSeconds) : "", hud.ui.fallbackNote || (hud.sharedMic ? "" : hud.ui.activity.source || "SottoDuo")].filter(part => part).join(" · ")
+                    text: hud.ui.undoSeconds > 0 ? "Press " + (hud.ui.dictationKey || "the dictation key") + " again to paste · " + hud.ui.undoSeconds + "s" : [hud.ui.feedback.elapsedSeconds !== undefined ? hud.ui.duration(hud.ui.feedback.elapsedSeconds) : "", hud.ui.fallbackNote || (hud.sharedMic ? "" : hud.ui.activity.source || "DictaDuo")].filter(part => part).join(" · ")
                     color: hud.ui.c.muted
                     font.pixelSize: 11
                     Layout.fillWidth: true

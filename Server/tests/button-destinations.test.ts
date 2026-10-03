@@ -160,7 +160,7 @@ test("a second tap during preparation cancels instead of opening a delayed recor
 });
 
 test("a pinned computer stays selected, dictating elsewhere does not move it, and it survives restarts", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "sottoduo-button-target-"));
+  const directory = await mkdtemp(join(tmpdir(), "dictaduo-button-target-"));
   try {
     const file = join(directory, "button-target.json");
     const f = fixture(file);
@@ -221,7 +221,7 @@ test("a target change lets the current button take finish and never inherits a p
   expect(f.broker.state().selected).toBeUndefined();
 });
 test("a target that cannot be saved is reported and not applied", async () => {
-  const f = fixture("/nonexistent-sottoduo-directory/button-target.json");
+  const f = fixture("/nonexistent-dictaduo-directory/button-target.json");
   await expect(f.broker.setTarget({ mode: "off" })).rejects.toThrow();
   expect(f.broker.state().buttonTarget).toEqual({ mode: "lastDictated" });
 });

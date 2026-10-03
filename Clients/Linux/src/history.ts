@@ -172,8 +172,8 @@ export class HistoryTools {
   async list(before: unknown, source: unknown, queryID: unknown) {
     if (before !== undefined && (typeof before !== "string" || before.length > 512))
       throw new ClientNotice("Invalid history cursor. Refresh history.");
-    if (source !== undefined && source !== "sottoduo" && source !== "wispr-flow")
-      throw new ClientNotice("Choose SottoDuo, Wispr Flow or all sources.");
+    if (source !== undefined && source !== "dictaduo" && source !== "wispr-flow")
+      throw new ClientNotice("Choose DictaDuo, Wispr Flow or all sources.");
     if (queryID !== undefined && (typeof queryID !== "string" || queryID.length > 128))
       throw new ClientNotice("Invalid history request.");
     const cursor = before === undefined ? undefined : parseCursor(before);
@@ -412,7 +412,7 @@ export class HistoryTools {
       throw new ClientNotice(
         "The desktop session is unavailable. Sign in again before opening audio.",
       );
-    const base = join(runtime, "sottoduo-client");
+    const base = join(runtime, "dictaduo-client");
     await privateDirectory(base);
     const directory = join(base, "history-audio");
     await privateDirectory(directory);

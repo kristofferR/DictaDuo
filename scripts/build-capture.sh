@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 project_dir=$(cd "$(dirname "$0")/.." && pwd)
-output="${1:-$project_dir/build/capture/sottoduo-capture}"
+output="${1:-$project_dir/build/capture/dictaduo-capture}"
 mkdir -p "$(dirname "$output")"
 if ! dependency_flags=$(pkg-config --cflags --libs libpipewire-0.3 libusb-1.0 samplerate); then
     printf 'Install pkg-config and the PipeWire, libusb and libsamplerate development packages. See docs/pipewire-capture.md.\n' >&2

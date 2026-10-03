@@ -72,39 +72,39 @@ const keys = ["Menu", "F8", "F9", "F10", "F12"] as const;
 type Key = (typeof keys)[number];
 const codes: Record<Key, number[]> = { Menu: [135, 147], F8: [74], F9: [75], F10: [76], F12: [96] };
 const actions = ["start dictation", "stop dictation", "cancel dictation", "copy last result"];
-const begin = "-- BEGIN SottoDuo shortcuts\n",
-  end = "-- END SottoDuo shortcuts\n";
-const documentedMenuBlock = `-- Kris selected Menu for SottoDuo, replacing its Voxtype toggle binding.
+const begin = "-- BEGIN DictaDuo shortcuts\n",
+  end = "-- END DictaDuo shortcuts\n";
+const documentedMenuBlock = `-- Kris selected Menu for DictaDuo, replacing its Voxtype toggle binding.
 -- Remove the existing Menu binding once, then add both press and release actions.
 hl.unbind("Menu")
 -- Compositor events preserve press/release ordering without racing CLI processes.
-o.bind("Menu", "SottoDuo: start dictation", hl.dsp.event("sottoduo:start"))
-o.bind("Menu", "SottoDuo: stop dictation", hl.dsp.event("sottoduo:stop"), { release = true, ignore_mods = true })
-o.bind("SUPER + Menu", "SottoDuo: cancel dictation", hl.dsp.event("sottoduo:cancel"))
-o.bind("SUPER + SHIFT + Menu", "SottoDuo: copy last result", hl.dsp.event("sottoduo:copy"))
+o.bind("Menu", "DictaDuo: start dictation", hl.dsp.event("dictaduo:start"))
+o.bind("Menu", "DictaDuo: stop dictation", hl.dsp.event("dictaduo:stop"), { release = true, ignore_mods = true })
+o.bind("SUPER + Menu", "DictaDuo: cancel dictation", hl.dsp.event("dictaduo:cancel"))
+o.bind("SUPER + SHIFT + Menu", "DictaDuo: copy last result", hl.dsp.event("dictaduo:copy"))
 `;
 const revision = (text: string) => createHash("sha256").update(text).digest("hex");
 export function shortcutBlock(key: Key) {
-  return `o.rebind("${key}", "SottoDuo: start dictation", hl.dsp.event("sottoduo:start"))\no.bind("${key}", "SottoDuo: stop dictation", hl.dsp.event("sottoduo:stop"), { release = true, ignore_mods = true })\no.bind("SUPER + ${key}", "SottoDuo: cancel dictation", hl.dsp.event("sottoduo:cancel"))\no.bind("SUPER + SHIFT + ${key}", "SottoDuo: copy last result", hl.dsp.event("sottoduo:copy"))\n`;
+  return `o.rebind("${key}", "DictaDuo: start dictation", hl.dsp.event("dictaduo:start"))\no.bind("${key}", "DictaDuo: stop dictation", hl.dsp.event("dictaduo:stop"), { release = true, ignore_mods = true })\no.bind("SUPER + ${key}", "DictaDuo: cancel dictation", hl.dsp.event("dictaduo:cancel"))\no.bind("SUPER + SHIFT + ${key}", "DictaDuo: copy last result", hl.dsp.event("dictaduo:copy"))\n`;
 }
 function section(text: string) {
   for (const key of keys) {
     for (const block of [
       begin + shortcutBlock(key) + end,
-      `-- SottoDuo dictation: hold ${key}; release to transcribe.\n` + shortcutBlock(key),
+      `-- DictaDuo dictation: hold ${key}; release to transcribe.\n` + shortcutBlock(key),
       ...(key === "Menu" ? [documentedMenuBlock] : []),
     ]) {
       const at = text.indexOf(block);
       if (
         at >= 0 &&
-        !text.replace(block, "").includes("sottoduo:") &&
-        !text.replace(block, "").includes("BEGIN SottoDuo shortcuts")
+        !text.replace(block, "").includes("dictaduo:") &&
+        !text.replace(block, "").includes("BEGIN DictaDuo shortcuts")
       )
         return { key, block, at };
     }
   }
   throw new ClientNotice(
-    "Shortcut editing supports SottoDuo’s standard Omarchy Lua bindings. Custom bindings must be edited in desktop settings.",
+    "Shortcut editing supports DictaDuo’s standard Omarchy Lua bindings. Custom bindings must be edited in desktop settings.",
   );
 }
 function records(value: unknown): Record<string, unknown>[] {
@@ -113,7 +113,7 @@ function records(value: unknown): Record<string, unknown>[] {
   return value;
 }
 function own(binding: Record<string, unknown>, key: Key) {
-  const index = actions.map((action) => `SottoDuo: ${action}`).indexOf(String(binding.description));
+  const index = actions.map((action) => `DictaDuo: ${action}`).indexOf(String(binding.description));
   return (
     index >= 0 &&
     binding.key === key &&
@@ -127,7 +127,7 @@ function own(binding: Record<string, unknown>, key: Key) {
 function verify(bindings: Record<string, unknown>[], key: Key) {
   return actions.every(
     (action) =>
-      bindings.filter((b) => own(b, key) && b.description === `SottoDuo: ${action}`).length === 1,
+      bindings.filter((b) => own(b, key) && b.description === `DictaDuo: ${action}`).length === 1,
   );
 }
 function conflict(bindings: Record<string, unknown>[], key: Key, current: Key) {
@@ -192,7 +192,7 @@ export class ShortcutSettings {
         revision: revision(text),
         message: supported
           ? "Hold to dictate; release to transcribe."
-          : "The active shortcuts differ from SottoDuo’s saved bindings. Reload or repair the desktop configuration first.",
+          : "The active shortcuts differ from DictaDuo’s saved bindings. Reload or repair the desktop configuration first.",
         choices: keys.map((key) => {
           const other = conflict(bindings, key, current.key);
           return {
@@ -234,7 +234,7 @@ export class ShortcutSettings {
       next: string | undefined,
       written = false;
     const atomic = (text: string) => {
-      const temp = `${this.file}.sottoduo-${randomUUID()}.tmp`;
+      const temp = `${this.file}.dictaduo-${randomUUID()}.tmp`;
       writeFileSync(temp, text, { flag: "wx", mode: lstatSync(this.file).mode & 0o777 });
       renameSync(temp, this.file);
     };
@@ -252,7 +252,7 @@ export class ShortcutSettings {
       const bindings = records(JSON.parse(await this.run(["hyprctl", "-j", "binds"])));
       if (!verify(bindings, current.key))
         throw new ClientNotice(
-          "The active SottoDuo shortcuts no longer match. Reload this page first.",
+          "The active DictaDuo shortcuts no longer match. Reload this page first.",
         );
       if (conflict(bindings, selected, current.key))
         throw new ClientNotice(
@@ -263,7 +263,7 @@ export class ShortcutSettings {
           "Desktop shortcuts changed elsewhere. Reload this page before saving.",
         );
       next = original.replace(current.block, begin + shortcutBlock(selected) + end);
-      writeFileSync(`${this.file}.sottoduo-backup-${randomUUID()}`, original, {
+      writeFileSync(`${this.file}.dictaduo-backup-${randomUUID()}`, original, {
         flag: "wx",
         mode: 0o600,
       });
@@ -279,7 +279,7 @@ export class ShortcutSettings {
       if (written && next !== undefined && original !== undefined) {
         if (this.read() !== next)
           throw new ClientNotice(
-            "The desktop configuration changed during saving, so your previous bindings were not restored. A SottoDuo backup is beside bindings.lua.",
+            "The desktop configuration changed during saving, so your previous bindings were not restored. A DictaDuo backup is beside bindings.lua.",
           );
         atomic(original);
         await this.run(["hyprctl", "reload"]);

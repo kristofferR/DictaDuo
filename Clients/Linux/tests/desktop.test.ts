@@ -28,15 +28,15 @@ test("Omarchy lock checks reject pending, orphan and rapid lock/unlock even with
 
 test("only exact namespaced compositor events control dictation", async () => {
   const { shortcutEvent } = await import("../src/desktop.ts");
-  expect(["custom>>sottoduo:start", "custom>>sottoduo:stop"].map(shortcutEvent)).toEqual([
+  expect(["custom>>dictaduo:start", "custom>>dictaduo:stop"].map(shortcutEvent)).toEqual([
     "start",
     "stop",
   ]);
   for (const event of [
     "custom>>other:start",
-    "custom>>sottoduo:start\nstop",
-    "windowtitle>>sottoduo:start",
-    "custom>>sottoduo:status",
+    "custom>>dictaduo:start\nstop",
+    "windowtitle>>dictaduo:start",
+    "custom>>dictaduo:status",
   ])
     expect(shortcutEvent(event)).toBeUndefined();
 });
@@ -47,13 +47,13 @@ test("each notification replaces the previous one instead of stacking", async ()
     calls.push(args);
     return "41\n";
   });
-  notifier.notify("Not pasted", "Your text is ready. Copy it from the tray or SottoDuo.");
+  notifier.notify("Not pasted", "Your text is ready. Copy it from the tray or DictaDuo.");
   notifier.notify("Check the field");
   await notifier.settled();
   expect(calls[0]!.some((arg) => arg.startsWith("--replace-id"))).toBe(false);
   expect(calls[0]!.slice(-2)).toEqual([
     "Not pasted",
-    "Your text is ready. Copy it from the tray or SottoDuo.",
+    "Your text is ready. Copy it from the tray or DictaDuo.",
   ]);
   expect(calls[1]).toContain("--replace-id=41");
   expect(calls[1]!.at(-1)).toBe("Check the field");

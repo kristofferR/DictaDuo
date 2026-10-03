@@ -1,0 +1,17 @@
+[Unit]
+Description=DictaDuo dictation server with optional desktop microphone capture
+After=pipewire.service
+Wants=pipewire.service
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.config/dictaduo/server.env
+ExecStart=%h/.local/opt/dictaduo/current/dictaduo-server
+Restart=on-failure
+RestartSec=3
+KillMode=control-group
+TimeoutStopSec=15
+UMask=0077
+
+[Install]
+WantedBy=default.target

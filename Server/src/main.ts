@@ -95,7 +95,7 @@ if (import.meta.main) {
       console.log(defaultProofreadingPrompt);
     else {
       const server = await startServer(await parseConfiguration());
-      console.log(`SottoDuo server listening at ${server.address}`);
+      console.log(`DictaDuo server listening at ${server.address}`);
       const stop = () => {
         void server.close().then(
           () => process.exit(0),

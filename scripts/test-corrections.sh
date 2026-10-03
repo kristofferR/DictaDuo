@@ -10,9 +10,9 @@ else
     helper_flag=--engine
     default_model=""
 fi
-model="${SOTTODUO_TEXT_MODEL:-$default_model}"
+model="${DICTADUO_TEXT_MODEL:-$default_model}"
 if [[ -z "$model" ]]; then
-    printf 'Set SOTTODUO_TEXT_MODEL to your Qwen GGUF file.\n' >&2
+    printf 'Set DICTADUO_TEXT_MODEL to your Qwen GGUF file.\n' >&2
     exit 1
 fi
-exec python3 "$project_dir/scripts/$test_script" "$helper_flag" "$project_dir/build/server/helpers/sottoduo-text-engine" --model "$model" --server "$project_dir/build/server/sottoduo-server" "$@"
+exec python3 "$project_dir/scripts/$test_script" "$helper_flag" "$project_dir/build/server/helpers/dictaduo-text-engine" --model "$model" --server "$project_dir/build/server/dictaduo-server" "$@"

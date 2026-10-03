@@ -6,7 +6,7 @@ Ref #9. This is the USB receiver path verified on Kris's Mic Mini 2S (2ca3:4011)
 
 Enable **Let the DJI button type here** on each participating client (Microphone page). **Button types into** chooses the target and is stored on the server for every computer (`PUT /v1/button-destinations/target`):
 
-- **Last computer I dictated on** (default): a successful computer-shortcut dictation selects that computer, provided DJI is available. `sottoduo arm` on Linux still selects explicitly in this mode.
+- **Last computer I dictated on** (default): a successful computer-shortcut dictation selects that computer, provided DJI is available. `dictaduo arm` on Linux still selects explicitly in this mode.
 - **Always <computer>**: that computer is selected whenever it is connected, including after lock, restart or reconnect. Dictating elsewhere does not move it.
 - **Nowhere**: taps are ignored without turning the receiver off.
 
@@ -18,7 +18,7 @@ Source and destination are pinned for the whole take. Menu/hotkey release only s
 
 Registration is per process with a fresh 256-bit owner secret and five-second lease. Clients renew once per polling cycle, using 1.5-second request timeouts and a one-second pause. Commands also expire within five seconds. No button command is persisted, and only the target choice survives a restart. In the default mode, lock, sleep, client/network loss, receiver monitor loss, unavailable source, or server restart clears selection; unlock/reconnect registers the client again without selecting it, so use a fresh shortcut take or explicit selection to re-arm. A pinned computer is selected again as soon as it reconnects. A failed capture remains in history as appropriate and never resumes for delivery after restart.
 
-Mac settings show the chosen computer and receiver availability. Linux exposes `sottoduo button-status` and desktop capture notifications. This implementation does not control transmitter LEDs, beeps, or haptics. The microphone cannot confirm destination selection itself; check the client before dictating.
+Mac settings show the chosen computer and receiver availability. Linux exposes `dictaduo button-status` and desktop capture notifications. This implementation does not control transmitter LEDs, beeps, or haptics. The microphone cannot confirm destination selection itself; check the client before dictating.
 
 ## Verified events and limits
 
@@ -32,9 +32,9 @@ The helper runs only when explicitly configured, but its grab remains active eve
 
 1. Build the native capture helper and button helper: `bash scripts/build-capture.sh` and `bash scripts/build-button.sh`. Build the server and Linux client using their existing scripts.
 2. Configure the capture provider with `--capture-helper PATH --capture-host-id HOST`. Obtain the exact stable DJI source ID from `/v1/audio-sources`.
-3. Add `--button-helper /absolute/path/to/sottoduo-dji-button --button-source-id EXACT_64_HEX_SOURCE_ID`. Equivalent environment variables are `SOTTODUO_BUTTON_HELPER` and `SOTTODUO_BUTTON_SOURCE_ID`. No button feature is enabled by default.
-4. Review the narrowly scoped udev template `Server/packaging/70-sottoduo-dji-button.rules` before an authorized system installation. It grants active-seat access only to the observed DJI Consumer Control interface; it does not add the user to the broad `input` group. The receiver status interface has its own separate access requirements from the capture-provider setup. Neither permission is installed by this change.
-5. On Linux set `"buttonEnabled": true` in its private client config and restart the client. Run `sottoduo button-status`, then `sottoduo arm`. On Mac enable **Receive the server's DJI button** and choose **Use this Mac**. Keep the existing local USB-button mapping disabled when testing the server path.
+3. Add `--button-helper /absolute/path/to/dictaduo-dji-button --button-source-id EXACT_64_HEX_SOURCE_ID`. Equivalent environment variables are `DICTADUO_BUTTON_HELPER` and `DICTADUO_BUTTON_SOURCE_ID`. No button feature is enabled by default.
+4. Review the narrowly scoped udev template `Server/packaging/70-dictaduo-dji-button.rules` before an authorized system installation. It grants active-seat access only to the observed DJI Consumer Control interface; it does not add the user to the broad `input` group. The receiver status interface has its own separate access requirements from the capture-provider setup. Neither permission is installed by this change.
+5. On Linux set `"buttonEnabled": true` in its private client config and restart the client. Run `dictaduo button-status`, then `dictaduo arm`. On Mac enable **Receive the server's DJI button** and choose **Use this Mac**. Keep the existing local USB-button mapping disabled when testing the server path.
 
 The daily server, Menu binding, udev configuration, and installed Mac app have not been changed by this implementation. Deployment remains a separate step.
 

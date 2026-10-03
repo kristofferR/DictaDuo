@@ -18,7 +18,7 @@ test("button IPC accepts Unix timestamps and rejects stale, future and malformed
 test.skipIf(process.platform !== "linux" || !Bun.which("cc"))(
   "native event conversion and Bun agree on the IPC clock without opening a device",
   async () => {
-    const directory = await mkdtemp(join(tmpdir(), "sottoduo-button-clock-"));
+    const directory = await mkdtemp(join(tmpdir(), "dictaduo-button-clock-"));
     try {
       const source = join(directory, "clock.c"),
         binary = join(directory, "clock");

@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleExecutable</key>
-	<string>SottoDuo</string>
+	<string>DictaDuo</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.kristofferr.sottoduo</string>
+	<string>com.kristofferr.dictaduo</string>
 	<key>CFBundleName</key>
-	<string>SottoDuo</string>
+	<string>DictaDuo</string>
 	<key>CFBundleDisplayName</key>
-	<string>SottoDuo</string>
+	<string>DictaDuo</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -17,7 +17,7 @@
 	<key>CFBundleVersion</key>
 	<string>28</string>
 	<key>CFBundleIconFile</key>
-	<string>SottoDuo</string>
+	<string>DictaDuo</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LSUIElement</key>
@@ -25,9 +25,9 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>SottoDuo records your microphone only while you dictate and sends audio to your configured SottoDuo server for transcription and shared history.</string>
+	<string>DictaDuo records your microphone only while you dictate and sends audio to your configured DictaDuo server for transcription and shared history.</string>
 	<key>NSInputMonitoringUsageDescription</key>
-	<string>SottoDuo listens for your chosen hold-to-dictate key. It does not store your keystrokes.</string>
+	<string>DictaDuo listens for your chosen hold-to-dictate key. It does not store your keystrokes.</string>
 	<!-- HTTP is validated in ServerEndpoint and limited to loopback/Tailscale IPs. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
@@ -59,8 +59,8 @@
 		</dict>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>SottoDuo connects to your SottoDuo server to process dictation and display shared history.</string>
-	<key>SottoDuoDevelopmentBuild</key>
+	<string>DictaDuo connects to your DictaDuo server to process dictation and display shared history.</string>
+	<key>DictaDuoDevelopmentBuild</key>
 	<false/>
 </dict>
 </plist>

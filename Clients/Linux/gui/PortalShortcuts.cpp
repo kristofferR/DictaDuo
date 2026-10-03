@@ -1,4 +1,4 @@
-#ifdef SOTTODUO_HAS_LIBPORTAL
+#ifdef DICTADUO_HAS_LIBPORTAL
 #include <libportal/portal.h>
 #endif
 #include "PortalShortcuts.h"
@@ -16,7 +16,7 @@ PortalShortcuts::PortalShortcuts(bool enabled, QObject *parent) : QObject(parent
               names.contains("plasma", Qt::CaseInsensitive));
   if (!m_plasma)
     return;
-#ifdef SOTTODUO_HAS_LIBPORTAL
+#ifdef DICTADUO_HAS_LIBPORTAL
   m_supported = true;
   m_message = "Checking Plasma shortcuts…";
   m_thread = std::thread([this] { run(); });
@@ -26,7 +26,7 @@ PortalShortcuts::PortalShortcuts(bool enabled, QObject *parent) : QObject(parent
 }
 
 PortalShortcuts::~PortalShortcuts() {
-#ifdef SOTTODUO_HAS_LIBPORTAL
+#ifdef DICTADUO_HAS_LIBPORTAL
   if (m_thread.joinable()) {
     std::unique_lock lock(m_mutex);
     m_ready.wait(lock, [this] { return m_context != nullptr; });
@@ -59,7 +59,7 @@ void PortalShortcuts::setStatus(bool available, const QString &trigger,
 }
 
 void PortalShortcuts::configure() {
-#ifdef SOTTODUO_HAS_LIBPORTAL
+#ifdef DICTADUO_HAS_LIBPORTAL
   if (!m_plasma)
     return;
   std::lock_guard lock(m_mutex);
@@ -85,7 +85,7 @@ void PortalShortcuts::configure() {
 }
 
 void PortalShortcuts::run() {
-#ifdef SOTTODUO_HAS_LIBPORTAL
+#ifdef DICTADUO_HAS_LIBPORTAL
   auto *context = g_main_context_new();
   g_main_context_push_thread_default(context);
   auto *loop = g_main_loop_new(context, FALSE);
@@ -119,13 +119,13 @@ void PortalShortcuts::run() {
 }
 
 void PortalShortcuts::created(void *source, void *result) {
-#ifdef SOTTODUO_HAS_LIBPORTAL
+#ifdef DICTADUO_HAS_LIBPORTAL
   GError *error = nullptr;
   auto *session = xdp_portal_create_global_shortcuts_session_finish(
       XDP_PORTAL(source), static_cast<GAsyncResult *>(result), &error);
   if (!session) {
     g_clear_error(&error);
-    setStatus(false, {}, "Plasma shortcuts are unavailable. Check the desktop portal and launch SottoDuo from its installed app entry.");
+    setStatus(false, {}, "Plasma shortcuts are unavailable. Check the desktop portal and launch DictaDuo from its installed app entry.");
     return;
   }
   m_session = session;
@@ -171,13 +171,13 @@ void PortalShortcuts::created(void *source, void *result) {
   auto *shortcuts = g_ptr_array_new_with_free_func(
       reinterpret_cast<GDestroyNotify>(xdp_global_shortcut_free));
   g_ptr_array_add(shortcuts, xdp_global_shortcut_new(
-                                  "dictate", "Hold to dictate with SottoDuo", "F8"));
+                                  "dictate", "Hold to dictate with DictaDuo", "F8"));
   g_ptr_array_add(shortcuts, xdp_global_shortcut_new(
-                                  "cancel", "Cancel SottoDuo dictation", ""));
+                                  "cancel", "Cancel DictaDuo dictation", ""));
   g_ptr_array_add(shortcuts, xdp_global_shortcut_new(
-                                  "copy", "Copy the last SottoDuo dictation", ""));
+                                  "copy", "Copy the last DictaDuo dictation", ""));
   g_ptr_array_add(shortcuts, xdp_global_shortcut_new(
-                                  "undo", "Paste a cancelled SottoDuo dictation", ""));
+                                  "undo", "Paste a cancelled DictaDuo dictation", ""));
   m_shortcuts = shortcuts;
   xdp_global_shortcuts_session_bind_shortcuts(
       session, shortcuts, nullptr, nullptr,
@@ -192,7 +192,7 @@ void PortalShortcuts::created(void *source, void *result) {
 }
 
 void PortalShortcuts::updateAssignments(void *value) {
-#ifdef SOTTODUO_HAS_LIBPORTAL
+#ifdef DICTADUO_HAS_LIBPORTAL
   auto *assignments = static_cast<GPtrArray *>(value);
   QString trigger;
   for (guint i = 0; assignments && i < assignments->len; ++i) {
@@ -212,14 +212,14 @@ void PortalShortcuts::updateAssignments(void *value) {
 }
 
 void PortalShortcuts::bound(void *result) {
-#ifdef SOTTODUO_HAS_LIBPORTAL
+#ifdef DICTADUO_HAS_LIBPORTAL
   GError *error = nullptr;
   auto *assignments = xdp_global_shortcuts_session_bind_shortcuts_finish(
       static_cast<XdpGlobalShortcutsSession *>(m_session),
       static_cast<GAsyncResult *>(result), &error);
   if (!assignments) {
     g_clear_error(&error);
-    setStatus(false, {}, "Plasma did not grant SottoDuo a global shortcut.");
+    setStatus(false, {}, "Plasma did not grant DictaDuo a global shortcut.");
     return;
   }
   updateAssignments(assignments);
@@ -230,7 +230,7 @@ void PortalShortcuts::bound(void *result) {
 }
 
 void PortalShortcuts::listed(void *result) {
-#ifdef SOTTODUO_HAS_LIBPORTAL
+#ifdef DICTADUO_HAS_LIBPORTAL
   GError *error = nullptr;
   auto *assignments = xdp_global_shortcuts_session_list_shortcuts_finish(
       static_cast<XdpGlobalShortcutsSession *>(m_session),
@@ -240,7 +240,7 @@ void PortalShortcuts::listed(void *result) {
     g_ptr_array_unref(assignments);
   } else {
     g_clear_error(&error);
-    setStatus(false, {}, "Couldn’t read Plasma’s current SottoDuo shortcut.");
+    setStatus(false, {}, "Couldn’t read Plasma’s current DictaDuo shortcut.");
   }
 #else
   (void)result;
@@ -248,7 +248,7 @@ void PortalShortcuts::listed(void *result) {
 }
 
 void PortalShortcuts::configured(void *result) {
-#ifdef SOTTODUO_HAS_LIBPORTAL
+#ifdef DICTADUO_HAS_LIBPORTAL
   GError *error = nullptr;
   if (!xdp_global_shortcuts_session_configure_shortcuts_finish(
           static_cast<XdpGlobalShortcutsSession *>(m_session),

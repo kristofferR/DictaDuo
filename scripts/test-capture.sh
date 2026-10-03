@@ -22,7 +22,7 @@ if [[ "$capture_test_mode" != "pipewire" ]]; then
         -o "$temporary/audio-test" "${flags[@]}" -lm
     "$temporary/audio-test"
 fi
-bash "$project_dir/scripts/build-capture.sh" "$temporary/sottoduo-capture"
+bash "$project_dir/scripts/build-capture.sh" "$temporary/dictaduo-capture"
 if [[ "$capture_test_mode" != "core" ]]; then
-    SOTTODUO_TEST_CAPTURE_HELPER="$temporary/sottoduo-capture" bun test "$project_dir/Server/tests/pipewire-native.test.ts"
+    DICTADUO_TEST_CAPTURE_HELPER="$temporary/dictaduo-capture" bun test "$project_dir/Server/tests/pipewire-native.test.ts"
 fi

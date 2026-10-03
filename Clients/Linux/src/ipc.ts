@@ -35,7 +35,7 @@ export function isCommand(value: string): value is Command {
 async function path(): Promise<string> {
   const runtime = process.env.XDG_RUNTIME_DIR;
   if (!runtime) throw new Error("XDG_RUNTIME_DIR is missing.");
-  const dir = join(runtime, "sottoduo-client");
+  const dir = join(runtime, "dictaduo-client");
   await mkdir(dir, { mode: 0o700 }).catch((error) => {
     if (error.code !== "EEXIST") throw error;
   });
@@ -48,7 +48,7 @@ export async function send(command: Command): Promise<string> {
   const socket = connect(await path());
   return new Promise((resolve, reject) => {
     let value = "";
-    socket.setTimeout(5000, () => socket.destroy(new Error("SottoDuo did not respond.")));
+    socket.setTimeout(5000, () => socket.destroy(new Error("DictaDuo did not respond.")));
     socket.on("connect", () => socket.write(command + "\n"));
     socket.on("data", (data: Buffer) => {
       value += data.toString();

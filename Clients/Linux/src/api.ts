@@ -45,18 +45,18 @@ export class API {
       signal: AbortSignal.timeout(timeout),
       headers: {
         Authorization: `Bearer ${this.token}`,
-        ...(destinationOwner ? { "X-SottoDuo-Destination-Owner": destinationOwner } : {}),
+        ...(destinationOwner ? { "X-DictaDuo-Destination-Owner": destinationOwner } : {}),
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         // Legacy routes negotiate these fields; recording routes negotiate only the engine.
-        "X-SottoDuo-Capture": "capture-v1",
-        "X-SottoDuo-Recognition": "streaming-v1",
-        "X-SottoDuo-Recognition-Engine": "engine-v1",
-        "X-SottoDuo-Microphone-Sharing": "sharing-v1",
-        "X-SottoDuo-Cloud-Recognition": "cloud-v1",
-        "X-SottoDuo-Features": "features-v1",
-        "X-SottoDuo-Language": "language-v2",
-        "X-SottoDuo-Generation-Retry": "retry-v1",
-        ...(owner ? { "X-SottoDuo-Capture-Owner": owner } : {}),
+        "X-DictaDuo-Capture": "capture-v1",
+        "X-DictaDuo-Recognition": "streaming-v1",
+        "X-DictaDuo-Recognition-Engine": "engine-v1",
+        "X-DictaDuo-Microphone-Sharing": "sharing-v1",
+        "X-DictaDuo-Cloud-Recognition": "cloud-v1",
+        "X-DictaDuo-Features": "features-v1",
+        "X-DictaDuo-Language": "language-v2",
+        "X-DictaDuo-Generation-Retry": "retry-v1",
+        ...(owner ? { "X-DictaDuo-Capture-Owner": owner } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -258,9 +258,9 @@ export class API {
       headers: {
         Authorization: `Bearer ${this.token}`,
         Accept: "application/x-ndjson",
-        "X-SottoDuo-Recognition-Engine": "engine-v1",
-        "X-SottoDuo-Microphone-Sharing": "sharing-v1",
-        "X-SottoDuo-Language": "language-v2",
+        "X-DictaDuo-Recognition-Engine": "engine-v1",
+        "X-DictaDuo-Microphone-Sharing": "sharing-v1",
+        "X-DictaDuo-Language": "language-v2",
       },
     });
     if (!response.ok || !response.body) {

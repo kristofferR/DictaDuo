@@ -22,8 +22,8 @@ export interface ServerConfiguration {
   button?: { helper: string; sourceID: string };
 }
 
-export const usage = `SottoDuo server — independent dictation service
-sottoduo-server --data-dir PATH --speech-helper PATH --speech-model PATH --vad-model PATH \
+export const usage = `DictaDuo server — independent dictation service
+dictaduo-server --data-dir PATH --speech-helper PATH --speech-model PATH --vad-model PATH \
   --proof-helper PATH --proof-model PATH [--parakeet-model PATH] [--host 127.0.0.1] [--port 8391] \
   [--token-file PATH] [--dev]
 
@@ -66,7 +66,7 @@ export async function parseConfiguration(
   environment: NodeJS.ProcessEnv = process.env,
 ) {
   const options = new Map<string, string>();
-  let development = environment.SOTTODUO_DEV === "1";
+  let development = environment.DICTADUO_DEV === "1";
   for (let index = 0; index < args.length; index++) {
     const argument = args[index]!;
     if (argument === "--dev") {
@@ -96,13 +96,13 @@ export async function parseConfiguration(
     const raw = value(name, variable);
     return raw ? expandPath(raw) : undefined;
   };
-  const rawPort = value("port", "SOTTODUO_SERVER_PORT") ?? "8391";
+  const rawPort = value("port", "DICTADUO_SERVER_PORT") ?? "8391";
   const port = Number(rawPort);
   if (!/^\d+$/.test(rawPort) || !Number.isSafeInteger(port) || port < 1 || port > 65535) {
     throw new Error("Port must be between 1 and 65535.");
   }
   let token: string | undefined;
-  const tokenFile = value("token-file", "SOTTODUO_SERVER_TOKEN_FILE");
+  const tokenFile = value("token-file", "DICTADUO_SERVER_TOKEN_FILE");
   if (tokenFile) {
     const file = await open(
       expandPath(tokenFile),
@@ -122,13 +122,13 @@ export async function parseConfiguration(
     if (!token || /\s/u.test(token))
       throw new Error("The server token must be nonempty and contain no whitespace.");
   }
-  const host = value("host", "SOTTODUO_SERVER_HOST") ?? "127.0.0.1";
+  const host = value("host", "DICTADUO_SERVER_HOST") ?? "127.0.0.1";
   if (!isLoopbackHost(host) && Buffer.byteLength(token ?? "") < 32) {
     throw new Error(
       "Listening beyond localhost requires a token file containing at least 32 characters. Use HTTPS or a private encrypted network for remote connections.",
     );
   }
-  const keyFile = value("soniox-key-file", "SOTTODUO_SONIOX_KEY_FILE");
+  const keyFile = value("soniox-key-file", "DICTADUO_SONIOX_KEY_FILE");
   const apiKey = keyFile
     ? new TextDecoder("utf-8", { fatal: true })
         .decode(await readRegularFile(expandPath(keyFile), 4096))
@@ -138,10 +138,10 @@ export async function parseConfiguration(
     throw new Error(
       "The Soniox key must be nonempty, without whitespace, and fit within 4096 bytes.",
     );
-  const captureHelper = value("capture-helper", "SOTTODUO_CAPTURE_HELPER");
-  const captureHostID = value("capture-host-id", "SOTTODUO_CAPTURE_HOST_ID");
-  const buttonHelper = value("button-helper", "SOTTODUO_BUTTON_HELPER");
-  const buttonSourceID = value("button-source-id", "SOTTODUO_BUTTON_SOURCE_ID");
+  const captureHelper = value("capture-helper", "DICTADUO_CAPTURE_HELPER");
+  const captureHostID = value("capture-host-id", "DICTADUO_CAPTURE_HOST_ID");
+  const buttonHelper = value("button-helper", "DICTADUO_BUTTON_HELPER");
+  const buttonSourceID = value("button-source-id", "DICTADUO_BUTTON_SOURCE_ID");
   if (
     (buttonHelper || buttonSourceID) &&
     (!captureHelper || !buttonHelper || !buttonSourceID || !/^[a-f0-9]{64}$/.test(buttonSourceID))
@@ -176,14 +176,14 @@ export async function parseConfiguration(
     port,
     token,
     development,
-    dataDirectory: path("data-dir", "SOTTODUO_SERVER_DATA_DIR"),
+    dataDirectory: path("data-dir", "DICTADUO_SERVER_DATA_DIR"),
     inference: createInferenceConfiguration({
-      speechHelper: path("speech-helper", "SOTTODUO_ENGINE_PATH"),
-      speechModel: path("speech-model", "SOTTODUO_SPEECH_MODEL"),
-      vadModel: path("vad-model", "SOTTODUO_VAD_PATH"),
-      proofHelper: path("proof-helper", "SOTTODUO_TEXT_ENGINE_PATH"),
-      proofModel: path("proof-model", "SOTTODUO_TEXT_MODEL"),
-      parakeetModel: optionalPath("parakeet-model", "SOTTODUO_PARAKEET_MODEL"),
+      speechHelper: path("speech-helper", "DICTADUO_ENGINE_PATH"),
+      speechModel: path("speech-model", "DICTADUO_SPEECH_MODEL"),
+      vadModel: path("vad-model", "DICTADUO_VAD_PATH"),
+      proofHelper: path("proof-helper", "DICTADUO_TEXT_ENGINE_PATH"),
+      proofModel: path("proof-model", "DICTADUO_TEXT_MODEL"),
+      parakeetModel: optionalPath("parakeet-model", "DICTADUO_PARAKEET_MODEL"),
     }),
   } satisfies ServerConfiguration;
 }

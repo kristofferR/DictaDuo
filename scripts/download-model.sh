@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Usage: download-model.sh [whisper|parakeet]. Parakeet is an optional second engine.
-model_dir="${SOTTODUO_MODEL_DIR:-${MURMUR_MODEL_DIR:-$HOME/Library/Application Support/Murmur/Models}}"
+model_dir="${DICTADUO_MODEL_DIR:-${MURMUR_MODEL_DIR:-$HOME/Library/Application Support/Murmur/Models}}"
 case "${1:-whisper}" in
     whisper)
         label="Whisper large-v3-turbo (1.62 GB)"
