@@ -418,7 +418,8 @@ struct HistoryPage: View {
                                 .help("Keep recording into this take.")
                         }
                         Button("Discard", role: .destructive) { pendingDiscardID = selected.id }
-                    } else {
+                    } else if selected.capture == nil {
+                        // A server-microphone take needs its owner's secret, which only that computer holds.
                         Button("Discard", role: .destructive) { confirmingDelete = true }
                             .disabled(controller.serverHealth == nil)
                     }

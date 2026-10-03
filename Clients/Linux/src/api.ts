@@ -121,7 +121,8 @@ export class API {
         "POST",
         undefined,
         undefined,
-        15_000,
+        // A finished take's saved audio is verified before the retry starts.
+        120_000,
       ),
     );
   }
