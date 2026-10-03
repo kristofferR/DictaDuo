@@ -55,7 +55,19 @@ ApplicationWindow {
     // The dictation shortcut, named on buttons, the overlay and the tray.
     readonly property string dictationKey: (portalShortcuts.plasma ? portalShortcuts.trigger : shortcut.key) || ""
     // Whether Start dictation can be offered, from the window or the tray.
-    readonly property bool canStart: bridge.connected && !snapshot.setupRequired && !shortcutBlocked && !microphoneTestActive
+    readonly property bool canStart: bridge.connected && serverReady && !snapshot.setupRequired && !shortcutBlocked && !microphoneTestActive
+    // The window takes focus from the field being dictated into, so it steps aside first.
+    function startFromWindow() {
+        if (!canStart)
+            return;
+        app.hide();
+        windowStart.restart();
+    }
+    Timer {
+        id: windowStart
+        interval: 300
+        onTriggered: bridge.request("start")
+    }
     readonly property string fallbackNote: activity.cloudUnavailable ? "Using local recognition (cloud unavailable)" : ""
     // Whole seconds left to undo a cancel; steps once per second, no continuous repaint.
     property int undoSeconds: 0

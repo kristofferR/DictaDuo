@@ -1212,7 +1212,8 @@ private slots:
     auto *headline = item("dictationHeadline");
     auto *fallback = item("recognitionFallback");
     QVERIFY(start && finish && cancel && undo && headline && fallback);
-    QVERIFY(start->isVisible() && start->isEnabled());
+    // Start waits for the server to report ready.
+    QTRY_VERIFY(start->isVisible() && start->isEnabled());
     QVERIFY(!finish->isVisible() && !cancel->isVisible() && !undo->isVisible());
     QSignalSpy failed(&bridge, &Bridge::failed);
     QVERIFY(QMetaObject::invokeMethod(start, "clicked"));

@@ -97,7 +97,9 @@ ColumnLayout {
             text: "Start dictation"
             visible: root.ui.canStartTake
             enabled: root.ui.canStart
-            onClicked: bridge.request("start")
+            ToolTip.visible: hovered
+            ToolTip.text: "Hides this window so the text goes into the field you were using."
+            onClicked: root.ui.startFromWindow()
         }
         SButton {
             objectName: "finishDictationButton"
