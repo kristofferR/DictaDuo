@@ -97,8 +97,11 @@ ColumnLayout {
             return { label: "Couldn't transcribe", tone: "error", detail: "" };
         if (record.status === "cancelled")
             return deliveryStatus("cancelled");
+        // A microphone test is never pasted; its receipt says "none".
+        if (record.mode === "test")
+            return deliveryStatus("tested");
         // List summaries of recording sessions carry no delivery receipt.
-        return deliveryStatus(record.delivery ? record.delivery.status : "") || (record.mode === "test" ? deliveryStatus("tested") : { label: "Done", tone: "neutral", detail: "" });
+        return deliveryStatus(record.delivery ? record.delivery.status : "") || { label: "Done", tone: "neutral", detail: "" };
     }
 
     function languageName(code) {

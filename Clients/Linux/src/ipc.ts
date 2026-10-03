@@ -95,8 +95,9 @@ export async function serve(
                 socket.setTimeout(65_000, () => socket.destroy());
               else if (request.action === "deleteHistory")
                 socket.setTimeout(70_000, () => socket.destroy());
+              // Longer than the retry request itself, which verifies a finished take's audio.
               else if (request.action === "retryHistory")
-                socket.setTimeout(18_000, () => socket.destroy());
+                socket.setTimeout(122_000, () => socket.destroy());
               else if (request.action === "saveShortcut")
                 socket.setTimeout(30_000, () => socket.destroy());
             }
