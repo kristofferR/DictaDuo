@@ -127,6 +127,7 @@ struct ServerPreferencesPage: View {
     @State private var base: PreferencesSnapshot?
     @State private var expandedLists = Set<String>()
     @State private var listPendingRemoval: String?
+    @State private var showingModelDetails = false
 
     private var dirty: Bool { base.map { draft != $0.preferences } ?? false }
     /// The draft as saved. One replacement phrase per line: blank lines are editing leftovers, not phrases.
@@ -148,17 +149,35 @@ struct ServerPreferencesPage: View {
     private var engineChoice: Bool {
         draft.recognitionEngine != nil && (controller.serverHealth?.recognitionEngines?.count ?? 0) > 1
     }
+    /// Status rows describe the saved preferences, not the unsaved draft.
+    private var modelsLoading: Bool {
+        guard let health = controller.serverHealth else { return false }
+        let cleanupEnabled = controller.sharedPreferences?.preferences.textCorrectionEnabled ?? true
+        return ServerModelStatus(health.speech, health: health) == .loading
+            || ServerModelStatus(health.proofreading, health: health, enabled: cleanupEnabled) == .loading
+    }
+    private var savedLocalEngineName: String {
+        let saved = controller.sharedPreferences?.preferences.recognitionEngine == .parakeet && installedEngines.contains(.parakeet)
+        return saved ? "Parakeet v3" : "Whisper large-v3-turbo"
+    }
+    /// Older servers reject Norwegian, so it is offered only when the server lists it.
+    private var languageOptions: [(String, String)] {
+        let norwegian = controller.serverHealth?.features?.contains("language-no") == true || draft.language == "no"
+        return languages.filter { $0.1 != "no" || norwegian }
+    }
     private var installedEngines: [RecognitionEngine] { controller.serverHealth?.recognitionEngines ?? [] }
     /// Recognition runs locally with Parakeet, which ignores language and vocabulary.
     private var parakeet: Bool { draft.recognitionEngine == .parakeet && installedEngines.contains(.parakeet) }
     private var engine: Binding<RecognitionEngine> {
         Binding { draft.recognitionEngine ?? .whisper } set: { draft.recognitionEngine = $0 }
     }
+    /// Whether Soniox is configured on the server. Nil from an older server.
+    private var cloudAvailable: Bool? { controller.serverHealth?.cloudRecognition }
     private let languages = [
         ("English", "en"), ("Detect automatically", "auto"), ("Spanish", "es"), ("French", "fr"),
         ("German", "de"), ("Italian", "it"), ("Portuguese", "pt"), ("Dutch", "nl"), ("Japanese", "ja"),
         ("Chinese", "zh"), ("Korean", "ko"), ("Hindi", "hi"), ("Arabic", "ar"), ("Polish", "pl"),
-        ("Russian", "ru"), ("Ukrainian", "uk"), ("Swedish", "sv")
+        ("Russian", "ru"), ("Ukrainian", "uk"), ("Swedish", "sv"), ("Norwegian", "no")
     ]
 
 
@@ -203,18 +222,14 @@ struct ServerPreferencesPage: View {
             Form {
                 if let health = controller.serverHealth {
                     Section {
-                        runtimeRow("Voice", runtime: health.speech)
-                        runtimeRow("Text cleanup", runtime: health.proofreading)
+                        modelsGroup(health)
                     } header: { Text("Server models").textCase(nil) }
                 }
                 Section {
-                    Picker("Speech recognition", selection: $draft.recognitionMode) {
-                        Text("Automatic (Soniox, with local fallback)").tag(RecognitionMode.automatic)
-                        Text("Cloud only (Soniox)").tag(RecognitionMode.cloud)
-                        Text("Local only").tag(RecognitionMode.local)
+                    VStack(alignment: .leading, spacing: 4) {
+                        recognitionModePicker
+                        if let modeCaption { caption(modeCaption) }
                     }
-                    .help("Automatic uses Soniox when configured on the server. Local only never sends audio to Soniox.")
-                    .accessibilityIdentifier("preferences.recognition-mode")
                     if engineChoice {
                         VStack(alignment: .leading, spacing: 4) {
                             Picker("Local engine", selection: engine) {
@@ -223,20 +238,27 @@ struct ServerPreferencesPage: View {
                             }
                             .accessibilityIdentifier("preferences.recognition-engine")
                             caption(parakeet
-                                ? "Faster. Detects 25 European languages on its own, not Norwegian, and ignores recognition vocabulary."
-                                : "Slower. Follows the Language setting and uses recognition vocabulary.")
+                                ? "Faster, but covers 25 European languages (not Norwegian) and ignores recognition vocabulary."
+                                : "Parakeet v3 is faster but covers 25 European languages (not Norwegian) and ignores recognition vocabulary.")
                         }
                     } else if installedEngines.count == 1 {
                         VStack(alignment: .leading, spacing: 4) {
-                            LabeledContent("Local engine", value: installedEngines[0] == .parakeet ? "Parakeet v3" : "Whisper large-v3-turbo")
-                            caption("The only engine installed on the server.")
+                            LabeledContent("Local engine",
+                                           value: "\(installedEngines[0] == .parakeet ? "Parakeet v3" : "Whisper large-v3-turbo") (only engine installed)")
+                            if installedEngines[0] == .whisper {
+                                caption("Install Parakeet on the server to choose it. It is faster but covers 25 European languages (not Norwegian) and ignores recognition vocabulary.")
+                            }
                         }
                     }
                     VStack(alignment: .leading, spacing: 4) {
                         Picker("Language", selection: $draft.language) {
-                            ForEach(languages, id: \.1) { name, code in Text(name).tag(code) }
+                            ForEach(languageOptions, id: \.1) { name, code in Text(name).tag(code) }
                         }
-                        if parakeet { caption("Used for cloud recognition. Parakeet detects the language itself.") }
+                        if parakeet {
+                            caption(draft.language == "no"
+                                ? "Parakeet does not recognize Norwegian. Choose Whisper as the local engine for Norwegian."
+                                : "Used for cloud recognition. Parakeet detects the language itself.")
+                        }
                     }
                     Toggle("Clean up text after transcribing", isOn: $draft.textCorrectionEnabled)
                     VStack(alignment: .leading, spacing: 8) {
@@ -292,6 +314,13 @@ struct ServerPreferencesPage: View {
         .onAppear {
             loadLatest()
             controller.refreshServer()
+        }
+        // Warm-up sends no event, so keep checking while a model is still loading.
+        .task(id: modelsLoading) {
+            while modelsLoading, !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(3)) } catch { return }
+                controller.refreshServer()
+            }
         }
         .onChange(of: controller.sharedPreferences) { old, latest in
             if base == nil || !dirty || latest?.preferences == draft {
@@ -376,24 +405,134 @@ struct ServerPreferencesPage: View {
         }
     }
 
-    private func runtimeRow(_ title: String, runtime: ModelRuntimeInfo) -> some View {
-        LabeledContent(title) {
-            HStack(spacing: 8) {
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(runtime.modelID).lineLimit(1)
-                    Text(runtime.message ?? runtime.backend)
-                        .font(.caption)
-                        .foregroundStyle(SottoDuoPalette.muted)
-                        .lineLimit(2)
+    @ViewBuilder private var recognitionModePicker: some View {
+        if let cloud = cloudAvailable {
+            Picker("Recognition mode", selection: $draft.recognitionMode) {
+                Text("Automatic").tag(RecognitionMode.automatic)
+                Text(cloud ? "Cloud only" : "Cloud only (needs a Soniox API key on the server)")
+                    .tag(RecognitionMode.cloud)
+                    .disabled(!cloud)
+                Text("Local only").tag(RecognitionMode.local)
+            }
+            .accessibilityIdentifier("preferences.recognition-mode")
+        } else {
+            // An older server does not report whether Soniox is configured.
+            Picker("Recognition mode", selection: $draft.recognitionMode) {
+                Text("Automatic (Soniox, with local fallback)").tag(RecognitionMode.automatic)
+                Text("Cloud only (Soniox)").tag(RecognitionMode.cloud)
+                Text("Local only").tag(RecognitionMode.local)
+            }
+            .help("Automatic uses Soniox when configured on the server. Local only never sends audio to Soniox.")
+            .accessibilityIdentifier("preferences.recognition-mode")
+        }
+    }
+
+    /// What the selected mode does on this server; engine names live here, not in the labels.
+    private var modeCaption: String? {
+        guard let cloud = cloudAvailable else { return nil }
+        switch draft.recognitionMode {
+        case .automatic: return cloud ? "Uses Soniox, with local fallback." : "Local only until a Soniox key is added."
+        case .cloud: return cloud ? "Uses Soniox, with no local fallback." : "Needs a Soniox API key on the server."
+        case .local: return "Audio never leaves your server."
+        }
+    }
+
+    @ViewBuilder private func modelsGroup(_ health: ServerHealth) -> some View {
+        let cleanupEnabled = controller.sharedPreferences?.preferences.textCorrectionEnabled ?? true
+        // In Automatic mode with Soniox configured, speech readiness describes the
+        // local engine (the cloud row covers Soniox); Cloud only reports Soniox itself.
+        let localReadiness = health.speech.backend.hasPrefix("soniox")
+            && controller.sharedPreferences?.preferences.recognitionMode != .cloud
+        modelRow("Speech recognition", name: localReadiness ? savedLocalEngineName : health.speech.friendlyName,
+                 status: ServerModelStatus(health.speech, health: health))
+        modelRow("Text cleanup", name: health.proofreading.friendlyName,
+                 status: ServerModelStatus(health.proofreading, health: health, enabled: cleanupEnabled))
+        if let cloud = health.cloudRecognition {
+            LabeledContent("Cloud recognition") {
+                VStack(alignment: .trailing, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("Soniox")
+                        ModelStatusDot(status: cloud ? .ready : .off)
+                        Text(cloud ? "On" : "Off").foregroundStyle(SottoDuoPalette.muted)
+                    }
+                    if !cloud { caption("No API key on the server") }
                 }
-                StatusDot(color: runtime.ready ? SottoDuoPalette.success : SottoDuoPalette.warning)
             }
         }
+        DisclosureGroup("Model details", isExpanded: $showingModelDetails) {
+            Text(modelDetails(health))
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(SottoDuoPalette.muted)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityIdentifier("preferences.model-details")
+    }
+
+    private func modelRow(_ title: String, name: String, status: ServerModelStatus) -> some View {
+        LabeledContent(title) {
+            HStack(spacing: 6) {
+                Text(name).lineLimit(1)
+                ModelStatusDot(status: status)
+                Text(status.rawValue).foregroundStyle(SottoDuoPalette.muted)
+            }
+        }
+    }
+
+    /// Exact model IDs and backends, as the server reports them.
+    private func modelDetails(_ health: ServerHealth) -> String {
+        var lines = [health.speech, health.proofreading].map { runtime in
+            ([runtime.modelID, runtime.backend] + [runtime.message].compactMap { $0 }).joined(separator: " · ")
+        }
+        if let cloud = health.cloudRecognition {
+            lines.append("soniox/websocket · " + (cloud ? "API key configured" : "no API key"))
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func loadLatest() {
         guard let snapshot = controller.sharedPreferences else { return }
         base = snapshot
         draft = snapshot.preferences
+    }
+}
+
+/// A plain status for a server model, derived from its health runtime.
+enum ServerModelStatus: String {
+    case ready = "Ready", loading = "Loading", off = "Off", unavailable = "Unavailable"
+
+    init(_ runtime: ModelRuntimeInfo, health: ServerHealth, enabled: Bool = true) {
+        if !enabled { self = .off }
+        else if runtime.ready { self = .ready }
+        // The server reports warm-up in these messages.
+        else if [runtime.message, health.message].contains(where: { $0?.hasPrefix("Loading") == true }) { self = .loading }
+        else { self = .unavailable }
+    }
+}
+
+extension ModelRuntimeInfo {
+    /// A friendly model name. The exact ID stays in Model details.
+    var friendlyName: String {
+        if backend.hasPrefix("soniox") { return "Soniox" }
+        if modelID.hasPrefix("whisper-large-v3-turbo") { return "Whisper large-v3-turbo" }
+        if modelID.hasPrefix("parakeet-tdt-0.6b-v3") { return "Parakeet v3" }
+        if modelID.hasPrefix("Qwen3-4B") { return "Qwen3 4B" }
+        return modelID
+    }
+}
+
+private struct ModelStatusDot: View {
+    var status: ServerModelStatus
+
+    var body: some View {
+        switch status {
+        case .ready: StatusDot(color: SottoDuoPalette.success)
+        case .loading, .unavailable: StatusDot(color: SottoDuoPalette.warning)
+        case .off:
+            Circle()
+                .stroke(SottoDuoPalette.muted, lineWidth: 1.5)
+                .frame(width: 6, height: 6)
+                .accessibilityHidden(true)
+        }
     }
 }

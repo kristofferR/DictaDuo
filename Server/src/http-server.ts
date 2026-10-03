@@ -61,6 +61,8 @@ const artifactName = (value: string) => {
 };
 
 type IDParams = { id: string };
+export const languageV2 = (request: FastifyRequest) =>
+  request.headers["x-sottoduo-language"] === "language-v2";
 // v1 clients generated before streaming reject unknown fields, even optional ones.
 const encodeFor = (request: FastifyRequest) => {
   const path = request.url.split("?")[0]!;
@@ -91,6 +93,8 @@ const encodeFor = (request: FastifyRequest) => {
         return undefined;
       if (key === "features" && request.headers["x-sottoduo-features"] !== "features-v1")
         return undefined;
+      // Older clients decode the language list strictly and predate Norwegian.
+      if (key === "language" && item === "no" && !languageV2(request)) return "auto";
       if (
         (key === "recognitionMode" || key === "recognition") &&
         request.headers["x-sottoduo-recognition"] !== "streaming-v1"
@@ -237,9 +241,17 @@ export function createHTTPServer(
     service.buttons.unregister(identifier(request.params.id), destinationOwner(request)),
   );
   app.get("/v1/preferences", () => service.getPreferences());
-  app.put("/v1/preferences", (request) =>
-    service.updatePreferences(validateBody("PreferencesSnapshot", request.body)),
-  );
+  app.put("/v1/preferences", async (request) => {
+    const update = validateBody("PreferencesSnapshot", request.body);
+    // An older client shows Norwegian as "auto"; saving that must not change it.
+    if (
+      !languageV2(request) &&
+      update.preferences.language === "auto" &&
+      (await service.getPreferences()).preferences.language === "no"
+    )
+      update.preferences.language = "no";
+    return service.updatePreferences(update);
+  });
   app.post("/v1/generations", async (request, reply) => {
     const record = await service.create(validateBody("CreateGenerationRequest", request.body));
     return reply.code(201).send(record);

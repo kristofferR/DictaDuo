@@ -378,7 +378,7 @@ export class GenerationService {
         apiVersion: API_VERSION,
         generationRetry: true,
         cloudRecognition: !!this.configuration.soniox,
-        features: ["retry-completed"],
+        features: ["retry-completed", "language-no"],
         recognitionEngines: [...this.engines],
         serverVersion: "0.1.0",
         isDev: this.configuration.development,
@@ -400,7 +400,9 @@ export class GenerationService {
           message: this.preferences.preferences.textCorrectionEnabled
             ? state.proofLoaded
               ? undefined
-              : "Unavailable. Text is kept as transcribed."
+              : this.warming
+                ? "Loading…"
+                : "Unavailable. Text is kept as transcribed."
             : "Disabled",
         },
         message,

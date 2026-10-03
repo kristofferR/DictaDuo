@@ -1184,6 +1184,7 @@ components:
           description: "Request this field with X-SottoDuo-Recognition-Engine: engine-v1. Missing values select Whisper; updates that omit it keep the server's selection."
         language:
           type: "string"
+          description: "Norwegian (no) is sent only to clients that send X-SottoDuo-Language: language-v2; others see auto, and saving auto keeps Norwegian."
           enum:
             - "en"
             - "auto"
@@ -1202,6 +1203,7 @@ components:
             - "ru"
             - "uk"
             - "sv"
+            - "no"
         proofreadingPrompt:
           type: "string"
           minLength: 1

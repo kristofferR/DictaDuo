@@ -47,14 +47,18 @@ const maximumPayloadBytes = Math.max(
 const heartbeatInterval = 30_000;
 const progressInterval = 500;
 
-// Engine fields postdate the v2 schemas, which older clients decode strictly.
-const encodeFor = (request: FastifyRequest) =>
-  request.headers["x-sottoduo-recognition-engine"] === "engine-v1"
-    ? (value: unknown) => JSON.stringify(value)
-    : (value: unknown) =>
-        JSON.stringify(value, (key, item) =>
-          key === "recognitionEngine" || key === "recognitionEngines" ? undefined : item,
-        );
+// Engine fields and Norwegian postdate the v2 schemas, which older clients decode strictly.
+const encodeFor = (request: FastifyRequest) => {
+  const engines = request.headers["x-sottoduo-recognition-engine"] === "engine-v1";
+  const norwegian = request.headers["x-sottoduo-language"] === "language-v2";
+  return (value: unknown) =>
+    JSON.stringify(value, (key, item) => {
+      if (!engines && (key === "recognitionEngine" || key === "recognitionEngines"))
+        return undefined;
+      if (!norwegian && key === "language" && item === "no") return "auto";
+      return item;
+    });
+};
 type Encode = ReturnType<typeof encodeFor>;
 
 function streamRecording(socket: WebSocket, id: string, service: RecordingService, encode: Encode) {

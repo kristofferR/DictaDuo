@@ -38,6 +38,7 @@ export function preferencesValidationError(preferences: ServerPreferences) {
       "ru",
       "uk",
       "sv",
+      "no",
     ].includes(preferences.language)
   )
     return "Choose a supported language.";

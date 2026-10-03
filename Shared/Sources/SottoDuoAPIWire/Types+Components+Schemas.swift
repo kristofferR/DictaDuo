@@ -323,6 +323,8 @@ extension Components {
             ///
             /// - Remark: Generated from `#/components/schemas/ServerPreferences/recognitionEngine`.
             public var recognitionEngine: Components.Schemas.RecognitionEngine?
+            /// Norwegian (no) is sent only to clients that send X-SottoDuo-Language: language-v2; others see auto, and saving auto keeps Norwegian.
+            ///
             /// - Remark: Generated from `#/components/schemas/ServerPreferences/language`.
             @frozen public enum LanguagePayload: String, Codable, Hashable, Sendable, CaseIterable {
                 case en = "en"
@@ -342,7 +344,10 @@ extension Components {
                 case ru = "ru"
                 case uk = "uk"
                 case sv = "sv"
+                case no = "no"
             }
+            /// Norwegian (no) is sent only to clients that send X-SottoDuo-Language: language-v2; others see auto, and saving auto keeps Norwegian.
+            ///
             /// - Remark: Generated from `#/components/schemas/ServerPreferences/language`.
             public var language: Components.Schemas.ServerPreferences.LanguagePayload
             /// Missing values use the built-in cleanup prompt; maximum UTF-8 size is 4096 bytes.
@@ -364,7 +369,7 @@ extension Components {
             /// - Parameters:
             ///   - recognitionMode:
             ///   - recognitionEngine: Request this field with X-SottoDuo-Recognition-Engine: engine-v1. Missing values select Whisper; updates that omit it keep the server's selection.
-            ///   - language:
+            ///   - language: Norwegian (no) is sent only to clients that send X-SottoDuo-Language: language-v2; others see auto, and saving auto keeps Norwegian.
             ///   - proofreadingPrompt: Missing values use the built-in cleanup prompt; maximum UTF-8 size is 4096 bytes.
             ///   - vocabulary: Maximum UTF-8 size is 16384 bytes.
             ///   - dictionary:

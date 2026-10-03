@@ -19,10 +19,15 @@ public enum SottoDuoHTTPServer {
     public static func makeRouter(service: GenerationService, token: String? = nil) -> Router<BasicRequestContext> {
         let router = Router()
         router.add(middleware: ServerMiddleware(token: token))
-        router.get("/v1/health") { _, _ in try json(await service.health()) }
+        router.get("/v1/health") { request, _ in try json(await service.health(), request: request) }
         router.get("/v1/preferences") { request, _ in try json(await service.getPreferences(), request: request) }
         router.put("/v1/preferences") { request, _ in
-            let update = try await decode(PreferencesSnapshot.self, request: request)
+            var update = try await decode(PreferencesSnapshot.self, request: request)
+            // An older client shows Norwegian as automatic; saving that keeps Norwegian.
+            if !languageV2(request), update.preferences.language == "auto",
+               await service.getPreferences().preferences.language == "no" {
+                update.preferences.language = "no"
+            }
             return try json(await service.updatePreferences(update), request: request)
         }
         router.post("/v1/generations") { request, _ in
@@ -127,13 +132,25 @@ public enum SottoDuoHTTPServer {
         catch { throw ServiceError(400, "invalid_json", "The request did not contain valid \(String(describing: type)) JSON.") }
     }
 
-    // Old generated v1 decoders reject the optional recognition fields.
+    private static func languageV2(_ request: Request?) -> Bool {
+        request?.headers[.init("X-SottoDuo-Language")!] == "language-v2"
+    }
+
+    // Old generated decoders reject the optional recognition fields and Norwegian.
     private static func encodeResponse<T: Encodable>(_ value: T, request: Request?) throws -> Data {
         let data = try SottoDuoAPI.encoder().encode(value)
-        if request?.headers[.init("X-SottoDuo-Recognition")!] == "streaming-v1" { return data }
+        let streaming = request?.headers[.init("X-SottoDuo-Recognition")!] == "streaming-v1"
+        let norwegian = languageV2(request)
+        let cloud = request?.headers[.init("X-SottoDuo-Cloud-Recognition")!] == "cloud-v1"
+        let features = request?.headers[.init("X-SottoDuo-Features")!] == "features-v1"
+        if streaming && norwegian && cloud && features { return data }
         func legacy(_ value: Any) -> Any {
-            if let object = value as? [String: Any] {
-                return object.filter { $0.key != "recognitionMode" && $0.key != "recognition" }.mapValues(legacy)
+            if var object = value as? [String: Any] {
+                if !streaming { object = object.filter { $0.key != "recognitionMode" && $0.key != "recognition" } }
+                if !norwegian, object["language"] as? String == "no" { object["language"] = "auto" }
+                if !cloud { object.removeValue(forKey: "cloudRecognition") }
+                if !features { object.removeValue(forKey: "features") }
+                return object.mapValues(legacy)
             }
             if let array = value as? [Any] { return array.map(legacy) }
             return value

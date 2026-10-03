@@ -87,9 +87,10 @@ final class APIWireTests: XCTestCase {
                        .parakeet)
         let health = ServerHealth(ready: true, speech: .init(modelID: "parakeet-tdt-0.6b-v3", backend: "local", ready: true),
                                   proofreading: .init(modelID: "qwen", backend: "local", ready: true),
-                                  recognitionEngines: [.whisper, .parakeet])
-        XCTAssertEqual(try SottoDuoAPI.decodeWire(ServerHealth.self, from: SottoDuoAPI.encodeWire(health)).recognitionEngines,
-                       [.whisper, .parakeet])
+                                  recognitionEngines: [.whisper, .parakeet], cloudRecognition: false)
+        let decoded = try SottoDuoAPI.decodeWire(ServerHealth.self, from: SottoDuoAPI.encodeWire(health))
+        XCTAssertEqual(decoded.recognitionEngines, [.whisper, .parakeet])
+        XCTAssertEqual(decoded.cloudRecognition, false)
     }
 
     func testCompleteGenerationRoundTripsThroughGeneratedTypes() throws {

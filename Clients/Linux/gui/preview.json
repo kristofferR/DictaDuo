@@ -164,17 +164,19 @@
   },
   "connection": {
     "ready": true,
-    "recognitionEngines": ["whisper", "parakeet"],
+    "message": "Server ready.",
+    "cloudRecognition": false,
+    "recognitionEngines": ["whisper"],
     "speech": {
-      "modelID": "stt-rt-v5",
-      "backend": "soniox/websocket",
-      "ready": true,
-      "message": "Cloud configured; connection checked per recording."
+      "modelID": "whisper-large-v3-turbo",
+      "backend": "whisper.cpp",
+      "ready": true
     },
     "proofreading": {
       "modelID": "Qwen3-4B-Instruct-2507",
       "backend": "llama.cpp",
-      "ready": true
+      "ready": false,
+      "message": "Loading…"
     }
   },
   "sources": {

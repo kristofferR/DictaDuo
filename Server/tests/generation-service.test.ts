@@ -4,11 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { GenerationService } from "../src/generation-service.ts";
+import { createHTTPServer } from "../src/http-server.ts";
 import type { InferenceBackend } from "../src/inference/native-inference.ts";
 import { InferenceError } from "../src/inference/inference-error.ts";
+import { validateBody } from "../src/validation.ts";
 
 class FakeInference implements InferenceBackend {
   failProof = false;
+  languages: string[] = [];
   blocked = false;
   text = "Hello Codex.";
   readiness() {
@@ -24,11 +27,12 @@ class FakeInference implements InferenceBackend {
   }
   async transcribe(
     _path: string,
-    _language: string,
+    language: string,
     _terms: string[],
     progress?: (value: number) => void,
     signal?: AbortSignal,
   ) {
+    this.languages.push(language);
     if (this.blocked)
       await new Promise<void>((_resolve, reject) => {
         if (signal?.aborted) reject(new Error("Cancelled"));
@@ -107,6 +111,59 @@ test("repeated requests return the same frozen generation while new recordings a
   await expect(service.updatePreferences(preferences)).rejects.toMatchObject({
     code: "stale_preferences",
   });
+});
+test('Norwegian is a supported language and reaches recognition as "no"', async () => {
+  const { service, inference } = await setup();
+  const preferences = await service.getPreferences();
+  preferences.preferences.language = "no";
+  expect(validateBody("ServerPreferences", preferences.preferences).language).toBe("no");
+  await service.updatePreferences(preferences);
+  expect((await service.getPreferences()).preferences.language).toBe("no");
+  const record = await upload(service);
+  await service.finish(record.id, { inferenceFrames: 4000 });
+  expect((await completed(service, record.id)).status).toBe("completed");
+  expect(inference.languages).toEqual(["no"]);
+});
+test("older clients see Norwegian as automatic and cannot overwrite it", async () => {
+  const { service } = await setup();
+  const app = createHTTPServer(service);
+  const preferences = await service.getPreferences();
+  preferences.preferences.language = "no";
+  await service.updatePreferences(preferences);
+  const v2 = { "x-sottoduo-language": "language-v2" };
+  expect(
+    (await app.inject({ url: "/v1/preferences", headers: v2 })).json().preferences.language,
+  ).toBe("no");
+  const legacy = (await app.inject({ url: "/v1/preferences" })).json();
+  expect(legacy.preferences.language).toBe("auto");
+  // Saving what an older client was shown keeps Norwegian.
+  const saved = await app.inject({ method: "PUT", url: "/v1/preferences", payload: legacy });
+  expect(saved.statusCode).toBe(200);
+  expect((await service.getPreferences()).preferences.language).toBe("no");
+  await app.close();
+});
+test("health reports text cleanup as loading while warm-up loads it", async () => {
+  let loaded!: () => void;
+  const gate = new Promise<void>((resolve) => (loaded = resolve));
+  const inference = new (class extends FakeInference {
+    proofLoaded = false;
+    override async readiness() {
+      return { ...(await super.readiness()), proofLoaded: this.proofLoaded };
+    }
+    override async warmUp() {
+      await gate;
+      this.proofLoaded = true;
+    }
+  })();
+  const { service } = await setup(inference);
+  expect((await service.health()).proofreading).toMatchObject({
+    ready: false,
+    message: "Loading…",
+  });
+  loaded();
+  for (let attempt = 0; !(await service.health()).proofreading.ready && attempt < 50; attempt++)
+    await Bun.sleep(10);
+  expect((await service.health()).proofreading).toMatchObject({ ready: true, message: undefined });
 });
 test("generation timestamps retain milliseconds for cross-device ordering", async () => {
   const { service } = await setup();
