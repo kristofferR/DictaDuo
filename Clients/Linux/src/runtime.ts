@@ -41,7 +41,8 @@ export class ClientRuntime {
     controller = new Controller(api, this.desktop, config.device, config.sources),
   ) {
     controller.captureAllowed = () => !this.changing && !this.shortcuts?.blocked;
-    controller.feedbackVisible = () => Date.now() - this.guiSeenAt < 5000;
+    // The GUI polls every half second, so a closed GUI stops counting within moments.
+    controller.feedbackVisible = () => Date.now() - this.guiSeenAt < 1500;
     controller.output = this.output;
     controller.muteOutput = config.muteOutputWhileRecording;
     const buttons = new ButtonDestinationClient(
