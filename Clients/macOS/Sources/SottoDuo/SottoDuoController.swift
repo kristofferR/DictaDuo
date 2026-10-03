@@ -975,9 +975,17 @@ final class SottoDuoController: ObservableObject {
     }
 
     /// A long recording paused before it finished; only the computer that made it can resume it.
-    /// Processing can fail while a server microphone still records; retry waits for it to stop.
+    /// The server retries a recording session only once its capture has fully stopped.
     func isStillRecording(_ id: UUID) -> Bool {
-        recordingSnapshots[id]?.captureState == .recording
+        guard let state = recordingSnapshots[id]?.captureState else { return false }
+        return state == .recording || state == .interrupted
+    }
+
+    /// Whether History offers Transcribe again for this take on the connected server.
+    func canTranscribeAgain(_ record: GenerationRecord) -> Bool {
+        record.canTranscribeAgain && !isStillRecording(record.id)
+            // Finished takes need a server that lists the addition.
+            && (record.status != .completed || serverHealth?.features?.contains("retry-completed") == true)
     }
 
     func isPausedRecording(_ id: UUID) -> Bool {

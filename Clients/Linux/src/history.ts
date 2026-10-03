@@ -140,8 +140,10 @@ function summary(snapshot: Recording): Entry {
     ...(inferenceAudio ? { inferenceAudio } : {}),
     ...(originalAudio ? { originalAudio } : {}),
     ...(runs ? { originalRuns: runs } : {}),
-    // Processing can fail while a server microphone still records; retry waits for it.
-    ...(snapshot.captureState === "recording" ? { capturing: true } : {}),
+    // The server retries a session only once its capture has fully stopped.
+    ...(snapshot.captureState === "recording" || snapshot.captureState === "interrupted"
+      ? { capturing: true }
+      : {}),
     ...(snapshot.captureState === "interrupted" &&
     !["completed", "failed"].includes(snapshot.processingState)
       ? { paused: true }

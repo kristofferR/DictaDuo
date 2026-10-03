@@ -469,7 +469,8 @@ extension ServerClient {
     }
 
     func retryRecording(_ id: UUID) async throws -> RecordingSnapshot {
-        try await recordingJSON(path: "v2/recordings/\(id)/retry", method: "POST")
+        // A finished take re-indexes its saved audio before the server replies.
+        try await recordingJSON(path: "v2/recordings/\(id)/retry", method: "POST", timeout: 30)
     }
 
     func recordingDelivery(_ id: UUID, receipt: DeliveryReceipt) async throws {

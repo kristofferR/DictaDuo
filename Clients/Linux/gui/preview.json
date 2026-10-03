@@ -166,6 +166,7 @@
     "ready": true,
     "message": "Server ready.",
     "generationRetry": true,
+    "features": ["retry-completed", "language-no"],
     "cloudRecognition": false,
     "recognitionEngines": ["whisper"],
     "speech": {
