@@ -90,11 +90,16 @@ Group {
         // Ready hardware can still be held by another computer's take.
         if (source.recordingFor && source.recordingFor.id !== deviceID)
             return "Busy · " + source.recordingFor.name + " is dictating";
-        if (source.link === "connected")
+        if (receiver.available)
             return place + "transmitter linked";
+        if (!source.present)
+            return place + "receiver unplugged";
         if (source.link === "disconnected")
             return place + "transmitter not linked. Turn it on and link it to the receiver.";
-        return place + "transmitter status unknown";
+        if (source.link !== "connected")
+            return place + "transmitter status unknown";
+        // Linked, but the receiver's audio can't be captured right now.
+        return place + "waiting for the receiver";
     }
     function checkReceiver() {
         if (!bridge.connected || checking)
