@@ -20,6 +20,8 @@ ColumnLayout {
     // A retry request is in flight; `retryingID` is then followed until it settles.
     property bool retryStarting: false
     property string retryingID: ""
+    // The server `retryingID` belongs to; a reconnect to the same server keeps following it.
+    property string retryServer: ""
     // Status reads that failed in a row while following a retry.
     property int retryFailures: 0
     property string audioID: ""
@@ -161,6 +163,7 @@ ColumnLayout {
     function startRetry(id, recordServer) {
         retryStarting = true;
         retryingID = id;
+        retryServer = recordServer;
         retryFailures = 0;
         message = "Starting to transcribe again…";
         bridge.request("retryHistory", {
@@ -408,7 +411,8 @@ ColumnLayout {
                 root.loading = false;
                 root.deleting = false;
                 root.retryStarting = false;
-                root.retryingID = "";
+                if (bridge.connected && server !== root.retryServer)
+                    root.retryingID = "";
                 root.server = server;
                 deleteDialog.close();
                 retryDialog.close();
