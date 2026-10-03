@@ -67,7 +67,7 @@ function parseCursor(before: string): Cursor {
 /** Runs recorded in different formats; the server exports their originals only one at a time. */
 type OriginalRun = { runID: string; byteCount: number };
 /** `paused`: a long recording stopped before it finished; only its own computer can resume it. */
-type Entry = Generation & { originalRuns?: OriginalRun[]; paused?: boolean };
+type Entry = Generation & { originalRuns?: OriginalRun[]; paused?: boolean; capturing?: boolean };
 function originalRuns(snapshot: Recording): OriginalRun[] | undefined {
   const streams = snapshot.streams.filter((stream) => stream.kind === "original");
   const format = streams[0]?.format;
@@ -140,6 +140,8 @@ function summary(snapshot: Recording): Entry {
     ...(inferenceAudio ? { inferenceAudio } : {}),
     ...(originalAudio ? { originalAudio } : {}),
     ...(runs ? { originalRuns: runs } : {}),
+    // Processing can fail while a server microphone still records; retry waits for it.
+    ...(snapshot.captureState === "recording" ? { capturing: true } : {}),
     ...(snapshot.captureState === "interrupted" &&
     !["completed", "failed"].includes(snapshot.processingState)
       ? { paused: true }

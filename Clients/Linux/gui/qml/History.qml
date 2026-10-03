@@ -128,7 +128,7 @@ ColumnLayout {
 
     // The server keeps saved audio for finished, failed and cancelled takes; interrupted ones must be finished first.
     function canRetry(record) {
-        return !!record && !record.importedSource && !!record.inferenceAudio && !record.paused && ["completed", "failed", "cancelled"].includes(record.status);
+        return !!record && !record.importedSource && !!record.inferenceAudio && !record.paused && !record.capturing && ["completed", "failed", "cancelled"].includes(record.status);
     }
 
     // A retry runs on the take's own engine and language, or Whisper if that engine is gone.

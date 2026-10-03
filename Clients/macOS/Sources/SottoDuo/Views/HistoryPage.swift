@@ -335,7 +335,9 @@ struct HistoryPage: View {
                 Divider()
                 HStack {
                     // Failed takes offer this in their banner.
-                    if selected.canTranscribeAgain && !problem { transcribeAgainButton(selected) }
+                    if selected.canTranscribeAgain && !problem && !controller.isStillRecording(selected.id) {
+                        transcribeAgainButton(selected)
+                    }
                     if selected.inferenceAudio != nil {
                         Button("Open audio") {
                             controller.errorMessage = nil
@@ -424,7 +426,7 @@ struct HistoryPage: View {
                         .font(.caption)
                         .foregroundStyle(tone.ink)
                 }
-            } else if selected.canTranscribeAgain {
+            } else if selected.canTranscribeAgain && !controller.isStillRecording(selected.id) {
                 transcribeAgainButton(selected, prominent: true)
             }
         }

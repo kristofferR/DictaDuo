@@ -971,6 +971,11 @@ final class SottoDuoController: ObservableObject {
     }
 
     /// A long recording paused before it finished; only the computer that made it can resume it.
+    /// Processing can fail while a server microphone still records; retry waits for it to stop.
+    func isStillRecording(_ id: UUID) -> Bool {
+        recordingSnapshots[id]?.captureState == .recording
+    }
+
     func isPausedRecording(_ id: UUID) -> Bool {
         guard let snapshot = recordingSnapshots[id] else { return false }
         return snapshot.captureState == .interrupted && snapshot.processingState != .completed
