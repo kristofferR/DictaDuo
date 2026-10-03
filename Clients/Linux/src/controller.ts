@@ -207,6 +207,8 @@ export class Controller {
   }
   state = "idle";
   result?: Result;
+  /** The latest delivered dictation, kept across later takes; microphone tests excluded. */
+  lastDictation?: Result;
   constructor(
     private api: Pick<
       API,
@@ -815,6 +817,7 @@ export class Controller {
     take.delivered();
     if (!this.live(take)) return;
     this.result = { id: take.id, text: record.insertionText, delivery };
+    if (!take.preview) this.lastDictation = this.result;
     if (delivery === "inserted") this.setState(take, "Text inserted", "completed");
     else if (delivery === "uncertain")
       this.setState(

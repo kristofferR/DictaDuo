@@ -116,6 +116,7 @@ export class ClientRuntime {
             activity: { phase: "idle" },
             busy: false,
             result: null,
+            hasLastDictation: false,
             message: "Set up your server connection in This computer.",
             server: this.settings.config?.server ?? "",
             device: this.settings.config?.device ?? { name: "This computer" },

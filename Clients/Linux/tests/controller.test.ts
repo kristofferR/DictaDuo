@@ -845,6 +845,24 @@ test("a shortcut take begun before disarm cannot reselect a replacement registra
   expect(f.service.buttons.state().selected).toBeUndefined();
 });
 
+test("Copy last keeps the latest real dictation across failed takes and microphone tests", async () => {
+  const f = await fixture();
+  await record(f);
+  f.controller.stop();
+  await f.controller.settled();
+  const dictated = f.controller.lastDictation;
+  expect(dictated?.delivery).toBe("inserted");
+  f.controller.start(undefined, true);
+  await until(() => f.controller.activity.phase === "recording");
+  f.controller.stop();
+  await f.controller.settled();
+  expect(f.controller.result?.delivery).toBe("preview");
+  await record(f);
+  await f.controller.cancelAll();
+  await f.controller.settled();
+  expect(f.controller.result).toBeUndefined();
+  expect(f.controller.lastDictation).toBe(dictated);
+});
 test("GUI microphone tests retain a preview without attempting desktop insertion or selecting a button destination", async () => {
   const f = await fixture();
   let selected = false;

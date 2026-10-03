@@ -7,6 +7,7 @@
       "trigger": "shortcut"
     },
     "busy": false,
+    "hasLastDictation": true,
     "result": {
       "id": "preview",
       "text": "Let’s keep the settings familiar, and make dictation feel at home on any Linux desktop.",

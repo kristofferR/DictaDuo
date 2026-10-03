@@ -199,7 +199,7 @@ int main(int argc, char **argv) {
     const QString key = window->property("dictationKey").toString();
     // Text after a tab is drawn as the menu's shortcut hint.
     start->setText(key.isEmpty() ? "Start dictation" : "Start dictation\t" + key);
-    copyLast->setEnabled(!snapshot.value("result").toMap().isEmpty());
+    copyLast->setEnabled(snapshot.value("hasLastDictation").toBool());
     menu.setDefaultAction(undoOpen    ? undo
                           : recording ? finish
                                       : nullptr);

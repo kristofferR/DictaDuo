@@ -58,6 +58,7 @@ export function createGUIHandler(
         canStartTake: controller.canStartTake,
         message: controller.state,
         result: controller.result ?? null,
+        hasLastDictation: controller.lastDictation !== undefined,
         device: config.device,
         server: config.server,
         sources: config.sources,
@@ -118,7 +119,7 @@ export function createGUIHandler(
         controller.undo();
         return {};
       case "copyLast": {
-        const result = controller.result;
+        const result = controller.lastDictation;
         if (!result) throw new ClientNotice("There is no dictation to copy yet.");
         await command(["wl-copy", "--type", "text/plain;charset=utf-8"], 1500, result.text);
         return {};
