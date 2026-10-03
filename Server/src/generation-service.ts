@@ -376,6 +376,7 @@ export class GenerationService {
         apiVersion: API_VERSION,
         generationRetry: true,
         cloudRecognition: !!this.configuration.soniox,
+        features: ["retry-completed"],
         recognitionEngines: [...this.engines],
         serverVersion: "0.1.0",
         isDev: this.configuration.development,
@@ -952,6 +953,11 @@ export class GenerationService {
         for (const key of outputKeys)
           if (previous[key] !== undefined) Object.assign(record, { [key]: previous[key] });
         if (previous.previousStatus === "completed") {
+          // The retry may already have replaced the transcript artifact.
+          await atomicPrivateWrite(
+            join(this.directory(record.id), "transcript.txt"),
+            record.finalText,
+          );
           record.status = "completed";
           record.error = `Transcribing again stopped: ${record.error ?? "it did not finish."} The previous transcript is kept.`;
         }

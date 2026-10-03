@@ -139,15 +139,17 @@ public struct ServerHealth: Codable, Equatable, Sendable {
     public var generationRetry: Bool?
     /// Installed local engines. Nil means Whisper only.
     public var recognitionEngines: [RecognitionEngine]?
+    /// Additions to API version 3, such as "retry-completed". Nil means none.
+    public var features: [String]?
     public var speech: ModelRuntimeInfo
     public var proofreading: ModelRuntimeInfo
     public var message: String?
     public init(apiVersion: Int = SottoDuoAPI.version, serverVersion: String = "0.1.0", isDev: Bool = true,
                 ready: Bool, speech: ModelRuntimeInfo, proofreading: ModelRuntimeInfo, message: String? = nil,
-                generationRetry: Bool? = nil, recognitionEngines: [RecognitionEngine]? = nil) {
+                generationRetry: Bool? = nil, recognitionEngines: [RecognitionEngine]? = nil, features: [String]? = nil) {
         self.apiVersion = apiVersion; self.serverVersion = serverVersion; self.isDev = isDev
         self.ready = ready; self.speech = speech; self.proofreading = proofreading; self.message = message
-        self.generationRetry = generationRetry; self.recognitionEngines = recognitionEngines
+        self.generationRetry = generationRetry; self.recognitionEngines = recognitionEngines; self.features = features
     }
 }
 

@@ -89,6 +89,8 @@ const encodeFor = (request: FastifyRequest) => {
         request.headers["x-sottoduo-cloud-recognition"] !== "cloud-v1"
       )
         return undefined;
+      if (key === "features" && request.headers["x-sottoduo-features"] !== "features-v1")
+        return undefined;
       if (
         (key === "recognitionMode" || key === "recognition") &&
         request.headers["x-sottoduo-recognition"] !== "streaming-v1"

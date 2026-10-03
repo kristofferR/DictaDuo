@@ -1270,6 +1270,13 @@ components:
         cloudRecognition:
           type: "boolean"
           description: "Whether cloud recognition (Soniox) is configured on this server. Request this field with X-SottoDuo-Cloud-Recognition: cloud-v1. An omitted value means unknown."
+        features:
+          type: "array"
+          description: "Additions to API version 3 this server supports, such as retry-completed (finished takes can be transcribed again) and language-no (Norwegian). Request this field with X-SottoDuo-Features: features-v1. An omitted value means none."
+          items:
+            type: "string"
+            maxLength: 64
+          maxItems: 32
         recognitionEngines:
           type: "array"
           description: "Local recognition engines installed on this server. Request this field with X-SottoDuo-Recognition-Engine: engine-v1. An omitted value means Whisper only."
