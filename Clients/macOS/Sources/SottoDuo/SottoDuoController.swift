@@ -912,13 +912,6 @@ final class SottoDuoController: ObservableObject {
 
     func updateSharedPreferences(_ value: ServerPreferences, expectedRevision: Int? = nil) {
         guard !isSavingPreferences, let snapshot = sharedPreferences else { return }
-        // One replacement phrase per line: blank lines are editing leftovers, not phrases.
-        var value = value
-        for list in value.dictionary.lists.indices {
-            for entry in value.dictionary.lists[list].entries.indices {
-                value.dictionary.lists[list].entries[entry].aliases.removeAll { $0.isEmpty }
-            }
-        }
         isSavingPreferences = true
         Task { [weak self] in
             guard let self else { return }

@@ -129,6 +129,16 @@ struct ServerPreferencesPage: View {
     @State private var listPendingRemoval: String?
 
     private var dirty: Bool { base.map { draft != $0.preferences } ?? false }
+    /// The draft as saved. One replacement phrase per line: blank lines are editing leftovers, not phrases.
+    private var cleanedDraft: ServerPreferences {
+        var value = draft
+        for list in value.dictionary.lists.indices {
+            for entry in value.dictionary.lists[list].entries.indices {
+                value.dictionary.lists[list].entries[entry].aliases.removeAll { $0.isEmpty }
+            }
+        }
+        return value
+    }
     private var changedRemotely: Bool {
         guard let base, let latest = controller.sharedPreferences else { return false }
         return dirty && base.revision != latest.revision
@@ -167,10 +177,10 @@ struct ServerPreferencesPage: View {
                     .disabled(!dirty)
                 Button("Save shared preferences") {
                     controller.errorMessage = nil
-                    controller.updateSharedPreferences(draft, expectedRevision: base?.revision)
+                    controller.updateSharedPreferences(cleanedDraft, expectedRevision: base?.revision)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!available || !dirty || changedRemotely || draft.validationError != nil || controller.isSavingPreferences)
+                .disabled(!available || !dirty || changedRemotely || cleanedDraft.validationError != nil || controller.isSavingPreferences)
                 .accessibilityIdentifier("preferences.save-shared")
             }
             .frame(height: 34)
@@ -181,7 +191,7 @@ struct ServerPreferencesPage: View {
             HStack {
                 SottoDuoActionMessage(message: changedRemotely
                     ? "Shared preferences changed on another device. Reload to continue."
-                    : (draft.validationError ?? controller.errorMessage))
+                    : (cleanedDraft.validationError ?? controller.errorMessage))
                 Button("Reload") { loadLatest() }
                     .opacity(changedRemotely ? 1 : 0)
                     .disabled(!changedRemotely)
