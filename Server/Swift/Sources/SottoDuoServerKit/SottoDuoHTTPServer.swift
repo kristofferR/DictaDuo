@@ -19,7 +19,7 @@ public enum SottoDuoHTTPServer {
     public static func makeRouter(service: GenerationService, token: String? = nil) -> Router<BasicRequestContext> {
         let router = Router()
         router.add(middleware: ServerMiddleware(token: token))
-        router.get("/v1/health") { _, _ in try json(await service.health()) }
+        router.get("/v1/health") { request, _ in try json(await service.health(), request: request) }
         router.get("/v1/preferences") { request, _ in try json(await service.getPreferences(), request: request) }
         router.put("/v1/preferences") { request, _ in
             var update = try await decode(PreferencesSnapshot.self, request: request)
@@ -141,11 +141,13 @@ public enum SottoDuoHTTPServer {
         let data = try SottoDuoAPI.encoder().encode(value)
         let streaming = request?.headers[.init("X-SottoDuo-Recognition")!] == "streaming-v1"
         let norwegian = languageV2(request)
-        if streaming && norwegian { return data }
+        let cloud = request?.headers[.init("X-SottoDuo-Cloud-Recognition")!] == "cloud-v1"
+        if streaming && norwegian && cloud { return data }
         func legacy(_ value: Any) -> Any {
             if var object = value as? [String: Any] {
                 if !streaming { object = object.filter { $0.key != "recognitionMode" && $0.key != "recognition" } }
                 if !norwegian, object["language"] as? String == "no" { object["language"] = "auto" }
+                if !cloud { object.removeValue(forKey: "cloudRecognition") }
                 return object.mapValues(legacy)
             }
             if let array = value as? [Any] { return array.map(legacy) }

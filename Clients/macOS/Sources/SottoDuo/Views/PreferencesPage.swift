@@ -154,6 +154,9 @@ struct ServerPreferencesPage: View {
         return ServerModelStatus(health.speech, health: health) == .loading
             || ServerModelStatus(health.proofreading, health: health, enabled: draft.textCorrectionEnabled) == .loading
     }
+    private var localEngineName: String {
+        parakeet ? "Parakeet v3" : "Whisper large-v3-turbo"
+    }
     private var installedEngines: [RecognitionEngine] { controller.serverHealth?.recognitionEngines ?? [] }
     /// Recognition runs locally with Parakeet, which ignores language and vocabulary.
     private var parakeet: Bool { draft.recognitionEngine == .parakeet && installedEngines.contains(.parakeet) }
@@ -428,7 +431,9 @@ struct ServerPreferencesPage: View {
 
     @ViewBuilder private func modelsGroup(_ health: ServerHealth) -> some View {
         let cleanupEnabled = controller.sharedPreferences?.preferences.textCorrectionEnabled ?? true
-        modelRow("Speech recognition", name: health.speech.friendlyName,
+        // With Soniox configured, speech readiness still describes the local engine;
+        // the cloud row covers Soniox.
+        modelRow("Speech recognition", name: health.speech.backend.hasPrefix("soniox") ? localEngineName : health.speech.friendlyName,
                  status: ServerModelStatus(health.speech, health: health))
         modelRow("Text cleanup", name: health.proofreading.friendlyName,
                  status: ServerModelStatus(health.proofreading, health: health, enabled: cleanupEnabled))

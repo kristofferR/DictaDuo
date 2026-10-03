@@ -73,6 +73,21 @@ final class GenerationServiceTests: XCTestCase {
         }
     }
 
+    func testReferenceServerReportsNoCloudRecognitionWhenAsked() async throws {
+        try await withFixture { service, _ in
+            let app = Application(router: SottoDuoHTTPServer.makeRouter(service: service))
+            try await app.test(.router) { client in
+                try await client.execute(uri: "/v1/health", method: .get, headers: [.init("Host")!: "localhost"]) { response in
+                    XCTAssertFalse(String(decoding: response.body.readableBytesView, as: UTF8.self).contains("cloudRecognition"))
+                }
+                try await client.execute(uri: "/v1/health", method: .get,
+                                         headers: [.init("Host")!: "localhost", .init("X-SottoDuo-Cloud-Recognition")!: "cloud-v1"]) { response in
+                    XCTAssertTrue(String(decoding: response.body.readableBytesView, as: UTF8.self).contains("\"cloudRecognition\":false"))
+                }
+            }
+        }
+    }
+
     func testOutOfOrderListSurvivesUnsupportedProofreadingName() async throws {
         let source = "I have a list of things to do. One is book the room Three is pick up the keys. Two is send the invitation. Four is I need to get God, what's it called? I need to get the meeting room sorted so I can go there and figure out whether I can get this meeting room."
         let formatted = "I have a list of things to do.\n\n1. book the room\n3. pick up the keys\n2. send the invitation\n4. I need to get God, what's it called? I need to get the meeting room sorted so I can go there and figure out whether I can get this meeting room."

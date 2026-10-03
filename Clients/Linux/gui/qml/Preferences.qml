@@ -296,7 +296,8 @@ ColumnLayout {
 
                     SLabel {
                         ui: root.ui
-                        text: root.health ? root.modelName(root.health.speech) : "Checking…"
+                        // With Soniox configured, readiness still describes the local engine.
+                        text: !root.health ? "Checking…" : root.health.speech.backend.startsWith("soniox") ? (root.parakeet ? "Parakeet v3" : "Whisper large-v3-turbo") : root.modelName(root.health.speech)
                     }
                     StatusDot {
                         id: speechStatus

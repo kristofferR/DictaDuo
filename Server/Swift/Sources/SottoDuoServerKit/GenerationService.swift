@@ -164,8 +164,10 @@ public actor GenerationService {
             speech: ModelRuntimeInfo(modelID: "whisper-large-v3-turbo", backend: Self.speechBackend, ready: state.speechLoaded),
             proofreading: ModelRuntimeInfo(modelID: "Qwen3-4B-Instruct-2507", backend: Self.proofBackend,
                                            ready: state.proofLoaded, message: preferences.preferences.textCorrectionEnabled ?
-                                               (state.proofLoaded ? nil : "Unavailable. Text is kept as transcribed.") : "Disabled"),
-            message: cloudOnly ? "Cloud recognition requires the TypeScript server. Choose Automatic or Local only." : message)
+                                               (state.proofLoaded ? nil : (warming ? "Loading…" : "Unavailable. Text is kept as transcribed.")) : "Disabled"),
+            message: cloudOnly ? "Cloud recognition requires the TypeScript server. Choose Automatic or Local only." : message,
+            // This server has no cloud recognition.
+            cloudRecognition: false)
     }
 
     public func getPreferences() -> PreferencesSnapshot { preferences }
