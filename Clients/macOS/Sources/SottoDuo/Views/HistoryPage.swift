@@ -366,7 +366,8 @@ struct HistoryPage: View {
     /// One label table for the delivery statuses both clients write.
     private func deliveryLabel(_ status: String?) -> String? {
         switch status {
-        case "inserted", "listUpdated": "Pasted"
+        case "inserted": "Pasted"
+        case "listUpdated": "List updated"
         case "copied": "Copied"
         case "unconfirmed": "Check the field"
         case "failed": "Couldn't paste"

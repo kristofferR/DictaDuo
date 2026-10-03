@@ -37,7 +37,7 @@ ColumnLayout {
             return "";
         return ({
             inserted: "Pasted",
-            listUpdated: "Pasted",
+            listUpdated: "List updated",
             copied: "Copied",
             unconfirmed: "Check the field",
             failed: "Couldn't paste",

@@ -469,6 +469,9 @@ final class SottoDuoController: ObservableObject {
                     refreshServer()
                     return
                 }
+                // Health needs no token, so check it against an authenticated endpoint.
+                _ = try await probe.preferences()
+                guard !Task.isCancelled else { return }
                 applyConnection(endpoint: endpoint, token: token, deviceName: deviceName)
             } catch {
                 guard let self, !Task.isCancelled else { return }

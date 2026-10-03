@@ -1962,20 +1962,27 @@ export class RecordingService {
   private async restorePrevious(manifest: Manifest, error: unknown) {
     const directory = this.directory(manifest.snapshot.id);
     let previous: Manifest;
+    let result: GenerationRecord;
     try {
       previous = JSON.parse(
         (await readRegularFile(join(directory, PREVIOUS_MANIFEST), MAX_MANIFEST_BYTES)).toString(),
       ) as Manifest;
-      await rename(join(directory, PREVIOUS_RESULT), join(directory, "result.json"));
+      result = JSON.parse(
+        (await readRegularFile(join(directory, PREVIOUS_RESULT), 64 * 1024 * 1024)).toString(),
+      ) as GenerationRecord;
     } catch {
       return false;
     }
-    await rm(join(directory, PREVIOUS_MANIFEST), { force: true });
+    // Copies, not moves: the backups stay until the restored manifest commits.
+    await atomicPrivateWrite(join(directory, "result.json"), JSON.stringify(result));
+    await atomicPrivateWrite(join(directory, "transcript.txt"), result.finalText);
     previous.snapshot.epoch = manifest.snapshot.epoch;
     previous.snapshot.revision = manifest.snapshot.revision;
     const reason = error instanceof Error ? error.message : "Speech processing failed.";
     previous.snapshot.error = `Transcribing again failed: ${reason} The previous transcript is kept.`;
     await this.commit(previous);
+    for (const name of [PREVIOUS_RESULT, PREVIOUS_MANIFEST])
+      await rm(join(directory, name), { force: true });
     for (const stream of previous.snapshot.streams)
       this.chunks.delete(this.streamKey(previous.snapshot.id, stream.runID, stream.kind));
     return true;
