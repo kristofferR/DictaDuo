@@ -224,8 +224,10 @@ struct HistoryPage: View {
                         .accessibilityLabel("Copy transcript")
                     // Interrupted takes are discarded from their banner.
                     if !interrupted {
+                        // A cached detail stays completed while a retry runs; deleting would abort it.
                         Button { confirmingDelete = true } label: { Image(systemName: "trash") }
-                            .disabled(!selected.status.isTerminal || controller.serverHealth == nil)
+                            .disabled(!selected.status.isTerminal || controller.serverHealth == nil
+                                      || controller.retryingGenerationIDs.contains(selected.id))
                             .help("Delete from server")
                             .accessibilityLabel("Delete dictation")
                     }

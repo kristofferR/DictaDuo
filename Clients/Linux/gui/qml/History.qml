@@ -392,6 +392,8 @@ ColumnLayout {
             if (action === "retryHistory") {
                 root.retryStarting = false;
                 root.retryingID = "";
+                // The detail load this retry superseded was ignored; load it again.
+                root.loadEntry();
             }
 
             if (action === "history")
