@@ -22,6 +22,8 @@ ColumnLayout {
     property string retryingID: ""
     // The server `retryingID` belongs to; a reconnect to the same server keeps following it.
     property string retryServer: ""
+    // Starting a retry ignores detail loads sent before it, which carry the old transcript.
+    property int entryEpoch: 0
     // Status reads that failed in a row while following a retry.
     property int retryFailures: 0
     property string audioID: ""
@@ -164,6 +166,8 @@ ColumnLayout {
         retryStarting = true;
         retryingID = id;
         retryServer = recordServer;
+        entryEpoch++;
+        entryID = "";
         retryFailures = 0;
         message = "Starting to transcribe again…";
         bridge.request("retryHistory", {
@@ -188,7 +192,7 @@ ColumnLayout {
         bridge.request("historyEntry", {
             "id": entryID,
             "server": server
-        });
+        }, "entry-" + entryEpoch);
     }
 
     function load(older, retry) {
@@ -322,6 +326,9 @@ ColumnLayout {
                 Qt.callLater(root.maybeLoadOlder);
             }
             if (action === "historyEntry") {
+                if (requestID !== "retry" && requestID !== "entry-" + root.entryEpoch)
+                    return ;
+
                 if (data.record.id === root.entryID)
                     root.entryID = "";
                 if (data.server !== root.server)
@@ -379,7 +386,7 @@ ColumnLayout {
                 if (++root.retryFailures < 20)
                     return ;
                 root.retryingID = "";
-            } else if (action === "historyEntry")
+            } else if (action === "historyEntry" && requestID === "entry-" + root.entryEpoch)
                 root.entryID = "";
 
             if (action === "retryHistory") {
