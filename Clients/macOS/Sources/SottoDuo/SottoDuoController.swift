@@ -452,12 +452,14 @@ final class SottoDuoController: ObservableObject {
         guard !isBusy, wisprFlowImportTask == nil else { return }
         // Probe with the token exactly as it will be saved.
         let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Only the newest attempt may apply its connection.
+        connectionProbe?.cancel()
+        connectionProbe = nil
         guard serverClientFactory == nil, let probe = try? ServerClient(endpoint: endpoint, token: trimmedToken) else {
             applyConnection(endpoint: endpoint, token: token, deviceName: deviceName)
             return
         }
         serverStatusMessage = "Checking connection…"
-        connectionProbe?.cancel()
         connectionProbe = Task { [weak self] in
             do {
                 let health = try await probe.health()
