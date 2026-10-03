@@ -625,6 +625,7 @@ final class SottoDuoController: ObservableObject {
         let endpoint = preferences.endpoint
         let source = historySourceFilter
         loadingGenerationDetails.insert(id)
+        let revision = recordingSnapshots[id]?.revision
         Task { [weak self] in
             guard let self else { return }
             defer { loadingGenerationDetails.remove(id) }
@@ -632,6 +633,12 @@ final class SottoDuoController: ObservableObject {
                 let value = try await client().materializedRecording(id)
                 guard selectedGenerationDetailID == id, endpoint == preferences.endpoint,
                       source == historySourceFilter, !Task.isCancelled else { return }
+                // The take changed while loading (a retry elsewhere): this response may be stale.
+                guard recordingSnapshots[id]?.revision == revision else {
+                    loadingGenerationDetails.remove(id)
+                    loadGenerationDetail(id)
+                    return
+                }
                 // Keep only the selected full transcript: long sessions must not
                 // accumulate in memory while browsing the compact history list.
                 if value.status == .completed { generationDetails = [id: value] }
