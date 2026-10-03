@@ -17,6 +17,7 @@ import type { RecordingService } from "./recording-service.ts";
 import type { CaptureSessions } from "./capture-sessions.ts";
 import { Readable } from "node:stream";
 import { validateBody } from "./validation.ts";
+import { isLocal } from "./request-origin.ts";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const identifier = (value: string) => {
@@ -395,6 +396,7 @@ export function registerRecordingRoutes(
         const snapshot = await captures.start(
           validateBody("StartCaptureRequest", request.body),
           captureOwner(request),
+          isLocal(request),
         );
         // A requester that gave up during startup never learns this ID, so it
         // could neither renew nor discard the take; the lease would archive it.

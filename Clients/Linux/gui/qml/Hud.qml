@@ -22,6 +22,8 @@ Window {
     }
     visible: surfaceReady && bridge.connected && !bridge.preview && (!ui.visible || !ui.active) && (ui.busy || linger.running)
     property string phase: ui.activity.phase
+    // A shared mic on another computer is named in the title, with its computer.
+    readonly property bool sharedMic: phase === "recording" && !!ui.activity.host && !!ui.activity.source
     onPhaseChanged: {
         if (["completed", "failed", "cancelled"].includes(phase))
             linger.restart();
@@ -74,14 +76,17 @@ Window {
                 spacing: 3
                 SLabel {
                     ui: hud.ui
-                    text: hud.ui.messageFor(hud.phase)
+                    objectName: "hudTitle"
+                    text: hud.sharedMic ? "Listening · " + hud.ui.activity.source + " on " + hud.ui.activity.host : hud.ui.messageFor(hud.phase)
+                    elide: Text.ElideRight
+                    maximumLineCount: 1
                     font.weight: Font.DemiBold
                     font.pixelSize: 14
                     Layout.fillWidth: true
                 }
                 SLabel {
                     ui: hud.ui
-                    text: hud.undoSeconds > 0 ? "Press " + (hud.undoKey || "the dictation key") + " again to paste · " + hud.undoSeconds + "s" : (hud.ui.feedback.elapsedSeconds !== undefined ? hud.ui.duration(hud.ui.feedback.elapsedSeconds) + " · " : "") + (hud.ui.activity.source || "SottoDuo")
+                    text: hud.undoSeconds > 0 ? "Press " + (hud.undoKey || "the dictation key") + " again to paste · " + hud.undoSeconds + "s" : [hud.ui.feedback.elapsedSeconds !== undefined ? hud.ui.duration(hud.ui.feedback.elapsedSeconds) : "", hud.sharedMic ? "" : hud.ui.activity.source || "SottoDuo"].filter(part => part).join(" · ")
                     color: hud.ui.c.muted
                     font.pixelSize: 11
                     Layout.fillWidth: true

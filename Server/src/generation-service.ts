@@ -8,6 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { CaptureSessions, type CaptureProvider, type CaptureStore } from "./capture-sessions.ts";
 import { ButtonDestinations } from "./button-destinations.ts";
+import { MicrophoneSharing } from "./microphone-sharing.ts";
 import type {
   AudioArtifact,
   AudioChunkReceipt,
@@ -142,6 +143,7 @@ interface Watcher {
 export class GenerationService {
   captures: CaptureSessions;
   readonly buttons: ButtonDestinations;
+  private readonly sharing: MicrophoneSharing;
   private recordings?: CaptureStore & {
     detail(id: string): Promise<{ result?: GenerationRecord }>;
     onDiscard?: (id: string) => void;
@@ -167,11 +169,19 @@ export class GenerationService {
     private readonly configuration: ServiceConfiguration,
     private readonly inference: InferenceBackend,
   ) {
-    this.buttons = new ButtonDestinations(this);
+    this.buttons = new ButtonDestinations(
+      this,
+      Date.now,
+      join(configuration.dataDirectory, "button-target.json"),
+    );
+    this.sharing = new MicrophoneSharing(
+      join(configuration.dataDirectory, "microphone-sharing.json"),
+    );
     this.captures = new CaptureSessions(
       unavailableCaptureStore,
       this.buttons,
       configuration.captureProvider,
+      this.sharing,
     );
     this.imports = new WisprFlowImports({
       dataDirectory: configuration.dataDirectory,
@@ -1093,6 +1103,7 @@ export class GenerationService {
       recordings,
       this.buttons,
       this.configuration.captureProvider,
+      this.sharing,
     );
     recordings.onDiscard = (id) => this.captures.abort(id);
   }

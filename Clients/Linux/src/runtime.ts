@@ -221,15 +221,25 @@ export class ClientRuntime {
     this.mutations++;
     try {
       switch (action) {
-        case "arm":
+        case "arm": {
           if (!buttons.enabled)
-            return "Enable pairing-button dictation in SottoDuo → This computer first.";
+            return "Let the DJI button type here in SottoDuo → Microphone first.";
+          // Arming only moves the button in "Last computer I dictated on" mode.
+          const target = buttons.state?.buttonTarget;
+          if (target && target.mode !== "lastDictated")
+            return `The DJI button is set to ${target.mode === "off" ? "Nowhere" : `always type into ${target.device?.name ?? "another computer"}`}. Change it in SottoDuo → Microphone.`;
           await buttons.select();
-          return "DJI pairing button destination selected: this computer.";
-        case "disarm":
-          if (!buttons.enabled) return "Pairing-button dictation is disabled on this computer.";
+          return "The DJI button now types into this computer.";
+        }
+        case "disarm": {
+          if (!buttons.enabled) return "The DJI button is not allowed to type here.";
+          // A pinned computer is selected again on its next registration.
+          const target = buttons.state?.buttonTarget;
+          if (target?.mode === "device" && target.device?.id === this.settings.config?.device.id)
+            return "The DJI button is set to always type here. Change it in SottoDuo → Microphone.";
           await buttons.disarm();
-          return "This computer is no longer selected.";
+          return "The DJI button no longer types into this computer.";
+        }
         case "button-status":
           return JSON.stringify({ ...buttons.state, enabled: buttons.enabled });
         case "start":

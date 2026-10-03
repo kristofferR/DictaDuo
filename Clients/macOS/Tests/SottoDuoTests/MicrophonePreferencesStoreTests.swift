@@ -82,6 +82,59 @@ final class MicrophonePreferencesStoreTests: XCTestCase {
         }
     }
 
+    func testSharedMicBusyWithAnotherComputerFallsThroughToNextInput() async throws {
+        try await withPreferences { store, _ in
+            let server = "https://desktop:8391"
+            let sharing = SharingHost(name: "omarchy", local: false)
+            var source = AudioSource(identity: .init(hostID: "omarchy-desktop", id: "dji"), name: "DJI Mic Mini", transport: .usb,
+                present: true, link: .connected, capture: .available, audioHealth: .healthy, observedAt: Date(), shared: true)
+            store.update(devices: [builtIn, usb], systemDefaultUID: builtIn.uid)
+            store.updateRemote([source], server: server, host: sharing, deviceID: "this-mac")
+            let remote = try XCTUnwrap(store.availableDevices.first { $0.remote != nil })
+            [remote, usb].forEach(store.addToPriority)
+            XCTAssertEqual(store.resolution.device, remote)
+
+            source.recordingFor = .init(id: "this-mac", name: "Studio Mac")
+            store.updateRemote([source], server: server, host: sharing, deviceID: "this-mac")
+            XCTAssertEqual(store.resolution.device, remote, "This Mac's own finishing take does not make the mic busy")
+
+            // The server records one take at a time, so every source reports the holder.
+            source.recordingFor = .init(id: "linux", name: "Linux desk")
+            var other = source
+            other.identity.id = "headset"
+            store.updateRemote([source, other], server: server, host: sharing, deviceID: "this-mac")
+            let second = try XCTUnwrap(store.availableDevices.first { $0.uid == "headset" })
+            store.addToPriority(second)
+            store.movePriority(id: second.id, by: -1)
+            XCTAssertEqual(store.resolution.device, usb)
+            XCTAssertFalse(store.isEligible(second))
+            XCTAssertEqual(store.availability(remote), "Busy · Linux desk is dictating")
+            XCTAssertEqual(store.busyFor(remote)?.id, "linux")
+
+            source.recordingFor = nil
+            store.updateRemote([source], server: server, host: sharing, deviceID: "this-mac")
+            XCTAssertEqual(store.resolution.device, remote)
+        }
+    }
+
+    func testSharedMicNamesUseTheSharingComputerName() async throws {
+        try await withPreferences { store, _ in
+            let server = "https://desktop:8391"
+            let source = AudioSource(identity: .init(hostID: "omarchy-desktop", id: "dji"), name: "DJI Mic Mini", transport: .usb,
+                present: true, link: .connected, capture: .available, audioHealth: .healthy, observedAt: Date())
+            store.updateRemote([source], server: server)
+            let remote = try XCTUnwrap(store.availableDevices.first)
+            XCTAssertEqual(store.qualifiedName(remote), "DJI Mic Mini on omarchy-desktop", "An older server names no host")
+            store.updateRemote([source], server: server, host: .init(name: "omarchy", local: false))
+            XCTAssertEqual(store.hostName(remote), "omarchy")
+            XCTAssertEqual(store.qualifiedName(remote), "DJI Mic Mini on omarchy")
+            store.clearRemote()
+            XCTAssertEqual(store.qualifiedName(remote), "DJI Mic Mini on omarchy", "Offline favorites keep a readable name")
+            XCTAssertNil(store.hostName(usb))
+            XCTAssertEqual(store.qualifiedName(usb), "Desk microphone")
+        }
+    }
+
     func testPreferredDeviceReturnsWithoutLosingSavedOrder() async throws {
         try await withPreferences { store, fixture in
             store.update(devices: [builtIn, usb], systemDefaultUID: builtIn.uid)

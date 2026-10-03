@@ -26,9 +26,15 @@ final class MicrophonePreferencesStore: ObservableObject {
     @Published private(set) var availableDevices: [AudioInputDevice] = []
     @Published private(set) var systemDefaultUID: String?
     @Published private(set) var storageError: String?
+    /// Sharing computers' names by host ID. Kept while offline so saved inputs still read naturally.
+    @Published private(set) var hostNames: [String: String] = [:]
+    /// The connected server's computer name; `hostNames` also remembers earlier servers.
+    @Published private(set) var currentHostName: String?
     private var localDevices: [AudioInputDevice] = []
     private var remoteSources: [String: AudioSource] = [:]
     private var remoteDevices: [AudioInputDevice] = []
+    /// This computer's identity; a shared source recording for anyone else is busy.
+    private var deviceID: String?
     private var publishedAvailability: [String: String] = [:]
     private let configuration: ConfigurationStore
     private var subscriptions: Set<AnyCancellable> = []
@@ -70,19 +76,43 @@ final class MicrophonePreferencesStore: ObservableObject {
 
     func isEligible(_ device: AudioInputDevice, at now: Date = Date()) -> Bool {
         device.remote == nil ? localDevices.contains(where: { $0.id == device.id })
-            : remoteSources[device.id]?.isEligible(at: now) == true
+            : remoteSources[device.id]?.isEligible(at: now) == true && busyFor(device) == nil
     }
+
+    func source(_ device: AudioInputDevice) -> AudioSource? { remoteSources[device.id] }
+
+    /// The other computer whose take holds this shared source, if any.
+    func busyFor(_ device: AudioInputDevice) -> DeviceIdentity? {
+        guard let holder = remoteSources[device.id]?.recordingFor, holder.id != deviceID else { return nil }
+        return DeviceIdentity(id: holder.id, name: holder.name)
+    }
+
+    /// The sharing computer's name, or its host ID before the server has named it.
+    func hostName(_ device: AudioInputDevice) -> String? {
+        device.remote.map { hostNames[$0.hostID] ?? $0.hostID }
+    }
+
+    func qualifiedName(_ device: AudioInputDevice) -> String { device.qualifiedName(host: hostName(device)) }
 
     func availability(_ device: AudioInputDevice) -> String {
         guard device.remote != nil else { return isEligible(device) ? "Connected" : "Disconnected" }
-        guard let source = remoteSources[device.id] else { return "Remote unavailable" }
-        if isEligible(device) { return "Remote ready" }
+        // Unlisted: offline, or no longer shared with this Mac.
+        guard let source = remoteSources[device.id] else { return "Not available" }
+        if let holder = busyFor(device) { return "Busy · \(holder.name) is dictating" }
+        if isEligible(device) { return "Ready" }
         if !source.present || source.link == .disconnected { return "Disconnected" }
         if source.audioHealth == .degraded { return "Audio degraded" }
-        return "Remote unavailable"
+        return "Unavailable"
     }
 
-    func updateRemote(_ sources: [AudioSource], server: String) {
+    func updateRemote(_ sources: [AudioSource], server: String, host: SharingHost? = nil, deviceID: String? = nil) {
+        self.deviceID = deviceID
+        if currentHostName != host?.name { currentHostName = host?.name }
+        if let host {
+            var names = hostNames
+            for source in sources { names[source.identity.hostID] = host.name }
+            if names != hostNames { hostNames = names }
+        }
         remoteSources = [:]
         remoteDevices = sources.prefix(32).compactMap { source in
             let device = AudioInputDevice(uid: source.identity.id, name: source.name,
@@ -97,6 +127,7 @@ final class MicrophonePreferencesStore: ObservableObject {
 
     func clearRemote() {
         remoteSources = [:]; remoteDevices = []
+        currentHostName = nil
         rebuildDevices()
     }
 

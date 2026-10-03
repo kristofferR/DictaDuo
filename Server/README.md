@@ -134,7 +134,7 @@ The dev runner fixes its host to loopback and defaults to port 8391, `.local/ser
 
 Bind to a reachable address and pass `--token-file /absolute/path/to/token`. Nonloopback listeners require a token of at least 32 characters with no internal whitespace. In the Mac app, enter the endpoint and token under **This Mac**; tokens are stored in Keychain.
 
-- Use an HTTPS reverse proxy for hosted servers and hostnames, including Tailscale MagicDNS names. The runner itself serves HTTP.
+- Use an HTTPS reverse proxy for hosted servers and hostnames, including Tailscale MagicDNS names. The runner itself serves HTTP. The proxy must send `X-Forwarded-For` (Caddy does by default; in nginx add `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`): requests without it from this computer count as local and may use and change unshared microphones.
 - HTTP is accepted for localhost and literal Tailscale IPs in `100.64.0.0/10` or `fd7a:115c:a1e0::/48` on your connected tailnet. SottoDuo checks the address range, not routing; use HTTPS if that private route cannot be assured.
 - Ordinary LAN IPs require HTTPS. Endpoints cannot contain credentials, queries, or fragments. Credential-bearing redirects are not followed.
 

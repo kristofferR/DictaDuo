@@ -28,9 +28,9 @@ export class ButtonDestinationClient {
   }
   async setEnabled(enabled: boolean) {
     if (this.closed)
-      throw new ClientNotice("Restart the client before changing pairing-button settings.");
+      throw new ClientNotice("Restart the client before changing DJI button settings.");
     if (this.controller.busy)
-      throw new ClientNotice("Finish dictation before changing pairing-button settings.");
+      throw new ClientNotice("Finish dictation before changing DJI button settings.");
     if (this.receiving === enabled) return;
     this.receiving = enabled;
     this.lastTick = Date.now();
@@ -75,9 +75,7 @@ export class ButtonDestinationClient {
     if (!generationID && this.controller.busy)
       throw new ClientNotice("Finish dictation before changing its destination.");
     if (!this.state?.available)
-      throw new ClientNotice(
-        "The server’s pairing-button receiver is unavailable. Check receiver status.",
-      );
+      throw new ClientNotice("The DJI receiver is unavailable. Check receiver status.");
     return this.request(registration, "/select", generationID ? { generationID } : {});
   }
   async disarm() {

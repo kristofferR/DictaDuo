@@ -6,6 +6,8 @@ enum ServerClientError: LocalizedError {
     case invalidEndpoint
     case rejected(Int, String)
     case captureUnavailable(String)
+    /// Another take holds the shared microphone; the next input may be used.
+    case captureBusy(String)
     case invalidResponse
     case disconnected
     case importArtifactTooLarge(WisprFlowArtifactName, Int)
@@ -15,7 +17,7 @@ enum ServerClientError: LocalizedError {
         switch self {
         case .invalidEndpoint: "The server address is invalid."
         case .rejected(_, let message): message
-        case .captureUnavailable(let message): message
+        case .captureUnavailable(let message), .captureBusy(let message): message
         case .invalidResponse: "The server returned an invalid response."
         case .disconnected: "The server connection was interrupted. Any completed result is available in shared history."
         case .importArtifactTooLarge(let name, let bytes):
@@ -63,6 +65,11 @@ struct ServerClient: Sendable {
         try await json(path: "/v1/button-destinations" + path, method: method, body: body, timeout: 1.5)
     }
 
+    /// Where the DJI button types, stored on the server for every computer.
+    func setButtonTarget(_ target: ButtonTarget) async throws -> ButtonDestinationState {
+        try await buttonDestination("/target", method: "PUT", body: Self.encode(target))
+    }
+
     private static let defaultSession: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 12
@@ -89,6 +96,7 @@ struct ServerClient: Sendable {
         request.setValue("retry-v1", forHTTPHeaderField: "X-SottoDuo-Generation-Retry")
         request.setValue("engine-v1", forHTTPHeaderField: "X-SottoDuo-Recognition-Engine")
         request.setValue("capture-v1", forHTTPHeaderField: "X-SottoDuo-Capture")
+        request.setValue("sharing-v1", forHTTPHeaderField: "X-SottoDuo-Microphone-Sharing")
         if let destinationOwner { request.setValue(destinationOwner, forHTTPHeaderField: "X-SottoDuo-Destination-Owner") }
         if let captureOwner { request.setValue(captureOwner, forHTTPHeaderField: "X-SottoDuo-Capture-Owner") }
         if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
@@ -126,10 +134,12 @@ struct ServerClient: Sendable {
     private static func validate(_ response: URLResponse, data: Data = Data()) throws {
         guard let response = response as? HTTPURLResponse else { throw ServerClientError.invalidResponse }
         guard (200..<300).contains(response.statusCode) else {
-            if response.statusCode == 503,
-               let error = try? SottoDuoAPI.decoder().decode(APIErrorResponse.self, from: data),
-               ["source_unavailable", "capture_failed", "capture_timeout"].contains(error.code) {
-                throw ServerClientError.captureUnavailable(String(error.message.prefix(1_000)))
+            if let error = try? SottoDuoAPI.decoder().decode(APIErrorResponse.self, from: data) {
+                let message = String(error.message.prefix(1_000))
+                if response.statusCode == 503, ["source_unavailable", "capture_failed", "capture_timeout"].contains(error.code) {
+                    throw ServerClientError.captureUnavailable(message)
+                }
+                if response.statusCode == 409, error.code == "capture_busy" { throw ServerClientError.captureBusy(message) }
             }
             let message: String
             if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -161,16 +171,16 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate, @unchecked Se
 }
 
 extension ServerClient {
-    func audioSources() async throws -> [AudioSource] {
+    func audioSources() async throws -> AudioSourceList {
         do {
             let result: AudioSourceList = try await json(path: "v1/audio-sources", timeout: 1)
             guard result.sources.count <= 32,
                   Set(result.sources.map(\.identity)).count == result.sources.count else {
                 throw ServerClientError.invalidResponse
             }
-            return result.sources
+            return result
         } catch ServerClientError.rejected(404, _) {
-            return [] // A server without capture support still accepts local uploads.
+            return AudioSourceList(sources: []) // A server without capture support still accepts local uploads.
         }
     }
     /// Admits a recording session fed by a server-hosted microphone.

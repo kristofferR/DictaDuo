@@ -349,10 +349,10 @@ test("connection switch drains old button registration and rejects stale server 
   settings.accepted(settings.config!);
   const calls: string[] = [];
   const registration = Promise.withResolvers<void>();
-  const oldSources = Promise.withResolvers<Source[]>();
+  const oldSources = Promise.withResolvers<{ sources: Source[] }>();
   cleanup.push(async () => {
     registration.resolve();
-    oldSources.resolve([]);
+    oldSources.resolve({ sources: [] });
   });
   settings.api!.buttonRequest = async (path, _owner, _body, method) => {
     calls.push(`${method ?? "POST"} ${path}`);
@@ -362,7 +362,7 @@ test("connection switch drains old button registration and rejects stale server 
   const runtime = new ClientRuntime(settings, f.desktop);
   cleanup.push(async () => {
     registration.resolve();
-    oldSources.resolve([]);
+    oldSources.resolve({ sources: [] });
     await runtime.close();
   });
   runtime.start();
@@ -391,7 +391,7 @@ test("connection switch drains old button registration and rejects stale server 
   expect(await runtime.command("start")).toContain("connection is changing");
   registration.resolve();
   await saving;
-  oldSources.resolve([]);
+  oldSources.resolve({ sources: [] });
   expect(await pendingSources).toContain("connection changed");
   expect(calls[0]).toBe("POST ");
   expect(calls[1]).toStartWith("DELETE /");

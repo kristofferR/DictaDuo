@@ -16,7 +16,7 @@ const help = `SottoDuo for Linux
   sottoduo toggle|cancel    Toggle recording or cancel this desktop's take
   sottoduo undo             Insert a just-cancelled take after all (4 seconds)
   sottoduo status|result    Show state or the current process's last result
-  sottoduo arm|disarm       Select or clear this computer for the DJI pairing button
+  sottoduo arm|disarm       Point the DJI button at this computer, or away from it
   sottoduo button-status    Show button destination and receiver availability
   sottoduo copy             Explicitly copy that result; never inject paste keys
 

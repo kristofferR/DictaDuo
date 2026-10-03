@@ -152,13 +152,54 @@ paths:
       operationId: "listAudioSources"
       responses:
         "200":
-          description: "Bounded snapshot; discovery never starts audio or connects Bluetooth."
+          description: "Bounded snapshot; discovery never starts audio or connects Bluetooth.
+            Other computers only see shared sources."
           content:
             "application/json":
               schema:
                 "$ref": "#/components/schemas/AudioSourceList"
         default:
           "$ref": "#/components/responses/APIError"
+  "/v1/audio-sources/sharing":
+    put:
+      operationId: "setAudioSourceSharing"
+      description: "Shares or stops sharing one source with other computers. Only a client on
+        the computer that hosts the sources may change this."
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              "$ref": "#/components/schemas/AudioSourceSharing"
+      responses:
+        "200":
+          description: "Updated snapshot."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/AudioSourceList"
+        default:
+          "$ref": "#/components/responses/APIError"
+  /v1/button-destinations/target:
+    put:
+      operationId: setButtonTarget
+      description: Chooses where the DJI button types. Stored on the server and shared by
+        every destination.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ButtonTarget"
+      responses:
+        "200":
+          description: Live button-destination state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ButtonDestinationState"
+        default:
+          $ref: "#/components/responses/APIError"
   "/v2/captures":
     post:
       operationId: "startCapture"
@@ -1308,9 +1349,27 @@ components:
           type: boolean
         command:
           $ref: "#/components/schemas/ButtonCommand"
+        buttonTarget:
+          $ref: "#/components/schemas/ButtonTarget"
       required:
         - destinations
         - available
+    ButtonTarget:
+      type: object
+      additionalProperties: false
+      description: lastDictated follows the computer of the latest successful shortcut
+        dictation; device always types into one computer; off ignores the button.
+      properties:
+        mode:
+          type: string
+          enum:
+            - lastDictated
+            - device
+            - "off"
+        device:
+          $ref: "#/components/schemas/DeviceIdentity"
+      required:
+        - mode
     HeartbeatButtonDestination:
       type: object
       additionalProperties: false
@@ -1376,6 +1435,13 @@ components:
         reason:
           type: "string"
           maxLength: 512
+        shared:
+          type: "boolean"
+          description: "Other computers may record from this source."
+        recordingFor:
+          "$ref": "#/components/schemas/DeviceIdentity"
+          description: "The device whose take this computer is recording. One take holds every
+            source until it ends."
       required: [identity, name, transport, present, link, capture, audioHealth, observedAt]
     AudioSourceList:
       type: "object"
@@ -1386,7 +1452,31 @@ components:
           maxItems: 32
           items:
             "$ref": "#/components/schemas/AudioSource"
+        sharingHost:
+          "$ref": "#/components/schemas/SharingHost"
       required: [sources]
+    SharingHost:
+      type: "object"
+      additionalProperties: false
+      description: "The computer whose sources are listed."
+      properties:
+        name:
+          type: "string"
+          minLength: 1
+          maxLength: 128
+        local:
+          type: "boolean"
+          description: "The request came from that computer, so it may change sharing."
+      required: [name, local]
+    AudioSourceSharing:
+      type: "object"
+      additionalProperties: false
+      properties:
+        source:
+          "$ref": "#/components/schemas/AudioSourceIdentity"
+        shared:
+          type: "boolean"
+      required: [source, shared]
     RemoteCapture:
       type: "object"
       additionalProperties: false

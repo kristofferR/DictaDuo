@@ -2,9 +2,12 @@ import { afterEach, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { ButtonDestinations } from "../src/button-destinations.ts";
 import type { GenerationService } from "../src/generation-service.ts";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 const brokers: ButtonDestinations[] = [];
 afterEach(() => brokers.splice(0).forEach((b) => b.shutdown()));
-function fixture() {
+function fixture(targetFile?: string) {
   let now = Date.now();
   let connected = true;
   const source = { hostID: "desktop", id: "dji" };
@@ -29,7 +32,7 @@ function fixture() {
       throw new Error("No completed generation");
     },
   };
-  const broker = new ButtonDestinations(service, () => now);
+  const broker = new ButtonDestinations(service, () => now, targetFile);
   brokers.push(broker);
   const a = randomUUID().toUpperCase(),
     b = randomUUID().toUpperCase(),
@@ -154,4 +157,71 @@ test("a second tap during preparation cancels instead of opening a delayed recor
   expect(claim.signal.aborted).toBe(true);
   expect(f.broker.state(f.a).command?.action).toBe("cancel");
   expect(f.broker.state().selected).toBeUndefined();
+});
+
+test("a pinned computer stays selected, dictating elsewhere does not move it, and it survives restarts", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sottoduo-button-target-"));
+  try {
+    const file = join(directory, "button-target.json");
+    const f = fixture(file);
+    expect(f.broker.state().buttonTarget).toEqual({ mode: "lastDictated" });
+    await f.broker.setTarget({ mode: "device", device: { id: "linux", name: "Linux" } });
+    expect(f.broker.state().selected?.id).toBe(f.b);
+    // A shortcut take on the Mac would select it in lastDictated mode.
+    await f.broker.select(f.a, {}, f.owner);
+    expect(f.broker.state().selected?.id).toBe(f.b);
+    f.broker.press("epoch", 1);
+    expect(f.broker.state(f.b).command?.action).toBe("start");
+
+    // The same target applies after a restart, once the pinned computer registers again.
+    const restarted = fixture(file);
+    expect(restarted.broker.state().buttonTarget).toEqual({
+      mode: "device",
+      device: { id: "linux", name: "Linux" },
+    });
+    expect(restarted.broker.state().selected?.id).toBe(restarted.b);
+
+    await restarted.broker.setTarget({ mode: "off" });
+    expect(restarted.broker.state().selected).toBeUndefined();
+    await restarted.broker.select(restarted.a, {}, restarted.owner);
+    restarted.advance(501);
+    restarted.broker.press("epoch", 1);
+    expect(restarted.broker.state(restarted.a).command).toBeUndefined();
+    expect(restarted.broker.state(restarted.b).command).toBeUndefined();
+    await expect(restarted.broker.setTarget({ mode: "device" })).rejects.toThrow();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a target change lets the current button take finish and never inherits a pinned selection", async () => {
+  const f = fixture();
+  await f.broker.setTarget({ mode: "device", device: { id: "linux", name: "Linux" } });
+  f.broker.press("epoch", 1);
+  const command = f.broker.state(f.b).command!;
+  expect(command.action).toBe("start");
+  await f.broker.setTarget({ mode: "off" });
+  // The take started on Linux keeps recording there.
+  expect(f.broker.state(f.b).command?.id).toBe(command.id);
+  f.broker.complete(f.b, command.takeID, f.owner);
+  expect(f.broker.state().selected).toBeUndefined();
+  await f.broker.setTarget({ mode: "device", device: { id: "linux", name: "Linux" } });
+  expect(f.broker.state().selected?.id).toBe(f.b);
+  // Back to "last computer I dictated on": nothing is selected until a shortcut take.
+  await f.broker.setTarget({ mode: "lastDictated" });
+  expect(f.broker.state().selected).toBeUndefined();
+  // Also when the switch happens during a take: the take finishes, then nothing is selected.
+  await f.broker.setTarget({ mode: "device", device: { id: "linux", name: "Linux" } });
+  f.advance(501);
+  f.broker.press("epoch", 2);
+  const take = f.broker.state(f.b).command!;
+  await f.broker.setTarget({ mode: "lastDictated" });
+  expect(f.broker.state().selected?.id).toBe(f.b);
+  f.broker.complete(f.b, take.takeID, f.owner);
+  expect(f.broker.state().selected).toBeUndefined();
+});
+test("a target that cannot be saved is reported and not applied", async () => {
+  const f = fixture("/nonexistent-sottoduo-directory/button-target.json");
+  await expect(f.broker.setTarget({ mode: "off" })).rejects.toThrow();
+  expect(f.broker.state().buttonTarget).toEqual({ mode: "lastDictated" });
 });

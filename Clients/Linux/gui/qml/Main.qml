@@ -212,8 +212,8 @@ ApplicationWindow {
                 app.sources = data;
                 app.sourcesChecked = true;
             }
-            if (["arm", "disarm", "saveSources"].includes(action))
-                app.notice = action.startsWith("save") ? "Changes saved." : "Destination updated.";
+            if (action === "saveSources")
+                app.notice = "Changes saved.";
         }
         function onFailed(action, message) {
             if (action === "test")
@@ -238,8 +238,8 @@ ApplicationWindow {
             }
             if (!bridge.connected)
                 return;
-            // Receiver controls display their errors beside the affected settings.
-            if (["history", "historyEntry", "historyAudio", "historyArtifact", "deleteHistory", "preferences", "savePreferences", "processingDefaults", "saveMicrophones", "testConnection", "saveConnection", "receiver", "saveButton", "arm", "disarm", "shortcuts", "saveShortcut", "checkShortcut", "endShortcutCheck"].includes(action))
+            // Receiver, sharing and DJI button controls display their errors beside the affected settings.
+            if (["history", "historyEntry", "historyAudio", "historyArtifact", "deleteHistory", "preferences", "savePreferences", "processingDefaults", "saveMicrophones", "testConnection", "saveConnection", "receiver", "saveButton", "setButtonTarget", "setSharing", "shortcuts", "saveShortcut", "checkShortcut", "endShortcutCheck"].includes(action))
                 return;
             if (action === "connection") {
                 app.serverConnection = "Server unavailable";

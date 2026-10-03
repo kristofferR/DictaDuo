@@ -1,3 +1,4 @@
+import SottoDuoAPI
 import SottoDuoCore
 import SwiftUI
 
@@ -33,6 +34,7 @@ private struct MicrophoneSettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 25) {
                 SottoDuoPageHeading(title: "Microphone")
+                sharingNote(devices.filter { $0.remote != nil })
                 inputSection(profile: profile, resolution: resolution, devices: devices)
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Input priority")
@@ -54,6 +56,7 @@ private struct MicrophoneSettingsView: View {
                         .padding(.horizontal, 10)
                 }
                 SottoDuoMicrophoneTestButton(controller: controller, identifier: "microphone.test")
+                DJIButtonSection(controller: controller, preferences: controller.preferences, store: store)
             }
             .padding(.horizontal, 28)
             .padding(.top, 30)
@@ -87,11 +90,11 @@ private struct MicrophoneSettingsView: View {
                             Text("System default").tag(MicrophoneChoice.systemDefault)
                             Divider()
                             ForEach(devices) { device in
-                                Text(device.displayName).tag(MicrophoneChoice.device(device.id))
+                                Text(store.qualifiedName(device)).tag(MicrophoneChoice.device(device.id))
                             }
                             if case .fixed(let device) = store.preferences.selection,
                                !devices.contains(where: { $0.id == device.id }) {
-                                Text("\(device.displayName) (disconnected)").tag(MicrophoneChoice.device(device.id))
+                                Text("\(store.qualifiedName(device)) (disconnected)").tag(MicrophoneChoice.device(device.id))
                             }
                         }
                         .labelsHidden()
@@ -105,11 +108,18 @@ private struct MicrophoneSettingsView: View {
                     HStack {
                         Text("Next dictation")
                         Spacer(minLength: 16)
-                        Text(resolution.device?.displayName ?? "No microphone available")
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .foregroundStyle(.secondary)
-                            .help(resolution.device?.displayName ?? "Connect an audio input to record.")
+                        if let device = resolution.device {
+                            Text(device.displayName)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .foregroundStyle(.secondary)
+                                .help(store.qualifiedName(device))
+                            MicrophoneHostChip(host: store.hostName(device))
+                        } else {
+                            Text("No microphone available")
+                                .foregroundStyle(.secondary)
+                                .help("Connect an audio input to record.")
+                        }
                     }
                     .frame(height: 48)
                     .accessibilityIdentifier("microphone.resolved")
@@ -199,34 +209,11 @@ private struct MicrophoneSettingsView: View {
                                      connected: connected[device.id], isSelected: selectedID == device.id)
                     }
 
-                    if !otherDevices.isEmpty {
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text("Available inputs")
-                                .font(.caption)
-                                .foregroundStyle(SottoDuoPalette.muted)
-                                .padding(.top, 18)
-                                .padding(.bottom, 4)
-                            ForEach(otherDevices) { device in
-                                HStack(spacing: 12) {
-                                    deviceLabel(device, available: store.isEligible(device))
-                                        .padding(.leading, 30)
-                                    Spacer(minLength: 8)
-                                    Text(store.availability(device))
-                                        .font(.caption)
-                                        .foregroundStyle(SottoDuoPalette.muted)
-                                        .fixedSize()
-                                    Button { store.addToPriority(device) } label: {
-                                        SottoDuoControlIcon(systemName: "plus")
-                                    }
-                                    .buttonStyle(.borderless)
-                                    .foregroundStyle(SottoDuoPalette.accentInk)
-                                    .help("Add \(device.displayName) to \(profile.name)")
-                                    .accessibilityLabel("Add \(device.displayName) to priority list")
-                                }
-                                .frame(minHeight: 64)
-                                .overlay(alignment: .bottom) { Divider() }
-                            }
-                        }
+                    let local = otherDevices.filter { $0.remote == nil }
+                    if !local.isEmpty { availableInputs("On this Mac", devices: local, profile: profile) }
+                    let shared = Dictionary(grouping: otherDevices.filter { $0.remote != nil }) { store.hostName($0) ?? "" }
+                    ForEach(shared.keys.sorted(), id: \.self) { host in
+                        availableInputs("Shared from \(host) · add to use here", devices: shared[host] ?? [], profile: profile)
                     }
                 }
             }
@@ -248,19 +235,56 @@ private struct MicrophoneSettingsView: View {
         .accessibilityIdentifier("microphone.priorities")
     }
 
+    private func availableInputs(_ title: String, devices: [AudioInputDevice], profile: MicrophoneProfile) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(SottoDuoPalette.muted)
+                .padding(.top, 18)
+                .padding(.bottom, 4)
+            ForEach(devices) { device in
+                HStack(spacing: 12) {
+                    deviceLabel(device, available: store.isEligible(device))
+                        .padding(.leading, 30)
+                    Spacer(minLength: 8)
+                    Text(store.availability(device))
+                        .font(.caption)
+                        .foregroundStyle(SottoDuoPalette.muted)
+                        .fixedSize()
+                    Button { store.addToPriority(device) } label: {
+                        SottoDuoControlIcon(systemName: "plus")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(SottoDuoPalette.accentInk)
+                    .help("Add \(store.qualifiedName(device)) to \(profile.name)")
+                    .accessibilityLabel("Add \(store.qualifiedName(device)) to priority list")
+                }
+                .frame(minHeight: 64)
+                .overlay(alignment: .bottom) { Divider() }
+            }
+        }
+    }
+
+    private var hint: String {
+        guard let host = store.currentHostName else {
+            return "Drag a handle to reorder. Disconnected microphones keep their place."
+        }
+        return "Drag a handle to reorder. \(host) records one take at a time. While another computer is dictating with it, the next mic in your list is used."
+    }
+
     private var footer: some View {
         HStack(alignment: .top, spacing: 7) {
             if store.storageError != nil {
                 Image(systemName: "exclamationmark.circle")
                     .frame(width: 14)
             }
-            Text(store.storageError ?? "Drag a handle to reorder. Disconnected microphones keep their place.")
-                .lineLimit(2)
+            Text(store.storageError ?? hint)
+                .lineLimit(3)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .font(.caption)
         .foregroundStyle(store.storageError == nil ? .secondary : Color.orange)
-        .frame(height: 32, alignment: .topLeading)
+        .frame(minHeight: 32, alignment: .topLeading)
         .help(store.storageError ?? "In Automatic mode, the first ready microphone in the selected list is used.")
     }
 
@@ -284,10 +308,10 @@ private struct MicrophoneSettingsView: View {
     }
 
     private func selectionDetail(profile: MicrophoneProfile, resolution: MicrophoneResolution) -> String {
-        if let recordingInputName { return "Current take: \(recordingInputName) → this Mac. Changes apply to your next dictation." }
+        if let recordingInputName { return "Recording with \(recordingInputName). Changes apply to your next dictation." }
         switch resolution.reason {
         case .fallback(let requested):
-            if let requested { return "\(requested.displayName) is unavailable. It will be used again when it is ready." }
+            if let requested { return "\(store.qualifiedName(requested)) is unavailable. It will be used again when it is ready." }
             return "The system input is unavailable. Using the first available microphone."
         case .unavailable: return "Connect an audio input to start dictating."
         case .priority: return "The first ready microphone in “\(profile.name)” is used."
@@ -335,7 +359,7 @@ private struct MicrophoneSettingsView: View {
             Button("Remove from priority list") { store.removeFromPriority(id: device.id) }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Priority \(position + 1), \((connected ?? device).displayName)")
+        .accessibilityLabel("Priority \(position + 1), \(store.qualifiedName(connected ?? device))")
         .accessibilityValue(store.availability(device) + (isSelected ? ", next dictation" : ""))
         .accessibilityActions {
             if position > 0 {
@@ -363,7 +387,7 @@ private struct MicrophoneSettingsView: View {
                 .foregroundStyle(SottoDuoPalette.muted)
                 .fixedSize()
             MicrophoneReorderHandle()
-                .help("Drag to reorder \(device.displayName)")
+                .help("Drag to reorder \(store.qualifiedName(device))")
                 .highPriorityGesture(priorityDragGesture(id: device.id))
         }
         .frame(minHeight: 64)
@@ -450,12 +474,233 @@ private struct MicrophoneSettingsView: View {
                 .frame(width: 20, height: 24)
                 .accessibilityHidden(true)
             Text(device.displayName)
-                .help(device.displayName + " · " + store.availability(device))
+                .help(store.qualifiedName(device) + " · " + store.availability(device))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .foregroundStyle(available ? SottoDuoPalette.ink : SottoDuoPalette.muted)
+            MicrophoneHostChip(host: store.hostName(device))
         }
         .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private func sharingNote(_ shared: [AudioInputDevice]) -> some View {
+        if let host = shared.first.flatMap(store.hostName) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: "link")
+                    .foregroundStyle(SottoDuoPalette.accentInk)
+                    .accessibilityHidden(true)
+                Text("\(host) shares \(shared.count) \(shared.count == 1 ? "mic" : "mics") with this Mac. Add one to your list to dictate with it here. The text still lands on this Mac. Sharing is set on \(host).")
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.callout)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(SottoDuoPalette.tint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("microphone.sharing-note")
+        }
+    }
+}
+
+/// Where an input lives: a shared mic's computer, or this Mac.
+private struct MicrophoneHostChip: View {
+    var host: String?
+
+    var body: some View {
+        let shape = Capsule()
+        Text(host.map { "Shared · \($0)" } ?? "This Mac")
+            .font(.caption2.weight(.medium))
+            .lineLimit(1)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .foregroundStyle(host == nil ? SottoDuoPalette.muted : SottoDuoPalette.accentInk)
+            .background(host == nil ? Color.clear : SottoDuoPalette.accent.opacity(0.14), in: shape)
+            .overlay { if host == nil { shape.strokeBorder(SottoDuoPalette.line) } }
+            .fixedSize()
+    }
+}
+
+/// Where the server's DJI button types, plus a receiver plugged into this Mac.
+private struct DJIButtonSection: View {
+    @ObservedObject var controller: SottoDuoController
+    @ObservedObject var preferences: ClientPreferencesStore
+    @ObservedObject var store: MicrophonePreferencesStore
+    @State private var error: String?
+
+    private struct Computer: Identifiable {
+        let id: String
+        let name: String
+        var offline = false
+    }
+
+    private enum Choice: Hashable {
+        case lastDictated, device(String), off
+    }
+
+    /// The server's name, from shared mic discovery.
+    private var serverName: String { store.currentHostName ?? "the server" }
+
+    var body: some View {
+        let state = controller.remoteButtonState
+        VStack(alignment: .leading, spacing: 10) {
+            Text("DJI button")
+                .font(.headline)
+                .padding(.horizontal, 10)
+            SottoDuoSettingsGroup {
+                VStack(spacing: 0) {
+                    if let state, let target = state.buttonTarget {
+                        targetRow(state, target: target)
+                        Divider()
+                    }
+                    HStack {
+                        Text("Receiver")
+                        Spacer(minLength: 16)
+                        Text(receiverStatus(state))
+                            .multilineTextAlignment(.trailing)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(minHeight: 48)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("microphone.dji-receiver")
+                    Divider()
+                    switchRow("Let the DJI button type here", isOn: $preferences.remoteButtonEnabled)
+                        .accessibilityIdentifier("microphone.dji-type-here")
+                    if controller.hasDetectedDJIMicrophone || controller.djiMicButtonEnabled {
+                        Divider()
+                        localReceiver
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            if let error {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(SottoDuoPalette.warning)
+                    .padding(.horizontal, 10)
+            }
+        }
+        .disabled(controller.isBusy)
+        .onChange(of: preferences.remoteButtonEnabled) { _, _ in controller.refreshRemoteButtons() }
+        .task {
+            while !Task.isCancelled {
+                await controller.refreshButtonState()
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            }
+        }
+    }
+
+    /// Connected destinations, plus a pinned computer that is offline.
+    private func computers(_ state: ButtonDestinationState, target: ButtonTarget) -> [Computer] {
+        var computers: [Computer] = []
+        for destination in state.destinations where !computers.contains(where: { $0.id == destination.device.id }) {
+            computers.append(Computer(id: destination.device.id, name: destination.device.name))
+        }
+        if target.mode == .device, let pinned = target.device, !computers.contains(where: { $0.id == pinned.id }) {
+            computers.append(Computer(id: pinned.id, name: pinned.name, offline: true))
+        }
+        return computers
+    }
+
+    private func targetRow(_ state: ButtonDestinationState, target: ButtonTarget) -> some View {
+        let computers = computers(state, target: target)
+        let selection = Binding<Choice> {
+            switch target.mode {
+            case .lastDictated: .lastDictated
+            case .device: .device(target.device?.id ?? "")
+            case .off: .off
+            }
+        } set: { choice in
+            let next: ButtonTarget
+            switch choice {
+            case .lastDictated: next = ButtonTarget(mode: .lastDictated)
+            case .off: next = ButtonTarget(mode: .off)
+            case .device(let id):
+                guard let computer = computers.first(where: { $0.id == id }) else { return }
+                next = ButtonTarget(mode: .device, device: .init(id: computer.id, name: computer.name))
+            }
+            Task {
+                do { try await controller.setButtonTarget(next); error = nil }
+                catch { self.error = error.localizedDescription }
+            }
+        }
+        let selected = state.selected?.device
+        var current = "Right now: " + (selected.map { $0.id == preferences.deviceID ? "this Mac" : $0.name } ?? "nowhere")
+        if target.mode == .lastDictated, selected != nil { current += ", where you last dictated" }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Button types into")
+                Spacer(minLength: 16)
+                Picker("Button types into", selection: selection) {
+                    Text("Last computer I dictated on").tag(Choice.lastDictated)
+                    Divider()
+                    ForEach(computers) { computer in
+                        let name = computer.id == preferences.deviceID ? "this Mac" : computer.name
+                        Text("Always \(name)" + (computer.offline ? " (offline)" : "")).tag(Choice.device(computer.id))
+                    }
+                    Divider()
+                    Text("Nowhere").tag(Choice.off)
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(maxWidth: 300, alignment: .trailing)
+                .accessibilityIdentifier("microphone.dji-target")
+            }
+            Text(current)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 12)
+    }
+
+    private func receiverStatus(_ state: ButtonDestinationState?) -> String {
+        guard let state else { return "Unavailable · can’t reach \(serverName)" }
+        guard let identity = state.source else { return "Unavailable · no receiver on \(serverName)" }
+        let host = store.hostNames[identity.hostID] ?? serverName
+        // The Mac only sees the receiver when it is shared with other computers.
+        guard let device = store.availableDevices.first(where: { $0.remote?.hostID == identity.hostID && $0.uid == identity.id }),
+              let source = store.source(device) else { return "Unavailable · not shared with this Mac" }
+        // Ready hardware can still be held by another computer's take.
+        if let holder = store.busyFor(device) { return "Busy · \(holder.name) is dictating" }
+        if state.available { return "Plugged into \(host) · transmitter linked" }
+        if !source.present { return "Unavailable · receiver unplugged" }
+        if source.link != .connected { return "Unavailable · transmitter not linked" }
+        return "Unavailable · waiting for the receiver"
+    }
+
+    private var localReceiver: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            switchRow("Receiver plugged into this Mac", isOn: $controller.djiMicButtonEnabled)
+                .accessibilityIdentifier("preferences.dji-mic-button")
+            Text("Only for a receiver connected to this Mac by USB-C. Leave off when the receiver is on \(serverName).")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if controller.djiMicButtonEnabled {
+                HStack {
+                    Text(controller.djiMicButtonStatus.message)
+                        .font(.caption)
+                        .accessibilityIdentifier("preferences.dji-mic-status")
+                    Spacer(minLength: 16)
+                    if controller.djiMicButtonStatus == .permissionRequired {
+                        Button("Allow Input Monitoring", action: controller.requestInputMonitoring)
+                    }
+                    Button("Check receiver", action: controller.retryDJIMicButton)
+                }
+            }
+        }
+        .padding(.bottom, 12)
+    }
+
+    private func switchRow(_ title: String, isOn: Binding<Bool>) -> some View {
+        HStack {
+            Text(title)
+            Spacer(minLength: 16)
+            Toggle(title, isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        }
+        .frame(minHeight: 48)
     }
 }
 

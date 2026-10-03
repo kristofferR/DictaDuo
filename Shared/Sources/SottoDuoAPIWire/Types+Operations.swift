@@ -983,7 +983,7 @@ public enum Operations {
                     self.body = body
                 }
             }
-            /// Bounded snapshot; discovery never starts audio or connects Bluetooth.
+            /// Bounded snapshot; discovery never starts audio or connects Bluetooth. Other computers only see shared sources.
             ///
             /// - Remark: Generated from `#/paths//v1/audio-sources/get(listAudioSources)/responses/200`.
             ///
@@ -1009,6 +1009,286 @@ public enum Operations {
             /// A request, admission, or server error.
             ///
             /// - Remark: Generated from `#/paths//v1/audio-sources/get(listAudioSources)/responses/default`.
+            ///
+            /// HTTP response code: `default`.
+            case `default`(statusCode: Swift.Int, Components.Responses.APIError)
+            /// The associated value of the enum case if `self` is `.`default``.
+            ///
+            /// - Throws: An error if `self` is not `.`default``.
+            /// - SeeAlso: `.`default``.
+            public var `default`: Components.Responses.APIError {
+                get throws {
+                    switch self {
+                    case let .`default`(_, response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "default",
+                            response: self
+                        )
+                    }
+                }
+            }
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Shares or stops sharing one source with other computers. Only a client on the computer that hosts the sources may change this.
+    ///
+    /// - Remark: HTTP `PUT /v1/audio-sources/sharing`.
+    /// - Remark: Generated from `#/paths//v1/audio-sources/sharing/put(setAudioSourceSharing)`.
+    public enum SetAudioSourceSharing {
+        public static let id: Swift.String = "setAudioSourceSharing"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/v1/audio-sources/sharing/PUT/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.SetAudioSourceSharing.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.SetAudioSourceSharing.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.SetAudioSourceSharing.Input.Headers
+            /// - Remark: Generated from `#/paths/v1/audio-sources/sharing/PUT/requestBody`.
+            @frozen public enum Body: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/audio-sources/sharing/PUT/requestBody/content/application\/json`.
+                case json(Components.Schemas.AudioSourceSharing)
+            }
+            public var body: Operations.SetAudioSourceSharing.Input.Body
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            ///   - body:
+            public init(
+                headers: Operations.SetAudioSourceSharing.Input.Headers = .init(),
+                body: Operations.SetAudioSourceSharing.Input.Body
+            ) {
+                self.headers = headers
+                self.body = body
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/audio-sources/sharing/PUT/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/v1/audio-sources/sharing/PUT/responses/200/content/application\/json`.
+                    case json(Components.Schemas.AudioSourceList)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.AudioSourceList {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.SetAudioSourceSharing.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.SetAudioSourceSharing.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Updated snapshot.
+            ///
+            /// - Remark: Generated from `#/paths//v1/audio-sources/sharing/put(setAudioSourceSharing)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.SetAudioSourceSharing.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.SetAudioSourceSharing.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// A request, admission, or server error.
+            ///
+            /// - Remark: Generated from `#/paths//v1/audio-sources/sharing/put(setAudioSourceSharing)/responses/default`.
+            ///
+            /// HTTP response code: `default`.
+            case `default`(statusCode: Swift.Int, Components.Responses.APIError)
+            /// The associated value of the enum case if `self` is `.`default``.
+            ///
+            /// - Throws: An error if `self` is not `.`default``.
+            /// - SeeAlso: `.`default``.
+            public var `default`: Components.Responses.APIError {
+                get throws {
+                    switch self {
+                    case let .`default`(_, response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "default",
+                            response: self
+                        )
+                    }
+                }
+            }
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Chooses where the DJI button types. Stored on the server and shared by every destination.
+    ///
+    /// - Remark: HTTP `PUT /v1/button-destinations/target`.
+    /// - Remark: Generated from `#/paths//v1/button-destinations/target/put(setButtonTarget)`.
+    public enum SetButtonTarget {
+        public static let id: Swift.String = "setButtonTarget"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/v1/button-destinations/target/PUT/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.SetButtonTarget.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.SetButtonTarget.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.SetButtonTarget.Input.Headers
+            /// - Remark: Generated from `#/paths/v1/button-destinations/target/PUT/requestBody`.
+            @frozen public enum Body: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/button-destinations/target/PUT/requestBody/content/application\/json`.
+                case json(Components.Schemas.ButtonTarget)
+            }
+            public var body: Operations.SetButtonTarget.Input.Body
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            ///   - body:
+            public init(
+                headers: Operations.SetButtonTarget.Input.Headers = .init(),
+                body: Operations.SetButtonTarget.Input.Body
+            ) {
+                self.headers = headers
+                self.body = body
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/button-destinations/target/PUT/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/v1/button-destinations/target/PUT/responses/200/content/application\/json`.
+                    case json(Components.Schemas.ButtonDestinationState)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ButtonDestinationState {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.SetButtonTarget.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.SetButtonTarget.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Live button-destination state.
+            ///
+            /// - Remark: Generated from `#/paths//v1/button-destinations/target/put(setButtonTarget)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.SetButtonTarget.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.SetButtonTarget.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// A request, admission, or server error.
+            ///
+            /// - Remark: Generated from `#/paths//v1/button-destinations/target/put(setButtonTarget)/responses/default`.
             ///
             /// HTTP response code: `default`.
             case `default`(statusCode: Swift.Int, Components.Responses.APIError)

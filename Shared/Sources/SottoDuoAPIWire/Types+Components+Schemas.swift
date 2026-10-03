@@ -827,6 +827,8 @@ extension Components {
             public var available: Swift.Bool
             /// - Remark: Generated from `#/components/schemas/ButtonDestinationState/command`.
             public var command: Components.Schemas.ButtonCommand?
+            /// - Remark: Generated from `#/components/schemas/ButtonDestinationState/buttonTarget`.
+            public var buttonTarget: Components.Schemas.ButtonTarget?
             /// Creates a new `ButtonDestinationState`.
             ///
             /// - Parameters:
@@ -835,18 +837,21 @@ extension Components {
             ///   - source:
             ///   - available:
             ///   - command:
+            ///   - buttonTarget:
             public init(
                 selected: Components.Schemas.ButtonDestination? = nil,
                 destinations: [Components.Schemas.ButtonDestination],
                 source: Components.Schemas.AudioSourceIdentity? = nil,
                 available: Swift.Bool,
-                command: Components.Schemas.ButtonCommand? = nil
+                command: Components.Schemas.ButtonCommand? = nil,
+                buttonTarget: Components.Schemas.ButtonTarget? = nil
             ) {
                 self.selected = selected
                 self.destinations = destinations
                 self.source = source
                 self.available = available
                 self.command = command
+                self.buttonTarget = buttonTarget
             }
             public enum CodingKeys: String, CodingKey {
                 case selected
@@ -854,6 +859,7 @@ extension Components {
                 case source
                 case available
                 case command
+                case buttonTarget
             }
             public init(from decoder: any Swift.Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -877,12 +883,63 @@ extension Components {
                     Components.Schemas.ButtonCommand.self,
                     forKey: .command
                 )
+                self.buttonTarget = try container.decodeIfPresent(
+                    Components.Schemas.ButtonTarget.self,
+                    forKey: .buttonTarget
+                )
                 try decoder.ensureNoAdditionalProperties(knownKeys: [
                     "selected",
                     "destinations",
                     "source",
                     "available",
-                    "command"
+                    "command",
+                    "buttonTarget"
+                ])
+            }
+        }
+        /// lastDictated follows the computer of the latest successful shortcut dictation; device always types into one computer; off ignores the button.
+        ///
+        /// - Remark: Generated from `#/components/schemas/ButtonTarget`.
+        public struct ButtonTarget: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ButtonTarget/mode`.
+            @frozen public enum ModePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                case lastDictated = "lastDictated"
+                case device = "device"
+                case off = "off"
+            }
+            /// - Remark: Generated from `#/components/schemas/ButtonTarget/mode`.
+            public var mode: Components.Schemas.ButtonTarget.ModePayload
+            /// - Remark: Generated from `#/components/schemas/ButtonTarget/device`.
+            public var device: Components.Schemas.DeviceIdentity?
+            /// Creates a new `ButtonTarget`.
+            ///
+            /// - Parameters:
+            ///   - mode:
+            ///   - device:
+            public init(
+                mode: Components.Schemas.ButtonTarget.ModePayload,
+                device: Components.Schemas.DeviceIdentity? = nil
+            ) {
+                self.mode = mode
+                self.device = device
+            }
+            public enum CodingKeys: String, CodingKey {
+                case mode
+                case device
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.mode = try container.decode(
+                    Components.Schemas.ButtonTarget.ModePayload.self,
+                    forKey: .mode
+                )
+                self.device = try container.decodeIfPresent(
+                    Components.Schemas.DeviceIdentity.self,
+                    forKey: .device
+                )
+                try decoder.ensureNoAdditionalProperties(knownKeys: [
+                    "mode",
+                    "device"
                 ])
             }
         }
@@ -1045,6 +1102,14 @@ extension Components {
             public var observedAt: Foundation.Date
             /// - Remark: Generated from `#/components/schemas/AudioSource/reason`.
             public var reason: Swift.String?
+            /// Other computers may record from this source.
+            ///
+            /// - Remark: Generated from `#/components/schemas/AudioSource/shared`.
+            public var shared: Swift.Bool?
+            /// The device whose take this computer is recording. One take holds every source until it ends.
+            ///
+            /// - Remark: Generated from `#/components/schemas/AudioSource/recordingFor`.
+            public var recordingFor: Components.Schemas.DeviceIdentity?
             /// Creates a new `AudioSource`.
             ///
             /// - Parameters:
@@ -1057,6 +1122,8 @@ extension Components {
             ///   - audioHealth:
             ///   - observedAt:
             ///   - reason:
+            ///   - shared: Other computers may record from this source.
+            ///   - recordingFor: The device whose take this computer is recording. One take holds every source until it ends.
             public init(
                 identity: Components.Schemas.AudioSourceIdentity,
                 name: Swift.String,
@@ -1066,7 +1133,9 @@ extension Components {
                 capture: Components.Schemas.AudioSource.CapturePayload,
                 audioHealth: Components.Schemas.AudioSource.AudioHealthPayload,
                 observedAt: Foundation.Date,
-                reason: Swift.String? = nil
+                reason: Swift.String? = nil,
+                shared: Swift.Bool? = nil,
+                recordingFor: Components.Schemas.DeviceIdentity? = nil
             ) {
                 self.identity = identity
                 self.name = name
@@ -1077,6 +1146,8 @@ extension Components {
                 self.audioHealth = audioHealth
                 self.observedAt = observedAt
                 self.reason = reason
+                self.shared = shared
+                self.recordingFor = recordingFor
             }
             public enum CodingKeys: String, CodingKey {
                 case identity
@@ -1088,6 +1159,8 @@ extension Components {
                 case audioHealth
                 case observedAt
                 case reason
+                case shared
+                case recordingFor
             }
             public init(from decoder: any Swift.Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -1127,6 +1200,14 @@ extension Components {
                     Swift.String.self,
                     forKey: .reason
                 )
+                self.shared = try container.decodeIfPresent(
+                    Swift.Bool.self,
+                    forKey: .shared
+                )
+                self.recordingFor = try container.decodeIfPresent(
+                    Components.Schemas.DeviceIdentity.self,
+                    forKey: .recordingFor
+                )
                 try decoder.ensureNoAdditionalProperties(knownKeys: [
                     "identity",
                     "name",
@@ -1136,7 +1217,9 @@ extension Components {
                     "capture",
                     "audioHealth",
                     "observedAt",
-                    "reason"
+                    "reason",
+                    "shared",
+                    "recordingFor"
                 ])
             }
         }
@@ -1144,15 +1227,23 @@ extension Components {
         public struct AudioSourceList: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/AudioSourceList/sources`.
             public var sources: [Components.Schemas.AudioSource]
+            /// - Remark: Generated from `#/components/schemas/AudioSourceList/sharingHost`.
+            public var sharingHost: Components.Schemas.SharingHost?
             /// Creates a new `AudioSourceList`.
             ///
             /// - Parameters:
             ///   - sources:
-            public init(sources: [Components.Schemas.AudioSource]) {
+            ///   - sharingHost:
+            public init(
+                sources: [Components.Schemas.AudioSource],
+                sharingHost: Components.Schemas.SharingHost? = nil
+            ) {
                 self.sources = sources
+                self.sharingHost = sharingHost
             }
             public enum CodingKeys: String, CodingKey {
                 case sources
+                case sharingHost
             }
             public init(from decoder: any Swift.Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -1160,8 +1251,93 @@ extension Components {
                     [Components.Schemas.AudioSource].self,
                     forKey: .sources
                 )
+                self.sharingHost = try container.decodeIfPresent(
+                    Components.Schemas.SharingHost.self,
+                    forKey: .sharingHost
+                )
                 try decoder.ensureNoAdditionalProperties(knownKeys: [
-                    "sources"
+                    "sources",
+                    "sharingHost"
+                ])
+            }
+        }
+        /// The computer whose sources are listed.
+        ///
+        /// - Remark: Generated from `#/components/schemas/SharingHost`.
+        public struct SharingHost: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/SharingHost/name`.
+            public var name: Swift.String
+            /// The request came from that computer, so it may change sharing.
+            ///
+            /// - Remark: Generated from `#/components/schemas/SharingHost/local`.
+            public var local: Swift.Bool
+            /// Creates a new `SharingHost`.
+            ///
+            /// - Parameters:
+            ///   - name:
+            ///   - local: The request came from that computer, so it may change sharing.
+            public init(
+                name: Swift.String,
+                local: Swift.Bool
+            ) {
+                self.name = name
+                self.local = local
+            }
+            public enum CodingKeys: String, CodingKey {
+                case name
+                case local
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.name = try container.decode(
+                    Swift.String.self,
+                    forKey: .name
+                )
+                self.local = try container.decode(
+                    Swift.Bool.self,
+                    forKey: .local
+                )
+                try decoder.ensureNoAdditionalProperties(knownKeys: [
+                    "name",
+                    "local"
+                ])
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/AudioSourceSharing`.
+        public struct AudioSourceSharing: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/AudioSourceSharing/source`.
+            public var source: Components.Schemas.AudioSourceIdentity
+            /// - Remark: Generated from `#/components/schemas/AudioSourceSharing/shared`.
+            public var shared: Swift.Bool
+            /// Creates a new `AudioSourceSharing`.
+            ///
+            /// - Parameters:
+            ///   - source:
+            ///   - shared:
+            public init(
+                source: Components.Schemas.AudioSourceIdentity,
+                shared: Swift.Bool
+            ) {
+                self.source = source
+                self.shared = shared
+            }
+            public enum CodingKeys: String, CodingKey {
+                case source
+                case shared
+            }
+            public init(from decoder: any Swift.Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.source = try container.decode(
+                    Components.Schemas.AudioSourceIdentity.self,
+                    forKey: .source
+                )
+                self.shared = try container.decode(
+                    Swift.Bool.self,
+                    forKey: .shared
+                )
+                try decoder.ensureNoAdditionalProperties(knownKeys: [
+                    "source",
+                    "shared"
                 ])
             }
         }
