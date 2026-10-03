@@ -177,7 +177,9 @@ struct ServerPreferencesPage: View {
                     .disabled(!dirty)
                 Button("Save shared preferences") {
                     controller.errorMessage = nil
-                    controller.updateSharedPreferences(cleanedDraft, expectedRevision: base?.revision)
+                    // The saved value must equal the draft, so the reply is recognized as this save.
+                    draft = cleanedDraft
+                    controller.updateSharedPreferences(draft, expectedRevision: base?.revision)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!available || !dirty || changedRemotely || cleanedDraft.validationError != nil || controller.isSavingPreferences)
