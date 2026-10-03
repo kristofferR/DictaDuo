@@ -906,7 +906,10 @@ export class GenerationService {
       if (record.rawText || record.status === "completed")
         await atomicPrivateWrite(
           join(this.directory(record.id), PREVIOUS_OUTPUT),
-          JSON.stringify(Object.fromEntries(outputKeys.map((key) => [key, record[key]]))),
+          JSON.stringify({
+            ...Object.fromEntries(outputKeys.map((key) => [key, record[key]])),
+            previousStatus: record.status,
+          }),
         );
       delete record.error;
       for (const key of outputKeys) delete record[key];
@@ -935,7 +938,9 @@ export class GenerationService {
   }
   /**
    * A retry that did not finish gives back the whole output it replaced, even
-   * when it had recognized new speech before failing or being interrupted.
+   * when it had recognized new speech before failing or being interrupted. A
+   * finished take stays finished; callers set the failure first, which then
+   * becomes the explanation of why nothing changed.
    */
   private async restorePreviousOutput(record: GenerationRecord) {
     const path = join(this.directory(record.id), PREVIOUS_OUTPUT);
@@ -943,9 +948,13 @@ export class GenerationService {
       try {
         const previous = JSON.parse(
           (await readRegularFile(path, MAX_METADATA_BYTES)).toString("utf8"),
-        ) as Partial<GenerationRecord>;
+        ) as Partial<GenerationRecord> & { previousStatus?: GenerationRecord["status"] };
         for (const key of outputKeys)
           if (previous[key] !== undefined) Object.assign(record, { [key]: previous[key] });
+        if (previous.previousStatus === "completed") {
+          record.status = "completed";
+          record.error = `Transcribing again stopped: ${record.error ?? "it did not finish."} The previous transcript is kept.`;
+        }
       } catch {}
     }
     await rm(path, { force: true }).catch(() => {});
@@ -1464,10 +1473,10 @@ export class GenerationService {
         // A retry may have queued the record again since, so leave it alone.
         if (!record || terminal(record) || signal.aborted) return;
         const failed = copy(record);
-        await this.restorePreviousOutput(failed);
-        if (failed.recognition) delete failed.recognition.partialText;
         failed.status = "failed";
         failed.error = error instanceof Error ? error.message : "Processing failed.";
+        await this.restorePreviousOutput(failed);
+        if (failed.recognition) delete failed.recognition.partialText;
         failed.updatedAt = now();
         delete failed.progress;
         await this.save(failed).catch(() => this.publish(failed));

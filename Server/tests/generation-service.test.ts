@@ -661,6 +661,9 @@ test("a retry of a finished take stopped during cleanup gives back the finished 
   const recovered = await restarted.get(record.id);
   expect(recovered.rawText).toBe(done.rawText);
   expect(recovered.finalText).toBe(done.finalText);
+  // The finished take stays finished, with a note that the retry did not change it.
+  expect(recovered.status).toBe("completed");
+  expect(recovered.error).toContain("previous transcript is kept");
 });
 
 test("a retry that fails before new speech keeps the transcript it replaced", async () => {
