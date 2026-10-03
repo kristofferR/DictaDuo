@@ -157,9 +157,9 @@ struct ServerPreferencesPage: View {
     private var localEngineName: String {
         parakeet ? "Parakeet v3" : "Whisper large-v3-turbo"
     }
-    /// Servers that report cloud availability shipped with Norwegian; older ones reject it.
+    /// Older servers reject Norwegian, so it is offered only when the server lists it.
     private var languageOptions: [(String, String)] {
-        let norwegian = controller.serverHealth?.cloudRecognition != nil || draft.language == "no"
+        let norwegian = controller.serverHealth?.features?.contains("language-no") == true || draft.language == "no"
         return languages.filter { $0.1 != "no" || norwegian }
     }
     private var installedEngines: [RecognitionEngine] { controller.serverHealth?.recognitionEngines ?? [] }
@@ -438,7 +438,11 @@ struct ServerPreferencesPage: View {
         let cleanupEnabled = controller.sharedPreferences?.preferences.textCorrectionEnabled ?? true
         // With Soniox configured, speech readiness still describes the local engine;
         // the cloud row covers Soniox.
-        modelRow("Speech recognition", name: health.speech.backend.hasPrefix("soniox") ? localEngineName : health.speech.friendlyName,
+        // In Automatic mode with Soniox configured, speech readiness describes the
+        // local engine (the cloud row covers Soniox); Cloud only reports Soniox itself.
+        let localReadiness = health.speech.backend.hasPrefix("soniox")
+            && controller.sharedPreferences?.preferences.recognitionMode != .cloud
+        modelRow("Speech recognition", name: localReadiness ? localEngineName : health.speech.friendlyName,
                  status: ServerModelStatus(health.speech, health: health))
         modelRow("Text cleanup", name: health.proofreading.friendlyName,
                  status: ServerModelStatus(health.proofreading, health: health, enabled: cleanupEnabled))

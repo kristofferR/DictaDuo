@@ -142,12 +142,14 @@ public enum SottoDuoHTTPServer {
         let streaming = request?.headers[.init("X-SottoDuo-Recognition")!] == "streaming-v1"
         let norwegian = languageV2(request)
         let cloud = request?.headers[.init("X-SottoDuo-Cloud-Recognition")!] == "cloud-v1"
-        if streaming && norwegian && cloud { return data }
+        let features = request?.headers[.init("X-SottoDuo-Features")!] == "features-v1"
+        if streaming && norwegian && cloud && features { return data }
         func legacy(_ value: Any) -> Any {
             if var object = value as? [String: Any] {
                 if !streaming { object = object.filter { $0.key != "recognitionMode" && $0.key != "recognition" } }
                 if !norwegian, object["language"] as? String == "no" { object["language"] = "auto" }
                 if !cloud { object.removeValue(forKey: "cloudRecognition") }
+                if !features { object.removeValue(forKey: "features") }
                 return object.mapValues(legacy)
             }
             if let array = value as? [Any] { return array.map(legacy) }

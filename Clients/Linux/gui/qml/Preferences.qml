@@ -297,7 +297,8 @@ ColumnLayout {
                     SLabel {
                         ui: root.ui
                         // With Soniox configured, readiness still describes the local engine.
-                        text: !root.health ? "Checking…" : root.health.speech.backend.startsWith("soniox") ? (root.parakeet ? "Parakeet v3" : "Whisper large-v3-turbo") : root.modelName(root.health.speech)
+                        // In Automatic mode with Soniox configured, readiness describes the local engine.
+                        text: !root.health ? "Checking…" : root.health.speech.backend.startsWith("soniox") && !!root.latest && root.latest.preferences.recognitionMode !== "cloud" ? (root.parakeet ? "Parakeet v3" : "Whisper large-v3-turbo") : root.modelName(root.health.speech)
                     }
                     StatusDot {
                         id: speechStatus
@@ -493,8 +494,8 @@ ColumnLayout {
                     }
 
                     ComboBox {
-                        // Servers that report cloud availability shipped with Norwegian; older ones reject it.
-                        readonly property bool norwegian: root.cloudRecognition !== undefined || (!!root.draft && root.draft.preferences.language === "no")
+                        // Older servers reject Norwegian, so it is offered only when the server lists it.
+                        readonly property bool norwegian: !!root.health && (root.health.features || []).includes("language-no") || (!!root.draft && root.draft.preferences.language === "no")
                         property var codes: ["auto", "en", "es", "fr", "de", "it", "pt", "nl", "ja", "zh", "ko", "hi", "ar", "pl", "ru", "uk", "sv"].concat(norwegian ? ["no"] : [])
 
                         implicitWidth: 245

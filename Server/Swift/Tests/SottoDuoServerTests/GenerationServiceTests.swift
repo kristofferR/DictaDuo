@@ -84,6 +84,10 @@ final class GenerationServiceTests: XCTestCase {
                                          headers: [.init("Host")!: "localhost", .init("X-SottoDuo-Cloud-Recognition")!: "cloud-v1"]) { response in
                     XCTAssertTrue(String(decoding: response.body.readableBytesView, as: UTF8.self).contains("\"cloudRecognition\":false"))
                 }
+                try await client.execute(uri: "/v1/health", method: .get,
+                                         headers: [.init("Host")!: "localhost", .init("X-SottoDuo-Features")!: "features-v1"]) { response in
+                    XCTAssertTrue(String(decoding: response.body.readableBytesView, as: UTF8.self).contains("language-no"))
+                }
             }
         }
     }

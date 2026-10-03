@@ -166,6 +166,8 @@ public actor GenerationService {
                                            ready: state.proofLoaded, message: preferences.preferences.textCorrectionEnabled ?
                                                (state.proofLoaded ? nil : (warming ? "Loading…" : "Unavailable. Text is kept as transcribed.")) : "Disabled"),
             message: cloudOnly ? "Cloud recognition requires the TypeScript server. Choose Automatic or Local only." : message,
+            // Norwegian is the only API-3 addition this reference server supports.
+            features: ["language-no"],
             // This server has no cloud recognition.
             cloudRecognition: false)
     }
