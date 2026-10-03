@@ -84,6 +84,8 @@ interface Session {
   id: string;
   source: StartRequest["source"];
   device: StartRequest["device"];
+  /** Admitted for a client on this computer, which may use unshared sources. */
+  local: boolean;
   controller: AbortController;
   leaseUntil: number;
   startedAt: number;
@@ -145,6 +147,10 @@ export class CaptureSessions {
     if (!this.sources().sources.some((item) => sameSource(item.identity, source)))
       throw new ServiceError(404, "source_not_found", "This microphone is not connected.");
     await this.sharing.set(source, shared);
+    // Unsharing also ends another computer's take on that microphone.
+    const active = this.active;
+    if (!shared && active && !active.local && sameSource(active.source, source))
+      await this.fail(active, "The microphone stopped being shared, so recording stopped.");
     return this.sourcesFor(local);
   }
 
@@ -248,6 +254,7 @@ export class CaptureSessions {
         id: record.id,
         source: structuredClone(request.source),
         device: structuredClone(request.device),
+        local,
         controller: new AbortController(),
         leaseUntil: Date.now() + captureLimits.leaseMS,
         startedAt: Date.now(),

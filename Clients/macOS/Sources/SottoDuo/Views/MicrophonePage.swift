@@ -661,10 +661,11 @@ private struct DJIButtonSection: View {
         // The Mac only sees the receiver when it is shared with other computers.
         guard let device = store.availableDevices.first(where: { $0.remote?.hostID == identity.hostID && $0.uid == identity.id }),
               let source = store.source(device) else { return "Unavailable · not shared with this Mac" }
+        // Ready hardware can still be held by another computer's take.
+        if let holder = store.busyFor(device) { return "Busy · \(holder.name) is dictating" }
         if state.available { return "Plugged into \(host) · transmitter linked" }
         if !source.present { return "Unavailable · receiver unplugged" }
         if source.link != .connected { return "Unavailable · transmitter not linked" }
-        if let holder = store.busyFor(device) { return "Busy · \(holder.name) is dictating" }
         return "Unavailable · waiting for the receiver"
     }
 

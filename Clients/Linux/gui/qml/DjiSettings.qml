@@ -86,6 +86,9 @@ Group {
             return place + "not shared with this computer. Share it on " + (hostLabel || "the server's computer") + ".";
         if (!source)
             return "No DJI receiver found. Plug it into " + (hostLabel || "the server's computer") + ".";
+        // Ready hardware can still be held by another computer's take.
+        if (source.recordingFor && source.recordingFor.id !== deviceID)
+            return "Busy · " + source.recordingFor.name + " is dictating";
         if (source.link === "connected")
             return place + "transmitter linked";
         if (source.link === "disconnected")

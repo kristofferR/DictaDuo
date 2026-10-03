@@ -771,6 +771,26 @@ test("other computers only see and record shared microphones; sharing changes on
   const busy = await list("100.64.0.9");
   for (const source of busy.sources) expect(source.recordingFor).toEqual(f.request.device);
 
+  // A proxied request is never local, even from this computer.
+  const proxied = await list(undefined, { ...sharing, "x-forwarded-for": "100.64.0.9" });
+  expect(proxied.sharingHost.local).toBe(false);
+  // Unsharing ends the other computer's take on that microphone.
+  const unshare = await f.app.inject({
+    method: "PUT",
+    url: "/v1/audio-sources/sharing",
+    headers: { ...f.headers, ...sharing },
+    payload: { source: { hostID: "host-stable", id: "desk-mic" }, shared: false },
+  });
+  expect(unshare.statusCode).toBe(200);
+  await until(
+    async () => (await f.recordings.get(recording.json().id)).captureState !== "recording",
+  );
+  await f.app.inject({
+    method: "PUT",
+    url: "/v1/audio-sources/sharing",
+    headers: { ...f.headers, ...sharing },
+    payload: { source: { hostID: "host-stable", id: "desk-mic" }, shared: true },
+  });
   // The choice is saved for the next server start.
   const saved = JSON.parse(await readFile(join(f.directory, "microphone-sharing.json"), "utf8"));
   expect(saved.shared.map((source: { id: string }) => source.id).sort()).toEqual([
