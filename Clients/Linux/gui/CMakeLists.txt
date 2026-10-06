@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
-project(DictaDuoLinuxGUI VERSION 0.1.0 LANGUAGES CXX)
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../../../VERSION" DICTADUO_VERSION LIMIT_COUNT 1)
+project(DictaDuoLinuxGUI VERSION "${DICTADUO_VERSION}" LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 6.8 REQUIRED COMPONENTS Quick QuickControls2 Widgets Network Svg DBus)
@@ -20,6 +21,7 @@ if(LIBPORTAL_FOUND)
   target_compile_definitions(dictaduo-gui PRIVATE DICTADUO_HAS_LIBPORTAL)
 endif()
 target_compile_options(dictaduo-gui PRIVATE -Wall -Wextra -Werror)
+target_compile_definitions(dictaduo-gui PRIVATE DICTADUO_VERSION="${PROJECT_VERSION}")
 install(TARGETS dictaduo-gui RUNTIME DESTINATION bin)
 install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/../../../build/linux-client/dictaduo"
                  "${CMAKE_CURRENT_SOURCE_DIR}/../../../build/linux-client/dictaduo-destination"

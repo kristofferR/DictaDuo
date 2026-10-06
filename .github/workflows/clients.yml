@@ -1,0 +1,106 @@
+name: Desktop clients
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release:
+        type: boolean
+        default: false
+    secrets:
+      APPLE_CERTIFICATE:
+        required: false
+      APPLE_CERTIFICATE_PASSWORD:
+        required: false
+      APPLE_SIGNING_IDENTITY:
+        required: false
+      APPLE_ID:
+        required: false
+      APPLE_PASSWORD:
+        required: false
+      APPLE_TEAM_ID:
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clients-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !inputs.release }}
+
+jobs:
+  macos:
+    name: macOS app bundle
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Import release signing certificate
+        if: inputs.release
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: bash scripts/import-signing-keychain.sh
+      - name: Build and verify app bundle
+        env:
+          RELEASE: ${{ inputs.release }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          flags=(--unsigned)
+          if [[ "$RELEASE" == true ]]; then flags=(); fi
+          bash scripts/package-macos.sh "${flags[@]}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-macos-client
+          path: build/release/*
+          if-no-files-found: error
+      - name: Remove release signing keychain
+        if: always() && inputs.release
+        run: |
+          security delete-keychain "$RUNNER_TEMP/dictaduo-signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/dictaduo-signing.p12"
+
+  linux:
+    name: Linux Qt tests and Arch package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container: archlinux:base-devel
+    steps:
+      - name: Install build and runtime dependencies
+        run: |
+          pacman -Syu --noconfirm --needed git cmake ninja qt6-base qt6-declarative qt6-svg \
+            layer-shell-qt libportal at-spi2-core json-glib wayland libxkbcommon dbus wl-clipboard
+          useradd -m builder
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - name: Build and test both Linux client components
+        run: |
+          bun install --frozen-lockfile
+          bun run --cwd Clients/Linux typecheck
+          bun run --cwd Clients/Linux test
+          bash scripts/build-linux-client.sh
+          bash scripts/build-linux-gui.sh
+          ctest --test-dir build/linux-gui --output-on-failure
+      - name: Package complete client
+        shell: bash
+        run: |
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          runuser -u builder -- env PATH="$PATH" bash scripts/package-linux.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-linux-client
+          path: build/release/*
+          if-no-files-found: error
