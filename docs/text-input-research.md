@@ -47,6 +47,10 @@ is retained with its copyright and distributed license.
   Application activation interrupts delivery, and keyboard events address the
   retained PID. Linux's Wayland keyboard protocols expose only a seat, so they
   retain field/focus checks and exact readback without an atomic PID-targeted post.
+- Linux requires an AT-SPI modifier snapshot or a readable evdev keyboard before
+  delivery. An uninitialized watcher or a readable mouse alone does not prove
+  that modifier keys are released. If neither backend can establish keyboard
+  state, delivery stays in History with an explicit verification message.
 - Plasma uses a keyboard-only RemoteDesktop grant, enabled explicitly in This
   computer before dictation. Restore tokens are private, rotated and never logged.
   Session revocation closes the transport. Printable key packets and complete

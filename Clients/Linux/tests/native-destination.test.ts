@@ -5,6 +5,28 @@ import { tmpdir } from "node:os";
 import { NativeDestinations } from "../src/native-destination.ts";
 // Opt in only in a disposable test display or during an explicitly supervised desktop trial.
 const nativeTest = process.env.DICTADUO_TEST_DESKTOP === "1" ? test : test.skip;
+test("an unknown keyboard state stays in History with a specific reason", async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), "dictaduo-input-state-"));
+  const destinations = new NativeDestinations();
+  try {
+    const helper = resolve(directory, "dictaduo-destination");
+    await writeFile(
+      helper,
+      `#!${process.execPath}\nimport { createInterface } from "node:readline";
+console.log("ready");
+createInterface({ input: process.stdin }).on("line", () => console.log("preview:input"));\n`,
+      { mode: 0o700 },
+    );
+    const destination = await destinations.capture(helper, "test");
+    expect(await destination.deliver("keep these words")).toBe("preview");
+    expect(destination.reason).toBe(
+      "The current keyboard state could not be verified. Your dictation is saved in History.",
+    );
+  } finally {
+    destinations.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 function fixtureLines(stream: ReadableStream<Uint8Array>) {
   const reader = stream.getReader();
   const decoder = new TextDecoder();

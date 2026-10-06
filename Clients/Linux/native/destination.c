@@ -41,6 +41,8 @@ static gboolean own_key_down;
 static GArray *input_fds;
 static AtspiDevice *input_device;
 static guint observed_modifiers;
+static gboolean modifiers_known;
+static gboolean input_state_known;
 static const guint modifier_mask = (1U << ATSPI_MODIFIER_SHIFT) | (1U << ATSPI_MODIFIER_CONTROL) |
   (1U << ATSPI_MODIFIER_ALT) | (1U << ATSPI_MODIFIER_META3);
 static const guint keycodes[] = {30,48,46,32,18,33,34,35,23,36,37,38,50,49,24,25};
@@ -52,6 +54,9 @@ static void interrupt_input(void) {
 static void key_event(AtspiDevice *device, gboolean pressed, guint keycode, guint keysym,
                       guint modifiers, const gchar *text, void *data) {
   (void)device; (void)text; (void)data;
+  // The first callback supplies a modifier snapshot, including keys held
+  // before the watcher started. A zero-initialized mask is not such a snapshot.
+  modifiers_known = TRUE;
   observed_modifiers = modifiers & modifier_mask;
   guint modifier = 0;
   if (keysym == 0xffe1 || keysym == 0xffe2) modifier = 1U << ATSPI_MODIFIER_SHIFT;
@@ -111,18 +116,26 @@ static void monitor_input(void) {
   g_dir_close(directory);
 }
 static gboolean arm_input(void) {
+  guarding_input = FALSE;
+  input_state_known = modifiers_known;
   if (observed_modifiers) return FALSE;
   // Discard events before this write, including the dictation shortcut release.
   for (guint i = 0; input_fds && i < input_fds->len; i++) {
     int fd = g_array_index(input_fds, int, i); struct input_event events[32];
     while (read(fd, events, sizeof(events)) > 0) {}
     unsigned long keys[(KEY_MAX + 8 * sizeof(long)) / (8 * sizeof(long))] = {0};
-    if (ioctl(fd, EVIOCGKEY(sizeof(keys)), keys) < 0) continue;
+    if (ioctl(fd, EVIOCGKEY(sizeof(keys)), keys) < 0) { input_state_known = FALSE; return FALSE; }
     const guint held[] = {KEY_LEFTCTRL, KEY_RIGHTCTRL, KEY_LEFTSHIFT, KEY_RIGHTSHIFT,
       KEY_LEFTALT, KEY_RIGHTALT, KEY_LEFTMETA, KEY_RIGHTMETA, BTN_LEFT, BTN_RIGHT, BTN_MIDDLE};
+    unsigned long supported[G_N_ELEMENTS(keys)] = {0};
+    if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(supported)), supported) < 0) { input_state_known = FALSE; return FALSE; }
+    // A readable mouse or media-button device cannot establish keyboard state.
+    for (guint key = 0; key < 8; key++)
+      if (supported[held[key] / (8 * sizeof(long))] & (1UL << (held[key] % (8 * sizeof(long))))) input_state_known = TRUE;
     for (guint key = 0; key < G_N_ELEMENTS(held); key++)
       if (keys[held[key] / (8 * sizeof(long))] & (1UL << (held[key] % (8 * sizeof(long))))) return FALSE;
   }
+  if (!input_state_known) return FALSE;
   own_key_index = 0; own_key_down = FALSE; guarding_input = TRUE; return TRUE;
 }
 
@@ -447,7 +460,7 @@ static gboolean input(GIOChannel *channel, GIOCondition condition, gpointer unus
         if ((g_utf8_get_char(p) < 32 && !(paste_request && (g_utf8_get_char(p) == 10 || g_utf8_get_char(p) == 9))) || g_utf8_get_char(p) == 127) printable = FALSE;
       gboolean armed = printable && arm_input();
       if (armed) { prepare(content, value, TRUE); reply("ready"); }
-      else { valid = FALSE; reply(printable ? "preview:modifiers" : "preview"); }
+      else { valid = FALSE; reply(printable ? (input_state_known ? "preview:modifiers" : "preview:input") : "preview"); }
       g_object_unref(parser); g_free(content); g_free(line);
       if (queued && valid) return G_SOURCE_CONTINUE;
       atspi_event_quit();
@@ -459,7 +472,7 @@ static gboolean input(GIOChannel *channel, GIOCondition condition, gpointer unus
     if (editable) {
       GError *error = NULL;
       if (!arm_input()) {
-        reply("preview:modifiers"); g_object_unref(editable); g_object_unref(parser); g_free(content); g_free(line);
+        reply(input_state_known ? "preview:modifiers" : "preview:input"); g_object_unref(editable); g_object_unref(parser); g_free(content); g_free(line);
         atspi_event_quit(); return G_SOURCE_REMOVE;
       }
       prepare(content, value, FALSE);

@@ -191,11 +191,13 @@ class NativeSession {
       this.reason =
         result === "preview:modifiers"
           ? "Release modifier keys and mouse buttons before insertion. Your dictation is saved in History."
-          : result === "preview:multiline"
-            ? "This field does not support paragraphs. Your dictation is saved in History."
-            : result === "preview:changed"
-              ? "The original field, text or caret changed. Your dictation is saved in History."
-              : "This app did not expose a readable, focused text field. Your dictation is saved in History.";
+          : result === "preview:input"
+            ? "The current keyboard state could not be verified. Your dictation is saved in History."
+            : result === "preview:multiline"
+              ? "This field does not support paragraphs. Your dictation is saved in History."
+              : result === "preview:changed"
+                ? "The original field, text or caret changed. Your dictation is saved in History."
+                : "This app did not expose a readable, focused text field. Your dictation is saved in History.";
       return "preview";
     }
     return result;
