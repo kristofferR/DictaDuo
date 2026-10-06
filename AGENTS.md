@@ -16,3 +16,17 @@
 ## Development
 
 - At the end of any turn that adds, edits, or deletes TypeScript files, run `bun run fmt` from the repository root after the final code edits and before committing or responding.
+
+## Client parity
+
+- Treat every bug fix, feature, and behavioral improvement as work across all
+  clients. Check both macOS and Linux and apply equivalent improvements to every
+  applicable client whenever feasible, even if the problem was reported on only
+  one platform.
+- Keep behavior, settings, and delivery guarantees aligned. Use implementations
+  appropriate to each platform and share reusable logic and contracts where
+  practical; avoid unnecessary abstractions or client divergence.
+- Before considering an improvement complete, verify its applicability and
+  validation on every client. If a client cannot receive it in the same change,
+  record the concrete platform constraint or blocker and track any remaining
+  parity work. Report which clients were updated and any justified differences.
