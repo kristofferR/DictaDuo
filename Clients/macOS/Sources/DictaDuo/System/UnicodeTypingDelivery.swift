@@ -7,7 +7,7 @@ enum TypingDispatch: Equatable {
     case interrupted(reason: String, dispatched: Bool)
 }
 
-struct UnicodeTypingReceipt: Sendable {
+struct TextInsertionReceipt: Sendable {
     let original: String
     let selection: NSRange
     let text: String
@@ -33,6 +33,12 @@ struct UnicodeTypingReceipt: Sendable {
               value.utf16.elementsEqual(expected.utf16) else { return false }
         let expectedSelection = sentUnits == 0 ? selection : NSRange(location: selection.location + sentUnits, length: 0)
         return actualSelection == expectedSelection
+    }
+
+    func confirmation(value: String?, selection: NSRange?) -> DeliveryConfirmation {
+        if matches(value: value, selection: selection, sentUnits: text.utf16.count) { return .confirmed }
+        if matches(value: value, selection: selection, sentUnits: 0) { return .pending }
+        return .unavailable
     }
 }
 

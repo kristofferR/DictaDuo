@@ -1116,6 +1116,33 @@ final class NativeIntegrationTests: XCTestCase {
     }
 
     @MainActor
+    func testAutomaticReceiptRejectsTransformedOrUnreadableTextEvenWhenCaretMatches() async throws {
+        let receipt = try XCTUnwrap(TextInsertionReceipt(original: "before OLD after",
+                                                        selection: NSRange(location: 7, length: 3), text: "hello -- world"))
+        let caret = NSRange(location: 7 + receipt.text.utf16.count, length: 0)
+        let expected = "before hello -- world after"
+        let values: [String?] = [expected, "before HELLO -- WORLD after", "before hello –– world after", nil]
+        for strategy in [TextDeliveryStrategy.nativeSelection, .keyboardPaste] {
+            for value in values {
+                let fixture = TextDeliveryFixture()
+                defer { fixture.pasteboard.releaseGlobally() }
+                fixture.nativeResult = .acknowledged
+                fixture.onConfirmation = { _ in receipt.confirmation(value: value, selection: caret) }
+                let outcome = await fixture.transaction.deliver(receipt.text, copying: receipt.text,
+                    strategy: strategy, clipboardUnchangedSince: fixture.holdStartCount)
+                let exact = value == expected
+                XCTAssertEqual(outcome, exact ? .inserted : .unconfirmed(clipboardBackup: true))
+                XCTAssertEqual(fixture.pasteAttempts, strategy == .keyboardPaste ? 1 : 0)
+                XCTAssertEqual(fixture.nativeWrites.count, strategy == .nativeSelection ? 1 : 0)
+                XCTAssertEqual(fixture.pasteboard.string(forType: .string), exact ? "Original clipboard" : receipt.text)
+            }
+        }
+        XCTAssertEqual(receipt.confirmation(value: receipt.original, selection: receipt.selection), .pending)
+        XCTAssertEqual(receipt.confirmation(value: expected, selection: receipt.selection), .unavailable)
+        XCTAssertEqual(receipt.confirmation(value: expected, selection: nil), .unavailable)
+    }
+
+    @MainActor
     func testNativeWriteNeedsConfirmationAndNeverRetriesThroughPaste() async {
         for write in [NativeTextWrite.acknowledged, .uncertain(reason: "AX timed out")] {
             let fixture = TextDeliveryFixture()

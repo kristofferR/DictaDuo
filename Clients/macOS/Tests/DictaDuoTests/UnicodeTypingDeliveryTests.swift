@@ -41,9 +41,20 @@ final class UnicodeTypingDeliveryTests: XCTestCase {
     }
 
     @MainActor
+    func testTypingRejectsTextChangedDuringRecordingWithTheSameCaret() async throws {
+        let receipt = try XCTUnwrap(TextInsertionReceipt(original: "first document",
+                                                        selection: NSRange(location: 6, length: 0), text: "words"))
+        let typing = UnicodeTypingDelivery(validate: { offset in
+            receipt.matches(value: "other document", selection: receipt.selection, sentUnits: offset) ? .valid : .changed(reason: "Text changed during recording")
+        }, canContinue: { true }, post: { _ in XCTFail("Must not type into the changed document"); return false }, pause: {})
+        let result = await typing.type(receipt.text, canDispatch: { true })
+        guard case .interrupted(_, dispatched: false) = result else { return XCTFail("Must reject before any input is sent") }
+    }
+
+    @MainActor
     func testTransformedTextStopsTypingEvenWhenTheCaretMatches() async throws {
         for text in ["words", String(repeating: "words ", count: 5)] {
-            let receipt = try XCTUnwrap(UnicodeTypingReceipt(original: "prefix suffix",
+            let receipt = try XCTUnwrap(TextInsertionReceipt(original: "prefix suffix",
                                                             selection: NSRange(location: 7, length: 6), text: text))
             var actual = receipt.original
             var selection = receipt.selection
@@ -63,7 +74,7 @@ final class UnicodeTypingDeliveryTests: XCTestCase {
     }
 
     func testTypingReceiptPreservesSelectionAndExactUnicode() throws {
-        let receipt = try XCTUnwrap(UnicodeTypingReceipt(original: "before OLD after",
+        let receipt = try XCTUnwrap(TextInsertionReceipt(original: "before OLD after",
                                                         selection: NSRange(location: 7, length: 3), text: "æ 👋🏽 e\u{301}"))
         XCTAssertTrue(receipt.matches(value: receipt.original, selection: receipt.selection, sentUnits: 0))
         let count = receipt.text.utf16.count
@@ -71,8 +82,8 @@ final class UnicodeTypingDeliveryTests: XCTestCase {
         XCTAssertTrue(receipt.matches(value: "before æ 👋🏽 e\u{301} after", selection: caret, sentUnits: count))
         XCTAssertFalse(receipt.matches(value: "before æ 👋🏽 é after", selection: caret, sentUnits: count))
         XCTAssertFalse(receipt.matches(value: "changed æ 👋🏽 e\u{301} after", selection: caret, sentUnits: count))
-        XCTAssertNil(UnicodeTypingReceipt(original: "abc", selection: NSRange(location: 2, length: 2), text: "new"))
-        XCTAssertNil(UnicodeTypingReceipt(original: String(repeating: "a", count: 65537), selection: NSRange(location: 0, length: 0), text: "new"))
+        XCTAssertNil(TextInsertionReceipt(original: "abc", selection: NSRange(location: 2, length: 2), text: "new"))
+        XCTAssertNil(TextInsertionReceipt(original: String(repeating: "a", count: 65537), selection: NSRange(location: 0, length: 0), text: "new"))
     }
 
     @MainActor

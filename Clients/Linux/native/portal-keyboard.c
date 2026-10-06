@@ -69,10 +69,10 @@ static void save_token(const gchar *value) {
     int fd = g_mkstemp_full(temporary, O_WRONLY | O_CLOEXEC, 0600);
     if (fd >= 0) {
       close(fd);
-      if (g_file_set_contents_full(temporary, value, -1,
-          G_FILE_SET_CONTENTS_CONSISTENT | G_FILE_SET_CONTENTS_DURABLE, 0600, NULL))
-        rename(temporary, token_path);
-      unlink(temporary);
+      if (!g_file_set_contents_full(temporary, value, -1,
+          G_FILE_SET_CONTENTS_CONSISTENT | G_FILE_SET_CONTENTS_DURABLE, 0600, NULL) ||
+          rename(temporary, token_path) != 0)
+        unlink(temporary);
     }
     g_free(temporary);
   }

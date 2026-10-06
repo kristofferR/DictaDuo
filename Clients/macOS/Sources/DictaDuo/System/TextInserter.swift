@@ -12,7 +12,12 @@ struct InsertionTarget: Equatable {
     var capturedAt: TimeInterval { snapshot.capturedAt }
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.isSameField(as: rhs) && lhs.selection == rhs.selection
+        guard lhs.isSameField(as: rhs), lhs.selection == rhs.selection else { return false }
+        switch (lhs.snapshot.text, rhs.snapshot.text) {
+        case (let lhs?, let rhs?): return lhs.utf16.elementsEqual(rhs.utf16)
+        case (nil, nil): return true
+        default: return false
+        }
     }
 
     func isSameField(as other: Self) -> Bool {
@@ -45,8 +50,7 @@ enum InsertionDestination: Equatable {
     }
 }
 
-/// Immutable AX handles and position metadata only. NSRunningApplication stays
-/// on the main actor; no document contents or AppKit views cross this boundary.
+/// Immutable AX identity only. NSRunningApplication stays on the main actor.
 fileprivate struct FocusedFieldSnapshot: @unchecked Sendable {
     let applicationPID: pid_t
     let elementPID: pid_t
@@ -61,12 +65,13 @@ fileprivate struct FocusedFieldSnapshot: @unchecked Sendable {
 fileprivate struct InsertionFieldSnapshot: @unchecked Sendable {
     let focus: FocusedFieldSnapshot
     let selection: NSRange?
+    let text: String?
     let capturedAt: TimeInterval
     let strategy: TextDeliveryStrategy
     let pasteCommand: NativePasteCommand?
 
-    func withSelection(_ selection: NSRange) -> Self {
-        Self(focus: focus, selection: selection, capturedAt: capturedAt,
+    func withSelection(_ selection: NSRange, text: String) -> Self {
+        Self(focus: focus, selection: selection, text: text, capturedAt: capturedAt,
              strategy: strategy, pasteCommand: pasteCommand)
     }
 }
@@ -143,7 +148,7 @@ enum InsertionCaretPolicy {
     }
 }
 
-/// Reads bounded field contents to verify typing; never activates an app or sends Return.
+/// Reads bounded field contents to verify delivery; never activates an app or sends Return.
 @MainActor
 final class TextInserter {
     private nonisolated static let accessibilityRequests = InsertionAccessibilityRequests()
@@ -211,10 +216,10 @@ final class TextInserter {
         }
     }
 
-    /// Position metadata only. Control-only list commands keep their anchor only
-    /// when the system-wide focused field and caret still match.
+    /// Control-only list commands keep their anchor only when the focused field,
+    /// bounded text baseline and caret still match.
     static func unchangedAnchor(_ target: InsertionTarget?) -> InsertionTarget? {
-        guard let target, target.selection != nil,
+        guard let target, target.selection != nil, target.snapshot.text != nil,
               let current = captureTarget(), target == current else { return nil }
         return current
     }
@@ -232,30 +237,28 @@ final class TextInserter {
         guard !Task.isCancelled else { return .failed(reason: "Dictation was cancelled. Nothing was copied.") }
         switch destination {
         case .field(let target):
-            var typingReceipt: UnicodeTypingReceipt?
+            let snapshot = target.snapshot
+            let receipt: TextInsertionReceipt?
+            if let original = snapshot.text, let selection = snapshot.selection {
+                receipt = TextInsertionReceipt(original: original, selection: selection, text: text)
+            } else { receipt = nil }
             let environment = TextDeliveryEnvironment(
                 validate: { await Self.validate(target) },
                 modifiersAreHeld: { Self.modifiersAreHeld },
                 replaceSelection: { Self.replaceSelection($0, in: target, willDispatch: $1) },
                 postPaste: { await Self.postPaste(into: target, canDispatch: $0) },
-                confirmation: { [weak self] text in
+                confirmation: { [weak self] _ in
                     guard let self else { return .blocked }
-                    return await self.confirm(text, in: target, typingReceipt: typingReceipt)
+                    return await self.confirm(in: target, receipt: receipt)
                 },
                 pause: { try await Task.sleep(nanoseconds: $0) },
                 waitUntilReady: waitUntilReady,
                 isCaptureActive: isCaptureActive,
                 willDispatch: { [weak self] in self?.dispatchedAt = ProcessInfo.processInfo.systemUptime },
                 typeText: { text, canDispatch in
-                    guard let selection = target.selection,
-                          let original = await Self.readOffMain({
-                              guard case .valid = Self.probeField(target.snapshot.focus) else { return nil as String? }
-                              return Self.checkedAttribute(kAXValueAttribute as CFString, of: target.snapshot.focus.element).value as? String
-                          }),
-                          let receipt = UnicodeTypingReceipt(original: original, selection: selection, text: text) else {
+                    guard let receipt else {
                         return .interrupted(reason: "Typing requires readable text and a verified selection. Choose Automatic.", dispatched: false)
                     }
-                    typingReceipt = receipt
                     return await Self.typeUnicode(text, in: target, receipt: receipt, canDispatch: canDispatch)
                 }
             )
@@ -278,18 +281,26 @@ final class TextInserter {
             return .changed(reason: "The original app closed.")
         }
         let expected = target.snapshot
-        var probe = await readOffMain { probeField(expected.focus) }
+        let read: @Sendable () async -> (FieldProbe, String?) = {
+            let probe = probeField(expected.focus)
+            guard case .valid = probe, expected.text != nil else { return (probe, nil) }
+            return (probe, boundedFieldText(of: expected.focus.element))
+        }
+        var (probe, value) = await readOffMain(read)
         // Some rich editors briefly omit selection metadata during a render.
         // Retry once, never discard the captured caret requirement.
         if expected.selection != nil, case .valid(selection: nil) = probe, !Task.isCancelled {
             do { try await Task.sleep(nanoseconds: 60_000_000) }
             catch { return .blocked(reason: "Dictation was cancelled.") }
-            probe = await readOffMain { probeField(expected.focus) }
+            (probe, value) = await readOffMain(read)
         }
         guard !Task.isCancelled else { return .blocked(reason: "Dictation was cancelled.") }
         guard !target.application.isTerminated else { return .changed(reason: "The original app closed.") }
         switch probe {
         case .valid(let selection):
+            if let original = expected.text, value?.utf16.elementsEqual(original.utf16) != true {
+                return .changed(reason: "The original field's text changed.")
+            }
             if let original = expected.selection, selection != original {
                 return .changed(reason: "The cursor or selection changed.")
             }
@@ -299,11 +310,10 @@ final class TextInserter {
         }
     }
 
-    private func confirm(_ text: String, in target: InsertionTarget,
-                         typingReceipt: UnicodeTypingReceipt? = nil) async -> DeliveryConfirmation {
+    private func confirm(in target: InsertionTarget, receipt: TextInsertionReceipt?) async -> DeliveryConfirmation {
         guard !target.application.isTerminated else { return .unavailable }
         let expected = target.snapshot
-        let readText = typingReceipt != nil
+        let readText = receipt != nil
         let (probe, value) = await Self.readOffMain {
             let probe = Self.probeField(expected.focus)
             guard case .valid = probe, readText else { return (probe, nil as String?) }
@@ -314,18 +324,14 @@ final class TextInserter {
         case .blocked: return .blocked
         case .changed: return .unavailable
         case .valid(let selection):
-            guard let original = expected.selection else { return .unavailable }
-            guard let selection else { return .pending }
-            if let typingReceipt, !typingReceipt.matches(value: value, selection: selection, sentUnits: text.utf16.count) {
-                return .unavailable
-            }
-            if InsertionCaretPolicy.matches(selection, replacing: original, with: text) {
+            guard let receipt else { return .unavailable }
+            let confirmation = receipt.confirmation(value: value, selection: selection)
+            if confirmation == .confirmed, let selection, let value {
                 confirmedAnchor = InsertionTarget(applicationName: target.applicationName,
                                                   application: target.application,
-                                                  snapshot: expected.withSelection(selection))
-                return .confirmed
+                                                  snapshot: expected.withSelection(selection, text: value))
             }
-            return selection == original ? .pending : .unavailable
+            return confirmation
         }
     }
 
@@ -384,6 +390,10 @@ final class TextInserter {
         guard !Task.isCancelled, AXIsProcessTrusted(), !target.application.isTerminated,
               case .valid(let selection) = probeField(target.snapshot.focus),
               target.selection == nil || selection == target.selection else { return false }
+        if let original = target.snapshot.text,
+           boundedFieldText(of: target.snapshot.focus.element)?.utf16.elementsEqual(original.utf16) != true {
+            return false
+        }
         // Recheck cheap local guards after the potentially slow AX queries.
         return !Task.isCancelled && AXIsProcessTrusted() && !target.application.isTerminated && !modifiersAreHeld
     }
@@ -394,7 +404,7 @@ final class TextInserter {
     }
 
     private static func typeUnicode(_ text: String, in target: InsertionTarget,
-                                    receipt: UnicodeTypingReceipt, canDispatch: () -> Bool) async -> TypingDispatch {
+                                    receipt: TextInsertionReceipt, canDispatch: () -> Bool) async -> TypingDispatch {
         // Accessibility selected-text replacement carries literal controls.
         // Keyboard events starting with a newline/tab can instead act as keys.
         let literal = UnicodeTypingDelivery.chunks(text).contains { packet in
@@ -409,8 +419,7 @@ final class TextInserter {
             }
             var dispatched = false
             switch replaceSelection(text, in: target, canDispatch: {
-                let current = checkedAttribute(kAXValueAttribute as CFString, of: target.snapshot.focus.element).value as? String
-                return current?.utf16.elementsEqual(receipt.original.utf16) == true && !input.interrupted && canDispatch()
+                !input.interrupted && canDispatch()
             }, willDispatch: { dispatched = true }) {
             case .acknowledged, .uncertain:
                 guard dispatched else { return .interrupted(reason: "Literal insertion was interrupted.", dispatched: false) }
@@ -464,7 +473,7 @@ final class TextInserter {
         return await typing.type(text, canDispatch: canDispatch)
     }
 
-    private static func validateTypingProgress(_ target: InsertionTarget, receipt: UnicodeTypingReceipt,
+    private static func validateTypingProgress(_ target: InsertionTarget, receipt: TextInsertionReceipt,
                                                sentUnits: Int) async -> TargetValidation {
         guard !target.application.isTerminated else { return .changed(reason: "The original app closed.") }
         for attempt in 0...1 {
@@ -577,7 +586,7 @@ final class TextInserter {
             let strategy = deliveryStrategy(of: field.focus.element)
             let command = NativePasteCommand.find(for: field.focus.applicationPID)
             return .field(InsertionFieldSnapshot(focus: field.focus, selection: field.selection,
-                                                capturedAt: field.capturedAt, strategy: strategy, pasteCommand: command))
+                                                text: field.text, capturedAt: field.capturedAt, strategy: strategy, pasteCommand: command))
         }
     }
 
@@ -592,10 +601,8 @@ final class TextInserter {
         case .unverified:
             return .blocked(reason: "The focused field could not be checked safely. Nothing was pasted or copied.")
         }
-        // Timestamp actual cursor capture, not completion of slower menu/role
-        // discovery. A genuinely post-release cursor still must never be used.
+        // Capture the cursor and bounded text together, before slower menu discovery.
         let selection = selectedRange(of: focused.element)
-        let capturedAt = ProcessInfo.processInfo.systemUptime
         let eligibility = fieldEligibility(of: focused.element)
         switch eligibility {
         case .editable, .notEditable: break
@@ -610,8 +617,19 @@ final class TextInserter {
             return .blocked(reason: "Focus changed while preparing dictation. Nothing was pasted or copied.")
         }
         if eligibility == .notEditable { return .clipboard(reason: "The focused control is not a supported text field.") }
-        return .field(InsertionFieldSnapshot(focus: focused, selection: selection, capturedAt: capturedAt,
+        let text = boundedFieldText(of: focused.element)
+        guard case .valid(let currentSelection) = probeField(focused), currentSelection == selection else {
+            return .blocked(reason: "The focused field changed while preparing dictation. Nothing was pasted or copied.")
+        }
+        let capturedAt = ProcessInfo.processInfo.systemUptime
+        return .field(InsertionFieldSnapshot(focus: focused, selection: selection, text: text, capturedAt: capturedAt,
                                             strategy: .keyboardPaste, pasteCommand: nil))
+    }
+
+    private nonisolated static func boundedFieldText(of element: AXUIElement) -> String? {
+        guard let value = checkedAttribute(kAXValueAttribute as CFString, of: element).value as? String,
+              value.utf16.count <= 65536 else { return nil }
+        return value
     }
 
     /// Electron documents this application attribute for third-party assistive
