@@ -115,7 +115,7 @@ struct TextDeliveryTransaction {
         case .blocked(let reason): return .failed(reason: reason)
         case .changed(let reason):
             let copied = clipboard.keepBackup(clipboardText, unchangedSince: changeCount)
-            return copied ? .copied(reason: "Copied to clipboard") : .failed(reason: reason)
+            return copied ? .copied(reason: "Copied to clipboard. " + reason) : .failed(reason: reason)
         }
         guard !environment.modifiersAreHeld() else {
             return .failed(reason: "A keyboard shortcut is still held. Your words are ready to copy.")
@@ -137,7 +137,7 @@ struct TextDeliveryTransaction {
         case .unavailable:
             if shouldDeferForCapture { return nil }
             let copied = clipboard.keepBackup(clipboardText, unchangedSince: changeCount)
-            return copied ? .copied(reason: "Copied to clipboard") :
+            return copied ? .copied(reason: "Copied to clipboard. macOS could not send the paste.") :
                 .failed(reason: "macOS could not send the paste. Your words are ready to copy.")
         }
 
@@ -190,7 +190,7 @@ struct TextDeliveryTransaction {
 
     private func copyInstead(_ text: String, expectedCount: Int, reason: String) -> InsertionOutcome {
         guard !Task.isCancelled else { return .failed(reason: Self.cancelled) }
-        return copyNewChunk(text, expectedCount: expectedCount) ? .copied(reason: "Copied to clipboard") :
+        return copyNewChunk(text, expectedCount: expectedCount) ? .copied(reason: "Copied to clipboard. " + reason) :
             .failed(reason: reason + " Your words are ready to copy.")
     }
 

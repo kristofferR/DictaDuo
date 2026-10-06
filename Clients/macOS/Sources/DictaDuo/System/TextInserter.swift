@@ -30,12 +30,17 @@ enum InsertionOutcome: Equatable {
 
 enum InsertionDestination: Equatable {
     case field(InsertionTarget)
-    case clipboard
+    case clipboard(reason: String)
     case blocked(reason: String)
 
     var target: InsertionTarget? {
         if case .field(let target) = self { return target }
         return nil
+    }
+
+    var usesClipboard: Bool {
+        if case .clipboard = self { return true }
+        return false
     }
 }
 
@@ -67,7 +72,7 @@ fileprivate struct InsertionFieldSnapshot: @unchecked Sendable {
 
 private enum InsertionDestinationSnapshot: Sendable {
     case field(InsertionFieldSnapshot)
-    case clipboard
+    case clipboard(reason: String)
     case blocked(reason: String)
 }
 
@@ -138,6 +143,7 @@ enum InsertionCaretPolicy {
 /// Never reads document text, activates another application, or sends Return.
 @MainActor
 final class TextInserter {
+    private nonisolated static let accessibilityRequests = InsertionAccessibilityRequests()
     private let pasteboard: NSPasteboard
     private(set) var confirmedAnchor: InsertionTarget?
     private(set) var dispatchedAt: TimeInterval?
@@ -176,13 +182,27 @@ final class TextInserter {
         destination(from: readDestinationSnapshot())
     }
 
+    /// Warm the renderer before a take. No field or document is captured here.
+    nonisolated static func prepareWebAccessibility(for pid: pid_t) {
+        guard !Task.isCancelled, AXIsProcessTrusted() else { return }
+        let application = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(application, 0.2)
+        var current: CFTypeRef?
+        let read = AXUIElementCopyAttributeValue(application, "AXManualAccessibility" as CFString, &current)
+        guard InsertionAccessibilityPolicy.afterRead(read, enabled: current as? Bool) == nil,
+              !Task.isCancelled, AXIsProcessTrusted() else { return }
+        _ = accessibilityRequests.enable(for: pid) {
+            AXUIElementSetAttributeValue(application, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        }
+    }
+
     private static func destination(from snapshot: InsertionDestinationSnapshot) -> InsertionDestination {
         switch snapshot {
-        case .clipboard: return .clipboard
+        case .clipboard(let reason): return .clipboard(reason: reason)
         case .blocked(let reason): return .blocked(reason: reason)
         case .field(let field):
             guard let application = NSRunningApplication(processIdentifier: field.focus.applicationPID),
-                  !application.isTerminated else { return .clipboard }
+                  !application.isTerminated else { return .clipboard(reason: "The original app closed.") }
             return .field(InsertionTarget(applicationName: application.localizedName ?? "the original app",
                                           application: application, snapshot: field))
         }
@@ -226,9 +246,9 @@ final class TextInserter {
                 .deliver(text, copying: clipboardText, strategy: target.snapshot.strategy,
                          clipboardUnchangedSince: changeCount)
         case .blocked(let reason): return .failed(reason: reason)
-        case .clipboard:
+        case .clipboard(let reason):
             switch DictationClipboard.copy(clipboardText, to: pasteboard, onlyIfUnchangedSince: changeCount) {
-            case .success: return .copied(reason: "Copied to clipboard")
+            case .success: return .copied(reason: "Copied to clipboard. " + reason)
             case .failure(let error): return .failed(reason: error.localizedDescription)
             }
         }
@@ -429,7 +449,8 @@ final class TextInserter {
             pause: { try await Task.sleep(nanoseconds: $0) }
         )
         switch await InsertionPreparation.capture(using: preparation) {
-        case .unavailable: return .clipboard
+        case .unavailable:
+            return .clipboard(reason: "The original app did not expose an editable text field in time.")
         case .blocked(let reason): return .blocked(reason: reason)
         case .ready(let field, _):
             guard !Task.isCancelled, AXIsProcessTrusted() else {
@@ -451,7 +472,7 @@ final class TextInserter {
         let focused: FocusedFieldSnapshot
         switch readFocusedElement(expectedApplication: expectedApplication) {
         case .found(let value): focused = value
-        case .absent: return .clipboard
+        case .absent: return .clipboard(reason: "No text field is focused.")
         case .unverified:
             return .blocked(reason: "The focused field could not be checked safely. Nothing was pasted or copied.")
         }
@@ -472,7 +493,7 @@ final class TextInserter {
         if let expectedApplication, !applicationIsFocused(expectedApplication) {
             return .blocked(reason: "Focus changed while preparing dictation. Nothing was pasted or copied.")
         }
-        if eligibility == .notEditable { return .clipboard }
+        if eligibility == .notEditable { return .clipboard(reason: "The focused control is not a supported text field.") }
         return .field(InsertionFieldSnapshot(focus: focused, selection: selection, capturedAt: capturedAt,
                                             strategy: .keyboardPaste, pasteCommand: nil))
     }
@@ -494,11 +515,15 @@ final class TextInserter {
         }
         // Never repeat this write during retries: Electron restarts a two-second
         // debounce on every request, and its mode getter is not tree readiness.
-        let write = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(app, &pid) == .success, pid > 0 else { return .unavailable }
+        let activation = accessibilityRequests.enable(for: pid) {
+            AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        }
         guard !Task.isCancelled, AXIsProcessTrusted(), applicationIsFocused(application) else {
             return .blocked(reason: "Focus or Accessibility access changed while preparing dictation. Nothing was pasted or copied.")
         }
-        return InsertionAccessibilityPolicy.afterWrite(write)
+        return activation
     }
 
     private nonisolated static func applicationIsFocused(_ expected: FocusedApplicationSnapshot) -> Bool {

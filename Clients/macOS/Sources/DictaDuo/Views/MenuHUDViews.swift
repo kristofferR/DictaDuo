@@ -101,7 +101,7 @@ extension DictationDeliveryStatus {
         }
     }
 
-    var needsAttention: Bool { self == .failed || self == .unconfirmed }
+    var needsAttention: Bool { self == .failed || self == .unconfirmed || self == .copied }
 }
 
 struct DictationHUD: View {
