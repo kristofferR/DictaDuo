@@ -2512,7 +2512,7 @@ final class DictaDuoController: ObservableObject {
         accessibilityWarmup.prepare(NSWorkspace.shared.frontmostApplication)
         workspaceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) {
             [weak self] notification in MainActor.assumeIsolated {
-                self?.accessibilityWarmup.prepare(notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)
+                _ = self?.accessibilityWarmup.prepare(notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)
             }
         })
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) {

@@ -42,7 +42,7 @@ static GArray *input_fds;
 static AtspiDevice *input_device;
 static guint observed_modifiers;
 static const guint modifier_mask = (1U << ATSPI_MODIFIER_SHIFT) | (1U << ATSPI_MODIFIER_CONTROL) |
-  (1U << ATSPI_MODIFIER_ALT) | (1U << ATSPI_MODIFIER_SUPER);
+  (1U << ATSPI_MODIFIER_ALT) | (1U << ATSPI_MODIFIER_META3);
 static const guint keycodes[] = {30,48,46,32,18,33,34,35,23,36,37,38,50,49,24,25};
 
 static void interrupt_input(void) {
@@ -57,7 +57,7 @@ static void key_event(AtspiDevice *device, gboolean pressed, guint keycode, guin
   if (keysym == 0xffe1 || keysym == 0xffe2) modifier = 1U << ATSPI_MODIFIER_SHIFT;
   else if (keysym == 0xffe3 || keysym == 0xffe4) modifier = 1U << ATSPI_MODIFIER_CONTROL;
   else if (keysym == 0xffe9 || keysym == 0xffea) modifier = 1U << ATSPI_MODIFIER_ALT;
-  else if (keysym == 0xffeb || keysym == 0xffec || keysym == 0xffe7 || keysym == 0xffe8) modifier = 1U << ATSPI_MODIFIER_SUPER;
+  else if (keysym == 0xffeb || keysym == 0xffec || keysym == 0xffe7 || keysym == 0xffe8) modifier = 1U << ATSPI_MODIFIER_META3;
   if (pressed) observed_modifiers |= modifier; else observed_modifiers &= ~modifier;
   if (!guarding_input) return;
   if (typing_pending && paste_pending) {

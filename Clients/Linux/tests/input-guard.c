@@ -10,6 +10,11 @@ int main(void) {
   assert(!arm_input());
   key_event(NULL,FALSE,29,0xffe3,1U << ATSPI_MODIFIER_CONTROL,NULL,NULL);
   assert(arm_input());
+  guarding_input = FALSE;
+  key_event(NULL,TRUE,125,0xffeb,0,NULL,NULL);
+  assert(!arm_input());
+  key_event(NULL,FALSE,125,0xffeb,1U << ATSPI_MODIFIER_META3,NULL,NULL);
+  assert(arm_input());
   own_text = g_strdup("æ👋"); typing_pending = TRUE;
   key_event(NULL,TRUE,30,0xe6,0,NULL,NULL); key_event(NULL,FALSE,30,0xe6,0,NULL,NULL);
   key_event(NULL,TRUE,48,0x0101f44b,0,NULL,NULL); key_event(NULL,FALSE,48,0x0101f44b,0,NULL,NULL);

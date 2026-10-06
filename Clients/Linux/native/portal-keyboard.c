@@ -60,6 +60,24 @@ static gchar *token(void) {
   ssize_t n = private ? read(fd, data, sizeof(data) - 1) : -1; close(fd);
   return n == info.st_size && n > 0 && g_utf8_validate(data, n, NULL) ? g_strndup(data, n) : NULL;
 }
+static void save_token(const gchar *value) {
+  gchar *directory = g_path_get_dirname(token_path);
+  if (!g_mkdir_with_parents(directory, 0700)) {
+    /* GLib preserves an existing file's mode. Replace from a private file so
+     * re-authorization also repairs an unusable token's permissions. */
+    gchar *temporary = g_strconcat(token_path, ".XXXXXX", NULL);
+    int fd = g_mkstemp_full(temporary, O_WRONLY | O_CLOEXEC, 0600);
+    if (fd >= 0) {
+      close(fd);
+      if (g_file_set_contents_full(temporary, value, -1,
+          G_FILE_SET_CONTENTS_CONSISTENT | G_FILE_SET_CONTENTS_DURABLE, 0600, NULL))
+        rename(temporary, token_path);
+      unlink(temporary);
+    }
+    g_free(temporary);
+  }
+  g_free(directory);
+}
 static gboolean authorize(gboolean restore) {
   gchar *saved = restore ? token() : NULL; if (restore && !saved) return FALSE;
   GVariantBuilder options; g_variant_builder_init(&options, G_VARIANT_TYPE_VARDICT);
@@ -78,12 +96,7 @@ static gboolean authorize(gboolean restore) {
   guint devices = 0;
   if (!result || !g_variant_lookup(result, "devices", "u", &devices) || !(devices & 1)) return FALSE;
   const char *next = NULL;
-  if (g_variant_lookup(result, "restore_token", "&s", &next)) {
-    gchar *directory = g_path_get_dirname(token_path);
-    if (!g_mkdir_with_parents(directory, 0700))
-      g_file_set_contents_full(token_path, next, -1, G_FILE_SET_CONTENTS_CONSISTENT | G_FILE_SET_CONTENTS_DURABLE, 0600, NULL);
-    g_free(directory);
-  }
+  if (g_variant_lookup(result, "restore_token", "&s", &next)) save_token(next);
   return TRUE;
 }
 static void key_complete(GObject *object, GAsyncResult *result, gpointer data) {

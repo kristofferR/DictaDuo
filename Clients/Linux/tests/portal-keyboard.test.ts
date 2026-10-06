@@ -90,23 +90,31 @@ native(
       read = lines(helper.stdout);
       expect(await read()).toBe("unavailable");
       expect(await helper.exited).toBe(1);
-      await chmod(token, 0o600);
       const keyboard = new PortalKeyboard(
         join(root, "build/linux-client/dictaduo-portal-keyboard"),
         env,
       );
-      const ready = async () => {
-        for (let i = 0; i < 100 && keyboard.status !== "ready"; i++) await Bun.sleep(10);
-        expect(keyboard.status).toBe("ready");
+      const waitStatus = async (status: PortalKeyboard["status"]) => {
+        for (let i = 0; i < 100 && keyboard.status !== status; i++) await Bun.sleep(10);
+        expect(keyboard.status).toBe(status);
       };
       try {
-        await ready();
+        await waitStatus("unavailable");
+        keyboard.enable();
+        await waitStatus("ready");
+        expect((await stat(token)).mode & 0o777).toBe(0o600);
+        fixture.stdin.write("get\n");
+        await fixture.stdin.flush();
+        expect(JSON.parse(await readFixture()).restored).toBe(false);
         expect(await keyboard.type("æ", false)).toBe(true);
         const cancelled = keyboard.type("x", false);
         keyboard.abort();
         keyboard.enable(true);
         expect(await cancelled).toBe(false);
-        await ready();
+        await waitStatus("ready");
+        fixture.stdin.write("get\n");
+        await fixture.stdin.flush();
+        expect(JSON.parse(await readFixture()).restored).toBe(true);
         expect(await keyboard.type("👋", false)).toBe(true);
       } finally {
         keyboard.close();

@@ -40,7 +40,7 @@ export class PortalKeyboard {
       this.abort();
       return;
     }
-    const child = Bun.spawn([this.helper, restore ? "--restore" : "--authorize"], {
+    const child = Bun.spawn([this.helper, restoreOnly ? "--restore" : "--authorize"], {
       env: this.environment,
       stdin: "pipe",
       stdout: "pipe",
