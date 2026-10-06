@@ -36,6 +36,14 @@ staged_app="$staging_dir/$app_name.app"
 mkdir -p "$staged_app/Contents/MacOS" "$staged_app/Contents/Resources"
 cp "$swift_bin/DictaDuo" "$staged_app/Contents/MacOS/DictaDuo"
 cp "$info_plist" "$staged_app/Contents/Info.plist"
+version=$(bash scripts/release-version.sh)
+build_number="${DICTADUO_BUILD_NUMBER:-$(git rev-list --count HEAD)}"
+if [[ ! "$build_number" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'DICTADUO_BUILD_NUMBER must be a positive integer.\n' >&2
+    exit 1
+fi
+/usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $version" "$staged_app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $build_number" "$staged_app/Contents/Info.plist"
 cp Resources/swift-openapi-runtime-LICENSE.txt Resources/swift-http-types-LICENSE.txt \
     THIRD_PARTY_NOTICES.md "$staged_app/Contents/Resources/"
 swift scripts/make-icon.swift "$project_dir/.build/DictaDuo.iconset"
@@ -56,7 +64,9 @@ if [[ -z "$signing_identity" ]]; then
     identity_count=$(printf '%s\n' "$identities" | awk 'NF {n++} END {print n+0}')
     if [[ "$identity_count" == 1 ]]; then signing_identity="$identities"; else signing_identity=-; fi
 fi
-codesign --force --sign "$signing_identity" --options runtime \
+signing_flags=(--timestamp=none)
+if [[ "$signing_identity" != - ]]; then signing_flags=(--timestamp); fi
+codesign --force --sign "$signing_identity" "${signing_flags[@]}" --options runtime \
     --entitlements Clients/macOS/Resources/DictaDuo.entitlements --identifier "$bundle_id" "$staged_app"
 codesign --verify --deep --strict "$staged_app"
 if [[ -d "$app_path" ]]; then
