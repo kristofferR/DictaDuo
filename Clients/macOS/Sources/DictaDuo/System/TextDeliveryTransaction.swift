@@ -44,7 +44,7 @@ struct TextDeliveryEnvironment {
 }
 
 /// Owns delivery and its temporary clipboard lease, not application discovery.
-/// The injected boundary never needs document contents to confirm caret movement.
+/// The injected boundary carries validation and receipt results.
 @MainActor
 struct TextDeliveryTransaction {
     let pasteboard: NSPasteboard

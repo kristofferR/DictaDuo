@@ -76,5 +76,7 @@ int main(void) {
   g_unix_fd_add(wl_display_get_fd(display), G_IO_IN | G_IO_HUP | G_IO_ERR, wayland_ready, NULL);
   GIOChannel *channel = g_io_channel_unix_new(STDIN_FILENO); g_io_channel_set_flags(channel, G_IO_FLAG_NONBLOCK, NULL);
   g_io_add_watch(channel, G_IO_IN | G_IO_HUP | G_IO_ERR, input, NULL);
-  reply("ready"); g_main_loop_run(loop); zwp_input_method_v2_destroy(method); wl_display_disconnect(display); return 0;
+  reply("ready"); g_main_loop_run(loop);
+  zwp_input_method_v2_destroy(method); wl_display_roundtrip(display);
+  wl_display_disconnect(display); return 0;
 }

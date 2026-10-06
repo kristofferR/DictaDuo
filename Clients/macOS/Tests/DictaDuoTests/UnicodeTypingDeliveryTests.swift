@@ -41,6 +41,41 @@ final class UnicodeTypingDeliveryTests: XCTestCase {
     }
 
     @MainActor
+    func testTransformedTextStopsTypingEvenWhenTheCaretMatches() async throws {
+        for text in ["words", String(repeating: "words ", count: 5)] {
+            let receipt = try XCTUnwrap(UnicodeTypingReceipt(original: "prefix suffix",
+                                                            selection: NSRange(location: 7, length: 6), text: text))
+            var actual = receipt.original
+            var selection = receipt.selection
+            var sent = 0
+            let typing = UnicodeTypingDelivery(validate: { offset in
+                receipt.matches(value: actual, selection: selection, sentUnits: offset) ? .valid : .changed(reason: "Text was transformed")
+            }, canContinue: { true }, post: { units in
+                sent += units.count
+                actual = (receipt.value(after: sent) ?? "").uppercased()
+                selection = NSRange(location: receipt.selection.location + sent, length: 0)
+                return true
+            }, pause: {})
+            let result = await typing.type(text, canDispatch: { true })
+            guard case .interrupted(_, dispatched: true) = result else { return XCTFail("Must reject transformed text, including the final packet") }
+            XCTAssertEqual(sent, min(text.utf16.count, 16))
+        }
+    }
+
+    func testTypingReceiptPreservesSelectionAndExactUnicode() throws {
+        let receipt = try XCTUnwrap(UnicodeTypingReceipt(original: "before OLD after",
+                                                        selection: NSRange(location: 7, length: 3), text: "æ 👋🏽 e\u{301}"))
+        XCTAssertTrue(receipt.matches(value: receipt.original, selection: receipt.selection, sentUnits: 0))
+        let count = receipt.text.utf16.count
+        let caret = NSRange(location: 7 + count, length: 0)
+        XCTAssertTrue(receipt.matches(value: "before æ 👋🏽 e\u{301} after", selection: caret, sentUnits: count))
+        XCTAssertFalse(receipt.matches(value: "before æ 👋🏽 é after", selection: caret, sentUnits: count))
+        XCTAssertFalse(receipt.matches(value: "changed æ 👋🏽 e\u{301} after", selection: caret, sentUnits: count))
+        XCTAssertNil(UnicodeTypingReceipt(original: "abc", selection: NSRange(location: 2, length: 2), text: "new"))
+        XCTAssertNil(UnicodeTypingReceipt(original: String(repeating: "a", count: 65537), selection: NSRange(location: 0, length: 0), text: "new"))
+    }
+
+    @MainActor
     func testNewlinesArePackedAsTextAndUnpackableRunsAreRefusedBeforeTyping() async {
         for text in [String(repeating: "x", count: 16) + "\n", String(repeating: "x", count: 16) + "\nA", "abcde👨‍👩‍👧‍👦\nA", "A\r\nB"] {
             let packets = UnicodeTypingDelivery.chunks(text)

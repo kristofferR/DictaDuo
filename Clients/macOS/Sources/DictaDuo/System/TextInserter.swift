@@ -143,7 +143,7 @@ enum InsertionCaretPolicy {
     }
 }
 
-/// Never reads document text, activates another application, or sends Return.
+/// Reads bounded field contents to verify typing; never activates an app or sends Return.
 @MainActor
 final class TextInserter {
     private nonisolated static let accessibilityRequests = InsertionAccessibilityRequests()
@@ -232,6 +232,7 @@ final class TextInserter {
         guard !Task.isCancelled else { return .failed(reason: "Dictation was cancelled. Nothing was copied.") }
         switch destination {
         case .field(let target):
+            var typingReceipt: UnicodeTypingReceipt?
             let environment = TextDeliveryEnvironment(
                 validate: { await Self.validate(target) },
                 modifiersAreHeld: { Self.modifiersAreHeld },
@@ -239,14 +240,23 @@ final class TextInserter {
                 postPaste: { await Self.postPaste(into: target, canDispatch: $0) },
                 confirmation: { [weak self] text in
                     guard let self else { return .blocked }
-                    return await self.confirm(text, in: target)
+                    return await self.confirm(text, in: target, typingReceipt: typingReceipt)
                 },
                 pause: { try await Task.sleep(nanoseconds: $0) },
                 waitUntilReady: waitUntilReady,
                 isCaptureActive: isCaptureActive,
                 willDispatch: { [weak self] in self?.dispatchedAt = ProcessInfo.processInfo.systemUptime },
                 typeText: { text, canDispatch in
-                    await Self.typeUnicode(text, in: target, canDispatch: canDispatch)
+                    guard let selection = target.selection,
+                          let original = await Self.readOffMain({
+                              guard case .valid = Self.probeField(target.snapshot.focus) else { return nil as String? }
+                              return Self.checkedAttribute(kAXValueAttribute as CFString, of: target.snapshot.focus.element).value as? String
+                          }),
+                          let receipt = UnicodeTypingReceipt(original: original, selection: selection, text: text) else {
+                        return .interrupted(reason: "Typing requires readable text and a verified selection. Choose Automatic.", dispatched: false)
+                    }
+                    typingReceipt = receipt
+                    return await Self.typeUnicode(text, in: target, receipt: receipt, canDispatch: canDispatch)
                 }
             )
             return await TextDeliveryTransaction(pasteboard: pasteboard, environment: environment)
@@ -289,10 +299,16 @@ final class TextInserter {
         }
     }
 
-    private func confirm(_ text: String, in target: InsertionTarget) async -> DeliveryConfirmation {
+    private func confirm(_ text: String, in target: InsertionTarget,
+                         typingReceipt: UnicodeTypingReceipt? = nil) async -> DeliveryConfirmation {
         guard !target.application.isTerminated else { return .unavailable }
         let expected = target.snapshot
-        let probe = await Self.readOffMain { Self.probeField(expected.focus) }
+        let readText = typingReceipt != nil
+        let (probe, value) = await Self.readOffMain {
+            let probe = Self.probeField(expected.focus)
+            guard case .valid = probe, readText else { return (probe, nil as String?) }
+            return (probe, Self.checkedAttribute(kAXValueAttribute as CFString, of: expected.focus.element).value as? String)
+        }
         guard !Task.isCancelled else { return .blocked }
         switch probe {
         case .blocked: return .blocked
@@ -300,6 +316,9 @@ final class TextInserter {
         case .valid(let selection):
             guard let original = expected.selection else { return .unavailable }
             guard let selection else { return .pending }
+            if let typingReceipt, !typingReceipt.matches(value: value, selection: selection, sentUnits: text.utf16.count) {
+                return .unavailable
+            }
             if InsertionCaretPolicy.matches(selection, replacing: original, with: text) {
                 confirmedAnchor = InsertionTarget(applicationName: target.applicationName,
                                                   application: target.application,
@@ -355,6 +374,7 @@ final class TextInserter {
         // Only a definitely unattempted/unsupported menu action can fall back.
         // Never send a second route after a successful or timed-out AX action.
         return await SystemPasteShortcut.post(
+            into: target.processIdentifier,
             canStart: { readyToDispatch(into: target) },
             canPaste: { readyToDispatch(into: target) && canDispatch() }
         )
@@ -374,7 +394,7 @@ final class TextInserter {
     }
 
     private static func typeUnicode(_ text: String, in target: InsertionTarget,
-                                    canDispatch: () -> Bool) async -> TypingDispatch {
+                                    receipt: UnicodeTypingReceipt, canDispatch: () -> Bool) async -> TypingDispatch {
         // Accessibility selected-text replacement carries literal controls.
         // Keyboard events starting with a newline/tab can instead act as keys.
         let literal = UnicodeTypingDelivery.chunks(text).contains { packet in
@@ -384,27 +404,19 @@ final class TextInserter {
             let input = TextInputInterruptionMonitor()
             guard input.start() else { return .unavailable }
             defer { input.stop() }
-            guard let range = target.selection,
-                  let original = await readOffMain({ checkedAttribute(kAXValueAttribute as CFString, of: target.snapshot.focus.element).value as? String }),
-                  original.utf16.count <= 65536, range.location >= 0, range.length >= 0,
-                  range.location <= original.utf16.count, range.length <= original.utf16.count - range.location else {
-                return .interrupted(reason: "Literal insertion requires readable text and a verified selection. Choose Automatic.", dispatched: false)
-            }
-            let expected = (original as NSString).replacingCharacters(in: range, with: text)
             guard !input.interrupted, canDispatch(), readyToDispatch(into: target), !input.interrupted else {
                 return .interrupted(reason: "Focus or input changed before literal insertion.", dispatched: false)
             }
             var dispatched = false
             switch replaceSelection(text, in: target, canDispatch: {
                 let current = checkedAttribute(kAXValueAttribute as CFString, of: target.snapshot.focus.element).value as? String
-                return current == original && !input.interrupted && canDispatch()
+                return current?.utf16.elementsEqual(receipt.original.utf16) == true && !input.interrupted && canDispatch()
             }, willDispatch: { dispatched = true }) {
             case .acknowledged, .uncertain:
                 guard dispatched else { return .interrupted(reason: "Literal insertion was interrupted.", dispatched: false) }
                 for _ in 0..<3 {
-                    let actual = await readOffMain { checkedAttribute(kAXValueAttribute as CFString, of: target.snapshot.focus.element).value as? String }
-                    if !input.interrupted, actual == expected,
-                       await validateTypingProgress(target, sentUnits: text.utf16.count) == .valid { return .sent }
+                    if !input.interrupted,
+                       await validateTypingProgress(target, receipt: receipt, sentUnits: text.utf16.count) == .valid { return .sent }
                     do { try await Task.sleep(for: .milliseconds(60)) } catch { break }
                 }
                 return .interrupted(reason: "The field did not confirm the literal text. Check it before retrying.", dispatched: true)
@@ -429,7 +441,7 @@ final class TextInserter {
         guard input.start() else { return .unavailable }
         defer { input.stop() }
         let typing = UnicodeTypingDelivery(
-            validate: { sentUnits in await validateTypingProgress(target, sentUnits: sentUnits) },
+            validate: { sentUnits in await validateTypingProgress(target, receipt: receipt, sentUnits: sentUnits) },
             canContinue: {
                 !input.interrupted && AXIsProcessTrusted() && CGPreflightPostEventAccess() &&
                     !target.application.isTerminated && !modifiersAreHeld
@@ -443,8 +455,8 @@ final class TextInserter {
                 }
                 // Some editors insert a Unicode payload on key-up as well.
                 down.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
-                down.post(tap: .cghidEventTap)
-                up.post(tap: .cghidEventTap)
+                down.postToPid(target.processIdentifier)
+                up.postToPid(target.processIdentifier)
                 return true
             },
             pause: { try await Task.sleep(for: .milliseconds(5)) }
@@ -452,23 +464,25 @@ final class TextInserter {
         return await typing.type(text, canDispatch: canDispatch)
     }
 
-    private static func validateTypingProgress(_ target: InsertionTarget, sentUnits: Int) async -> TargetValidation {
+    private static func validateTypingProgress(_ target: InsertionTarget, receipt: UnicodeTypingReceipt,
+                                               sentUnits: Int) async -> TargetValidation {
         guard !target.application.isTerminated else { return .changed(reason: "The original app closed.") }
         for attempt in 0...1 {
-            let probe = await readOffMain { probeField(target.snapshot.focus) }
+            let (probe, value) = await readOffMain {
+                let probe = probeField(target.snapshot.focus)
+                guard case .valid = probe else { return (probe, nil as String?) }
+                return (probe, checkedAttribute(kAXValueAttribute as CFString, of: target.snapshot.focus.element).value as? String)
+            }
             switch probe {
             case .blocked(let reason): return .blocked(reason: reason)
             case .changed(let reason): return .changed(reason: reason)
             case .valid(let selection):
-                guard let original = target.selection else { return .valid }
-                guard original.location <= Int.max - sentUnits else { return .blocked(reason: "The cursor position is invalid.") }
-                let expected = sentUnits == 0 ? original : NSRange(location: original.location + sentUnits, length: 0)
-                if selection == expected { return .valid }
+                if receipt.matches(value: value, selection: selection, sentUnits: sentUnits) { return .valid }
                 // Give the previous Unicode event one frame to update AX.
                 if attempt == 0, sentUnits > 0 {
                     do { try await Task.sleep(for: .milliseconds(60)) }
                     catch { return .blocked(reason: "Dictation was cancelled.") }
-                } else { return .changed(reason: "The cursor or selection changed, or typed text was not acknowledged.") }
+                } else { return .changed(reason: "The field text or selection changed, or typed text was not acknowledged exactly.") }
             }
         }
         return .blocked(reason: "The cursor could not be verified.")

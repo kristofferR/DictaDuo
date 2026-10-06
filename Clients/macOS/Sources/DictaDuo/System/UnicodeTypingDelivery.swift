@@ -7,6 +7,35 @@ enum TypingDispatch: Equatable {
     case interrupted(reason: String, dispatched: Bool)
 }
 
+struct UnicodeTypingReceipt: Sendable {
+    let original: String
+    let selection: NSRange
+    let text: String
+
+    init?(original: String, selection: NSRange, text: String) {
+        guard original.utf16.count <= 65536, selection.location >= 0, selection.length >= 0,
+              selection.location <= original.utf16.count,
+              selection.length <= original.utf16.count - selection.location else { return nil }
+        self.original = original
+        self.selection = selection
+        self.text = text
+    }
+
+    func value(after sentUnits: Int) -> String? {
+        guard sentUnits >= 0, sentUnits <= text.utf16.count else { return nil }
+        if sentUnits == 0 { return original }
+        let prefix = String(decoding: text.utf16.prefix(sentUnits), as: UTF16.self)
+        return (original as NSString).replacingCharacters(in: selection, with: prefix)
+    }
+
+    func matches(value: String?, selection actualSelection: NSRange?, sentUnits: Int) -> Bool {
+        guard let value, let expected = self.value(after: sentUnits),
+              value.utf16.elementsEqual(expected.utf16) else { return false }
+        let expectedSelection = sentUnits == 0 ? selection : NSRange(location: selection.location + sentUnits, length: 0)
+        return actualSelection == expectedSelection
+    }
+}
+
 @MainActor
 struct UnicodeTypingDelivery {
     var validate: (Int) async -> TargetValidation
@@ -22,7 +51,9 @@ struct UnicodeTypingDelivery {
             return .interrupted(reason: "Use Automatic insertion for these line breaks or tabs. Your words are ready to copy.", dispatched: false)
         }
         var dispatchedUnits = 0
-        for chunk in packets {
+        // Validate every receipt, including the final packet. Caret movement
+        // alone cannot establish that an editor preserved the dictated text.
+        for packetIndex in 0...packets.count {
             guard !Task.isCancelled, canContinue() else {
                 return .interrupted(reason: "Typing stopped because you changed input or dictation was cancelled.",
                                     dispatched: dispatchedUnits > 0)
@@ -36,6 +67,13 @@ struct UnicodeTypingDelivery {
                 }
                 return .interrupted(reason: "Typing stopped. " + reason, dispatched: dispatchedUnits > 0)
             }
+            if packetIndex == packets.count {
+                guard !Task.isCancelled, canContinue() else {
+                    return .interrupted(reason: "Typing stopped because input changed.", dispatched: dispatchedUnits > 0)
+                }
+                return .sent
+            }
+            let chunk = packets[packetIndex]
             guard !Task.isCancelled, canContinue(), canDispatch() else {
                 return .interrupted(reason: "Typing stopped because input changed.", dispatched: dispatchedUnits > 0)
             }

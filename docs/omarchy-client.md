@@ -8,11 +8,11 @@ Start the daemon in your graphical session. Hold the configured key, wait for th
 
 A completed take inserts once into the original accessible field only when the destination checks succeed. Otherwise a notification says the text is ready: `dictaduo result` prints it; `dictaduo copy` explicitly replaces the clipboard so you can paste it yourself. An uncertain insertion is identified separately; check the field before copying. Notifications never display dictated text. The last result lives only in this process and is cleared when starting a new take. Older results remain in shared server history.
 
-No key injection, automatic clipboard replacement, clipboard restoration, or automatic Enter is involved. Keyboard modifiers therefore cannot turn delivery into a different paste shortcut. Explicit copying intentionally replaces the clipboard; DictaDuo never restores old clipboard data over newer user content. Terminals use the manual-copy path, so their paste conventions and shell command execution remain under the user's control.
+Automatic can use verified keyboard input or a temporary clipboard lease. Type text avoids the clipboard. Held modifiers block delivery, and literal controls are never synthesized as Return or Tab actions. Restoration never overwrites a newer clipboard owner. Explicit copying intentionally replaces the clipboard. Terminals use the manual-copy path, so their paste conventions and shell command execution remain under the user's control.
 
 ## Build and setup
 
-Requires Linux, Bun for development, a C compiler, pkg-config, `at-spi2-core`, and `json-glib`. Runtime dependencies are `hyprctl`, `omarchy-shell`, `loginctl`, `dbus-monitor`, `pw-dump`, `notify-send`, `wl-copy`, and the native helper's shared libraries. The current destination/lock adapter targets Omarchy 4 / Hyprland 0.56; it fails closed when required state is unavailable. It is not a generic Wayland client yet.
+Requires Linux, Bun for development, a C compiler, pkg-config, `at-spi2-core`, `json-glib`, Wayland development tools/libraries, and `xkbcommon`. Runtime dependencies are `hyprctl`, `omarchy-shell`, `loginctl`, `dbus-monitor`, `pw-dump`, `notify-send`, `wl-copy`, a systemd user session, and the native helpers' shared libraries. The Omarchy destination/lock adapter targets Hyprland; it fails closed when required state is unavailable. Plasma has its own adapter and explicitly granted keyboard portal.
 
 ```sh
 bun install --frozen-lockfile
@@ -30,7 +30,21 @@ bash scripts/build-linux-client.sh
 
 The server must already be deployed with the optional PipeWire capture provider enabled. This client does not install the provider, grant USB access, pair Bluetooth devices, or change the daily server. A server with no registered sources cannot record from this client. Desktop inputs are captured by the same provider, with no second local capture path.
 
-For autostart, first place the executable and helper in `~/.local/opt/dictaduo-linux/current/` and put `dictaduo` on PATH. Configure the helper's installed absolute path, then adapt/install [the user service](../Clients/Linux/integration/dictaduo-client.service). Enable it only after the desktop trial. It requires the graphical session's `WAYLAND_DISPLAY`, `HYPRLAND_INSTANCE_SIGNATURE`, `XDG_RUNTIME_DIR`, and session D-Bus environment. The installed Omarchy session already exports these to systemd. Restart begins idle; it never reloads old takes for insertion. If desktop monitoring fails, stop/restart the client before trying again.
+For manual installation, keep the executable and **all six delivery helpers** together. From the repository root after building:
+
+```sh
+DICTADUO_INSTALL_DIR="$HOME/.local/opt/dictaduo-linux/current"
+install -d "$DICTADUO_INSTALL_DIR"
+for binary in dictaduo dictaduo-destination dictaduo-type dictaduo-clipboard dictaduo-clipboard-ext dictaduo-literal dictaduo-portal-keyboard; do
+  install -m755 "build/linux-client/$binary" "$DICTADUO_INSTALL_DIR/"
+done
+install -d "$DICTADUO_INSTALL_DIR/share/licenses/dictaduo"
+for protocol in virtual-keyboard-unstable-v1.xml input-method-unstable-v2.xml wlr-data-control-unstable-v1.xml ext-data-control-v1.xml; do
+  install -m644 "Clients/Linux/native/$protocol" "$DICTADUO_INSTALL_DIR/share/licenses/dictaduo/"
+done
+```
+
+The Qt GUI's CMake install also includes these binaries and protocol licenses. Put the installed `dictaduo` on PATH. For autostart, configure `destinationHelper` with the installed absolute path to `dictaduo-destination`, then adapt/install [the user service](../Clients/Linux/integration/dictaduo-client.service). Enable it only after the desktop trial. It requires the graphical session's `WAYLAND_DISPLAY`, `HYPRLAND_INSTANCE_SIGNATURE`, `XDG_RUNTIME_DIR`, and session D-Bus environment. The installed Omarchy session already exports these to systemd. Restart begins idle; it never reloads old takes for insertion. If desktop monitoring fails, stop/restart the client before trying again.
 
 [The Lua binding example](../Clients/Linux/integration/bindings.lua) uses Menu for press/release, Super+Menu to cancel, and Super+Shift+Menu to copy the last result. Kris chose to replace the existing Menu → Voxtype toggle; the example explicitly unbinds it before adding DictaDuo. F9 remains assigned to Voxtype. Recheck bindings before installation. Release ignores modifiers, so pressing another modifier while speaking still stops the take. Recording is not enabled on the lock screen. Validate changes with `hyprctl reload` followed by `hyprctl configerrors`.
 
@@ -65,7 +79,7 @@ The native helper retains one AT-SPI accessible object, restricted to the initia
 
 Automatic uses [AT-SPI InsertText](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/method.EditableText.insert_text.html), verified keyboard packets in web editors, literal input-method commits when supported, or guarded temporary paste. A selection is replaced in one keyboard/paste transaction without a separate delete. Each packet verifies the retained field, full resulting text and caret. A timeout/false/error after a possible mutation is **uncertain** and never permits another transport. Hyprland focus changes, accessible edits and physical input observed by the available backend invalidate delivery. Type text never touches the clipboard. Automatic snapshots all MIME formats and restores only its lease; a user scope preserves restored clipboard ownership across daemon shutdown. See [the current transport matrix and platform constraints](text-input-research.md).
 
-AT-SPI is application-provided metadata. Password roles are rejected, but arbitrary applications can omit or misreport accessibility information. Web form semantics, rich editors, embedded terminals, and application-specific protected inputs are not claimed to have macOS Accessibility parity. Missing/unsupported metadata uses preview/manual copy. There is no atomic compositor+accessibility transaction; insertion is pinned to the original object to avoid redirecting text into a newly focused application.
+AT-SPI is application-provided metadata. Password roles are rejected, but arbitrary applications can omit or misreport accessibility information. Web form semantics, rich editors, embedded terminals, and application-specific protected inputs are not claimed to have macOS Accessibility parity. Missing/unsupported metadata uses preview/manual copy. Native writes address the retained accessible object. Wayland keyboard/paste events cannot target a PID; field/focus checks and readback guard them, but there is no atomic compositor+accessibility transaction. The temporary input-method seat is released after each literal delivery, including deferred and interrupted takes.
 
 Lock safety checks logind activity, Omarchy shell `lock status`, and Hyprland monitor lock blockers. Unknown state, pending locks, and orphaned compositor locks block delivery. The lock event timestamp catches a lock/unlock cycle between checks. Logind sleep/session events cancel promptly; a wall-clock gap over 2.5 seconds cancels on resume. Only this desktop's owned session is cancelled. The Mac's server-side take is unaffected by a desktop lock.
 

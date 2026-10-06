@@ -54,7 +54,7 @@ enum PasteShortcutKey {
 
 @MainActor
 enum SystemPasteShortcut {
-    static func post(canStart: () -> Bool, canPaste: () -> Bool) async -> PasteDispatch {
+    static func post(into pid: pid_t, canStart: () -> Bool, canPaste: () -> Bool) async -> PasteDispatch {
         guard let key = PasteShortcutKey.current(), let source = CGEventSource(stateID: .privateState),
               let commandDown = CGEvent(keyboardEventSource: source, virtualKey: 55, keyDown: true),
               let down = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: true),
@@ -70,13 +70,13 @@ enum SystemPasteShortcut {
               canPaste(), !input.interrupted else {
             return .blocked(reason: "Focus or input access changed before pasting.")
         }
-        commandDown.post(tap: .cghidEventTap)
-        defer { commandUp.post(tap: .cghidEventTap) }
+        commandDown.postToPid(pid)
+        defer { commandUp.postToPid(pid) }
         // Dispatch the complete chord without yielding while Command is down.
-        down.post(tap: .cghidEventTap)
+        down.postToPid(pid)
         // Once V goes down, finish the chord even if the take is cancelled.
         // A dispatched paste must never be retried through another route.
-        up.post(tap: .cghidEventTap)
+        up.postToPid(pid)
         return .sent
     }
 }
@@ -87,6 +87,7 @@ enum SystemPasteShortcut {
 final class TextInputInterruptionMonitor {
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
+    private var activationObserver: NSObjectProtocol?
     private(set) var interrupted = false
 
     func start() -> Bool {
@@ -103,6 +104,11 @@ final class TextInputInterruptionMonitor {
         self.source = source
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { if let self { self.interrupted = true } }
+        }
         return true
     }
 
@@ -113,6 +119,8 @@ final class TextInputInterruptionMonitor {
     }
 
     func stop() {
+        if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
+        activationObserver = nil
         if let tap { CFMachPortInvalidate(tap) }
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
         tap = nil

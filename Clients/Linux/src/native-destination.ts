@@ -258,27 +258,49 @@ class NativeSession {
     this.literal = Bun.spawn([helper], { stdin: "pipe", stdout: "pipe", stderr: "ignore" });
     this.literalReader = this.literal.stdout.getReader();
     if ((await this.literalLine()) === "ready" && !this.closed) return true;
-    this.literal.kill("SIGKILL");
-    this.literal = undefined;
+    await this.releaseLiteral();
     return false;
+  }
+  private async releaseLiteral(): Promise<void> {
+    const child = this.literal;
+    this.literal = undefined;
+    void this.literalReader?.cancel().catch(() => {});
+    this.literalReader = undefined;
+    this.literalBuffer = "";
+    if (!child) return;
+    const timer = setTimeout(() => child.kill("SIGKILL"), 500);
+    try {
+      child.stdin.end();
+      await child.exited;
+    } catch {
+      child.kill("SIGKILL");
+      await child.exited;
+    } finally {
+      clearTimeout(timer);
+    }
   }
   private async commitLiteral(text: string, held: () => boolean): Promise<string> {
     let attempted = false;
-    for (const value of literalTextChunks(text)) {
-      if (held()) return attempted ? "uncertain" : "held";
-      if ((await this.command({ type: value, transport: "literal" })) !== "ready")
-        return attempted ? "uncertain" : "preview";
-      if (held() || this.closed) {
-        await this.command({ disarm: true });
-        return attempted ? "uncertain" : "held";
+    try {
+      for (const value of literalTextChunks(text)) {
+        if (held()) return attempted ? "uncertain" : "held";
+        if ((await this.command({ type: value, transport: "literal" })) !== "ready")
+          return attempted ? "uncertain" : "preview";
+        if (held() || this.closed) {
+          await this.command({ disarm: true });
+          return attempted ? "uncertain" : "held";
+        }
+        attempted = true;
+        this.literal!.stdin.write(JSON.stringify(value) + "\n");
+        await this.literal!.stdin.flush();
+        if ((await this.literalLine()) !== "sent" || (await this.command(false)) !== "inserted")
+          return "uncertain";
       }
-      attempted = true;
-      this.literal!.stdin.write(JSON.stringify(value) + "\n");
-      await this.literal!.stdin.flush();
-      if ((await this.literalLine()) !== "sent" || (await this.command(false)) !== "inserted")
-        return "uncertain";
+      return "inserted";
+    } finally {
+      // Queued takes retain the destination, never the exclusive IME seat.
+      await this.releaseLiteral();
     }
-    return "inserted";
   }
   private async paste(text: string, held: () => boolean): Promise<string> {
     if (!(await this.canType())) return "preview";
