@@ -73,6 +73,12 @@ async function activeWindow(): Promise<Window | undefined> {
 const preview = (): Destination => ({ deliver: async () => "preview", close() {} });
 export class HyprlandDesktop implements Desktop {
   readonly kind = "hyprland";
+  get keyboardAccess() {
+    return this.destinations.keyboardAccess;
+  }
+  enableKeyboardAccess(): void {
+    this.destinations.enableKeyboardAccess();
+  }
   private socket?: Socket;
   private monitor?: ReturnType<typeof Bun.spawn>;
   private connected = false;
@@ -257,7 +263,7 @@ export class HyprlandDesktop implements Desktop {
     };
   }
   close(): void {
-    this.destinations.invalidate();
+    this.destinations.close();
     this.connected = false;
     this.socket?.destroy();
     this.monitor?.kill();

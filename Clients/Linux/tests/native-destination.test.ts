@@ -5,6 +5,24 @@ import { tmpdir } from "node:os";
 import { NativeDestinations } from "../src/native-destination.ts";
 // Opt in only in a disposable test display or during an explicitly supervised desktop trial.
 const nativeTest = process.env.DICTADUO_TEST_DESKTOP === "1" ? test : test.skip;
+function fixtureLines(stream: ReadableStream<Uint8Array>) {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  return async () => {
+    while (!buffer.includes("\n")) {
+      const next = await reader.read();
+      if (next.done) throw new Error("Fixture stopped before its reply.");
+      buffer += decoder.decode(next.value, { stream: true });
+    }
+    const at = buffer.indexOf("\n");
+    const line = buffer.slice(0, at);
+    buffer = buffer.slice(at + 1);
+    return line.startsWith("text:")
+      ? Buffer.from(line.slice(5), "base64").toString().trimEnd()
+      : line;
+  };
+}
 async function focusFixture(pid: number) {
   if (!process.env.HYPRLAND_INSTANCE_SIGNATURE) return;
   await Bun.spawn(["hyprctl", "dispatch", "focuswindow", `pid:${pid}`], {
@@ -14,7 +32,7 @@ async function focusFixture(pid: number) {
   await Bun.sleep(100);
 }
 nativeTest(
-  "Wayland typing confirms Unicode packets, guards queued edits and refuses action keys",
+  "Wayland typing confirms Unicode packets, guards queued edits and uses literal controls",
   async () => {
     const root = resolve(import.meta.dir, "../../..");
     const entry = Bun.spawn([`${root}/.local/entry-fixture`], {
@@ -23,8 +41,7 @@ nativeTest(
       stderr: "ignore",
     });
     const destinations = new NativeDestinations();
-    const reader = entry.stdout.getReader();
-    const read = async () => new TextDecoder().decode((await reader.read()).value).trimEnd();
+    const read = fixtureLines(entry.stdout);
     const send = async (value: string) => {
       entry.stdin.write(value + "\n");
       await entry.stdin.flush();
@@ -51,9 +68,9 @@ nativeTest(
       for (const text of ["first\nsubmit", "first\tother"]) {
         await send("reset");
         const destination = await capture();
-        expect(await destination.deliver(text)).toBe("preview");
+        expect(await destination.deliver(text)).toBe(text.includes("\n") ? "preview" : "inserted");
         await send("get");
-        expect(await read()).toBe("start");
+        expect(await read()).toBe(text.includes("\n") ? "start" : "start " + text);
       }
       await send("reset");
       await send("web");
@@ -74,6 +91,11 @@ nativeTest(
       expect(await paragraphs.deliver("first\n\nsecond æøå 👋")).toBe("inserted");
       await send("get");
       expect(await read()).toBe("start first\n\nsecond æøå 👋");
+      await send("textarea");
+      const literal = await capture("unicodeTyping");
+      expect(await literal.deliver("\n\t👋🏽 literal\nsecond")).toBe("inserted");
+      await send("get");
+      expect(await read()).toBe("start \n\t👋🏽 literal\nsecond");
       await send("reset");
       const stale = await capture();
       await send("other");
@@ -129,8 +151,7 @@ nativeTest(
       stderr: "ignore",
     });
     const destinations = new NativeDestinations();
-    const reader = entry.stdout.getReader();
-    const read = async () => new TextDecoder().decode((await reader.read()).value).trimEnd();
+    const read = fixtureLines(entry.stdout);
     const send = async (value: string) => {
       entry.stdin.write(value + "\n");
       await entry.stdin.flush();
@@ -218,8 +239,7 @@ nativeTest(
       stdout: "pipe",
       stderr: "ignore",
     });
-    const reader = entry.stdout.getReader();
-    const read = async () => new TextDecoder().decode((await reader.read()).value).trimEnd();
+    const read = fixtureLines(entry.stdout);
     const send = async (value: string) => {
       entry.stdin.write(value + "\n");
       await entry.stdin.flush();
@@ -285,9 +305,9 @@ nativeTest(
       stdout: "pipe",
       stderr: "ignore",
     });
-    const reader = entry.stdout.getReader();
+    const read = fixtureLines(entry.stdout);
     try {
-      await reader.read();
+      await read();
       await Bun.sleep(800);
       await focusFixture(entry.pid);
       expect(await desktop.unlocked()).toBe(true);
@@ -296,7 +316,7 @@ nativeTest(
       expect(await destination.deliver("duplicate")).toBe("preview");
       entry.stdin.write("get\n");
       await entry.stdin.flush();
-      expect(new TextDecoder().decode((await reader.read()).value).trim()).toBe("start Norsk æøå");
+      expect(await read()).toBe("start Norsk æøå");
       entry.stdin.write("reset\n");
       await entry.stdin.flush();
       await Bun.sleep(100);

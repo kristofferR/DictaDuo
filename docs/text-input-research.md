@@ -15,7 +15,8 @@ is retained with its copyright and distributed license.
 | Offer direct typing. [Handy](https://github.com/cjpais/Handy/blob/a94b403e0610049fafa54b0a4077db2945084dd8/src-tauri/src/clipboard.rs), [wtype](https://github.com/atx/wtype/blob/d71be3a7b3f93b534a2823fd68cabd7ac2a02359/main.c). | Automatic / Type text; Unicode payload only on key-down. | Matching local modes. A bundled Wayland helper uses printable physical keycodes, avoiding Chromium's action-key interpretation of wtype's sequential keycodes. No external typing daemon or keyboard-layout guess. |
 | Preserve Unicode boundaries and stop after partial writes. [Parrot](https://github.com/humanitas-labs/parrot), [Fonos](https://github.com/ethannortharc/fonos). | At most 16 UTF-16 units; keep graphemes where possible; scalar-safe splitting of oversized clusters. No full-payload retry after a partial write. | Same packet bounds. Guard original text, field and selection, verify each packet, and terminate the keyboard helper on lost destination. No fallback after a possible write. |
 | Own a verified selection/range. [TypeWhisper](https://github.com/TypeWhisper/typewhisper-mac/blob/fe2f92d838dad9ab5200606b38a6e0c1c5ef5faf/TypeWhisper/Services/TextInsertionService.swift). | Retain selection, replace it, then verify the resulting caret. | Retain a single selection; one keyboard transaction replaces it. Avoid separate AT-SPI delete/insert operations. Unexpected edits, selection, focus or caret events invalidate queued takes. |
-| Preserve the clipboard and serialize delivery. [FreeFlow](https://github.com/zachlatta/freeflow/blob/ad5c827b5a324c503d58f948d500fa5d9f90e7d8/Sources/AppState.swift), [OpenWhisp](https://github.com/initcore0/openwhisp/blob/eec578712c25b37da26c7bd5cce36b3c813c19c1/OpenWhisp/Services/TextInserter.swift). | Snapshot all representations and restore only the owned revision in Automatic; Type text does not touch it. | Native and keyboard delivery never change the clipboard. Existing recording-order serialization is retained. Copy is an explicit user action. |
+| Preserve the clipboard and serialize delivery. [FreeFlow](https://github.com/zachlatta/freeflow/blob/ad5c827b5a324c503d58f948d500fa5d9f90e7d8/Sources/AppState.swift), [OpenWhisp](https://github.com/initcore0/openwhisp/blob/eec578712c25b37da26c7bd5cce36b3c813c19c1/OpenWhisp/Services/TextInserter.swift). | Snapshot all representations and restore only the owned revision in Automatic; Type text does not touch it. | Automatic snapshots every MIME representation before temporary paste, then restores only its lease. A separate user scope keeps restored data alive across client restart. Type text never touches the clipboard. Recording-order serialization is retained. |
+| Carry literal controls without action keys. [Input-method v2](../Clients/Linux/native/PROTOCOLS.md). | Leading/control-only packets use selected-text replacement with exact text and caret readback. A potentially applied write is never retried. | Native insertion or UTF-8 input-method commits handle literal newline/tab and emoji. Automatic can use verified paste when those routes are unavailable. |
 
 ## Linux-specific source review
 
@@ -23,30 +24,40 @@ is retained with its copyright and distributed license.
 - [OpenWhispr](https://github.com/OpenWhispr/openwhispr/blob/f770e9211719a6e28d0578b480d8a23dea79d7ff/resources/linux-fast-paste.c) separates portal, uinput and X11 shortcuts and waits for modifiers. Those transports are useful references, but their successful dispatch does not establish text insertion.
 - [hyprwhspr](https://github.com/goodroot/hyprwhspr/blob/6a97f2dc3d70023b6be191d7a446d8150673895d/lib/src/text_injector.py) uses clipboard generations, cancellation and compiled-layout checks for ydotool. We avoid layout-dependent typing and automatic clipboard replacement.
 - [Hex](https://github.com/anomalyco/hex/blob/255f12fac993ca99f18f4a68139b603beea308b5/src/linux_paste.rs) waits for modifier release and distinguishes bounded clipboard settling from an acknowledgment.
-- [Voquill](https://github.com/voquill/voquill/blob/a5dfbe0e3a35807271293a0ef02c91902abc0104/apps/desktop/src-tauri/src/platform/linux/wl/accessibility.rs) obtains selected text through temporary copy. DictaDuo reads the accessible range directly, avoiding another clipboard transaction. Its full transport remains only partially traced.
+- [Voquill](https://github.com/voquill/voquill/blob/a5dfbe0e3a35807271293a0ef02c91902abc0104/apps/desktop/src-tauri/src/platform/linux/wl/input.rs) was traced through its command, desktop adapter and Wayland transport. It uses ydotool/wtype, text-only clipboard backup and a delayed restore; failure can leave the transcript on the clipboard. DictaDuo uses all-format ownership checks and field readback. Its selected-text copy workaround is unnecessary because we read the accessible range directly.
 - [Cotto](https://github.com/JessePomeroy/cotto/blob/7b7dd80daf6e76cbc21b41cd3ddd623841409c0c/Linux/src/DesktopPaste.cpp) uses a RemoteDesktop portal. A portal transport needs a separately authorized session and still needs field readback.
+- [Epicenter/Whispering](https://github.com/EpicenterHQ/epicenter/blob/f9441c8f6d32276bb8ab640091b35776174d2490/apps/epicenter/src-tauri/src/delivery.rs) was traced from its frontend command through native delivery. Its Mac concealed pasteboard and permission-watch ideas informed our guards. Linux saves only text and restores after a fixed delay; we use MIME snapshots and verified receipt instead.
 
-## Concrete remaining differences
+## Delivery and platform constraints
 
-- Wayland keyboard input turns line breaks/tabs into action keys. Type text
-  refuses the whole payload before typing. Automatic can insert literal
-  paragraphs in native AT-SPI fields. A verified literal UTF-8 transport for
-  web-editor paragraphs remains necessary.
-- Chromium 153 on Wayland did not reliably accept supplementary Unicode
-  symbols through keyboard input. Chromium payloads containing them are refused
-  before mutation; native GTK fields passed emoji and combining-mark tests.
-- KWin does not offer this virtual-keyboard protocol. Plasma retains native
-  AT-SPI insertion and the same safety checks; a portal or KWin typing adapter
-  needs real-device validation. Unsupported Type text reports its constraint.
-- Wayland does not provide a general physical-input monitor to this client.
-  Linux observes accessible text/caret/selection/focus changes and compositor
-  focus changes; macOS additionally has a listen-only input event tap.
-- Linux has no borrowed-clipboard paste transport. Adding one must preserve all
-  MIME representations, respect newer clipboard owners and prove delivery.
-  Plain-text backups and unconditional restore timers are not sufficient.
+- Literal controls are never synthesized as Return/Tab actions. Linux attempts
+  native insertion, then an input-method commit when the focused application
+  supports it and no other input method owns the seat. Automatic has a verified
+  paste fallback for web paragraphs and Chromium supplementary Unicode. Type
+  text reports a constraint when no clipboard-free route exists.
+  This workstation runs Fcitx5, which already owns the input-method seat; that
+  route is deliberately declined without interrupting the existing IME.
+- macOS selected-text replacement must prove the exact expected value and caret.
+  Chromium's successful AX reply without a real write fails this check. Automatic
+  retains its paste route; Type text stops safely after any possible write.
+- Plasma uses a keyboard-only RemoteDesktop grant, enabled explicitly in This
+  computer before dictation. Restore tokens are private, rotated and never logged.
+  Session revocation closes the transport. Printable key packets and complete
+  paste chords use the same retained-field readback as Hyprland. KWin uses ext
+  data control for clipboard leases; both protocol variants are bundled.
+- Linux now watches AT-SPI keyboard events and readable physical evdev devices
+  without grabs or permission changes. Physical keys/buttons/wheel, dropped input
+  events and held modifiers interrupt delivery where the backend exposes them.
+  Full hardware coverage depends on compositor support/device access; accessible
+  text/caret/selection/focus checks always remain active. This workstation does
+  not grant access to its ordinary keyboard/mouse evdev nodes. macOS has a
+  listen-only event tap.
+- Clipboard snapshots are bounded to 128 formats, 32 MiB and 1.5 seconds.
+  An incomplete/changed snapshot is rejected before publishing a transcript.
+  Restoration never overwrites a newer owner. A systemd user scope is required
+  so restored selection ownership survives background-client shutdown.
 - Live streaming is tracked in [#63](https://github.com/kristofferR/DictaDuo/issues/63)
-  for both clients. Stable recognition chunks, region ownership, correction
-  reconciliation and the Linux transport gaps above remain feature work.
+  for both clients and was explicitly excluded from this change.
 
 ## Validation
 
@@ -54,11 +65,26 @@ Linux: complete Bun suite, TypeScript checks, warning-clean native builds, Qt
 GUI/desktop tests, and `scripts/test-linux-insertion.sh` in dedicated GTK fields.
 The desktop test uses a private accessibility bus, preserving the shared socket
 and restoring focus. Cases cover Unicode, selections, paragraphs, queued takes,
-changed destinations, control-key refusal, partial interruption, and a backend
+changed destinations, literal controls, partial interruption, and a backend
 that exits successfully without inserting text.
 
-A dedicated Chromium 153 Wayland window passed Norwegian letters, combining
-marks, Chinese text and punctuation including the sequential-keycode failure
-case. No Enter event occurred. Supplementary-symbol refusal left the field
-unchanged. macOS's corresponding delivery tests/probes passed in the preceding
-changes; this Linux follow-up does not modify that client.
+A dedicated Chromium 153 Wayland window passed leading newline/tab, Norwegian
+letters, emoji, skin tones and joined emoji through Automatic, with exact text
+readback and zero Enter events. Type text left that field unchanged when its
+input-method route was unavailable. GTK passed clipboard-free literal controls.
+
+`scripts/test-linux-transports.sh` uses private Wayland and D-Bus fixtures. It
+checks both wlr/ext clipboard formats, empty/binary data, newer-owner preservation,
+EOF restoration, keyboard-only portal grants, immediate responses, private restore
+tokens, key-up ordering and revocation. The private input-method test verifies
+literal controls/emoji and the commit serial, and rejects occupied, protected and
+inactive seats. An input-event fixture checks held
+modifiers and physical/synthetic discrimination without device permissions.
+Plasma protocol validation passes; a real KWin desktop trial remains unverified
+because this machine runs Hyprland and has no KWin/RemoteDesktop backend.
+
+macOS targeted Swift tests and its release build pass. Native NSTextView accepted
+leading newline/tab and emoji exactly in a signed temporary probe. Chromium
+reported AX success without inserting the payload, confirming why readback and
+no ambiguous retry are required. The temporary WKWebView did not expose a focused
+AX field, so that literal route is not claimed as verified there.

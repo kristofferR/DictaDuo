@@ -1,5 +1,32 @@
 export type TextInsertionMethod = "automatic" | "unicodeTyping";
 
+/** Input-method commits carry literal text. Leave room in Wayland's 4096-byte
+ * message for its headers; keep graphemes together unless one exceeds the bound. */
+export function literalTextChunks(text: string): string[] {
+  const encoder = new TextEncoder();
+  const chunks: string[] = [];
+  let chunk = "";
+  let bytes = 0;
+  const append = (part: string) => {
+    const size = encoder.encode(part).length;
+    if (bytes + size > 3000) {
+      chunks.push(chunk);
+      chunk = "";
+      bytes = 0;
+    }
+    chunk += part;
+    bytes += size;
+  };
+  for (const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(
+    text,
+  )) {
+    if (encoder.encode(segment).length <= 3000) append(segment);
+    else for (const scalar of segment) append(scalar);
+  }
+  if (chunk) chunks.push(chunk);
+  return chunks;
+}
+
 /** Wayland keyboard text maps line breaks and tabs to action keys. Refuse the
  * entire payload before typing so a chat cannot submit or change focus. */
 export function typingChunks(text: string): string[] | undefined {

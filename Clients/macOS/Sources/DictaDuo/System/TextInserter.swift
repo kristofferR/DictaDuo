@@ -310,7 +310,8 @@ final class TextInserter {
         }
     }
 
-    private static func replaceSelection(_ text: String, in target: InsertionTarget, willDispatch: () -> Void) -> NativeTextWrite {
+    private static func replaceSelection(_ text: String, in target: InsertionTarget,
+                                         canDispatch: () -> Bool = { true }, willDispatch: () -> Void) -> NativeTextWrite {
         guard !Task.isCancelled, AXIsProcessTrusted(), !target.application.isTerminated else {
             return .uncertain(reason: "Insertion was interrupted.")
         }
@@ -323,7 +324,7 @@ final class TextInserter {
             guard settable.boolValue else { return .unsupported }
         default: return .uncertain(reason: "Native insertion access could not be verified.")
         }
-        guard readyToDispatch(into: target) else { return .uncertain(reason: "The original cursor changed.") }
+        guard readyToDispatch(into: target), canDispatch() else { return .uncertain(reason: "The original cursor changed.") }
         willDispatch()
         let result = AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString)
         switch result {
@@ -374,6 +375,43 @@ final class TextInserter {
 
     private static func typeUnicode(_ text: String, in target: InsertionTarget,
                                     canDispatch: () -> Bool) async -> TypingDispatch {
+        // Accessibility selected-text replacement carries literal controls.
+        // Keyboard events starting with a newline/tab can instead act as keys.
+        let literal = UnicodeTypingDelivery.chunks(text).contains { packet in
+            packet.first.map { [9, 10, 13].contains($0) } ?? false
+        }
+        if literal {
+            let input = TextInputInterruptionMonitor()
+            guard input.start() else { return .unavailable }
+            defer { input.stop() }
+            guard let range = target.selection,
+                  let original = await readOffMain({ checkedAttribute(kAXValueAttribute as CFString, of: target.snapshot.focus.element).value as? String }),
+                  original.utf16.count <= 65536, range.location >= 0, range.length >= 0,
+                  range.location <= original.utf16.count, range.length <= original.utf16.count - range.location else {
+                return .interrupted(reason: "Literal insertion requires readable text and a verified selection. Choose Automatic.", dispatched: false)
+            }
+            let expected = (original as NSString).replacingCharacters(in: range, with: text)
+            guard !input.interrupted, canDispatch(), readyToDispatch(into: target), !input.interrupted else {
+                return .interrupted(reason: "Focus or input changed before literal insertion.", dispatched: false)
+            }
+            var dispatched = false
+            switch replaceSelection(text, in: target, canDispatch: {
+                let current = checkedAttribute(kAXValueAttribute as CFString, of: target.snapshot.focus.element).value as? String
+                return current == original && !input.interrupted && canDispatch()
+            }, willDispatch: { dispatched = true }) {
+            case .acknowledged, .uncertain:
+                guard dispatched else { return .interrupted(reason: "Literal insertion was interrupted.", dispatched: false) }
+                for _ in 0..<3 {
+                    let actual = await readOffMain { checkedAttribute(kAXValueAttribute as CFString, of: target.snapshot.focus.element).value as? String }
+                    if !input.interrupted, actual == expected,
+                       await validateTypingProgress(target, sentUnits: text.utf16.count) == .valid { return .sent }
+                    do { try await Task.sleep(for: .milliseconds(60)) } catch { break }
+                }
+                return .interrupted(reason: "The field did not confirm the literal text. Check it before retrying.", dispatched: true)
+            case .unsupported:
+                return .interrupted(reason: "This field cannot receive these line breaks or tabs without the clipboard. Choose Automatic.", dispatched: false)
+            }
+        }
         // A single-line field may interpret a newline as submission even when
         // no Return key is sent. Check this before typing any part of the text.
         if text.contains(where: { $0.isNewline }) {

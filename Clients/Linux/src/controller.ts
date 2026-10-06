@@ -87,6 +87,8 @@ export interface Destination {
 }
 export interface Desktop {
   kind?: "hyprland" | "plasma";
+  readonly keyboardAccess?: "disabled" | "requesting" | "ready" | "unavailable";
+  enableKeyboardAccess?(): void;
   unlocked(since?: number): Promise<boolean>;
   capture(method?: TextInsertionMethod): Promise<Destination>;
   defaultInput(hostID: string): Promise<SourceID | undefined>;

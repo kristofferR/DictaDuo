@@ -84,7 +84,7 @@ ScrollView {
             Setting {
                 ui: root.ui
                 title: "Text insertion"
-                detail: root.ui.snapshot.textInsertionMethod === "unicodeTyping" ? "Types without using the clipboard on supported Wayland desktops. Line breaks and tabs stay in History." : "Uses native insertion, or verified typing in supported web editors. Keep a text field focused."
+                detail: root.ui.snapshot.textInsertionMethod === "unicodeTyping" ? "Uses clipboard-free typing or literal text insertion where supported. Keep a text field focused." : "Uses native insertion or verified typing, with temporary paste when needed. Restores your clipboard."
                 ComboBox {
                     objectName: "textInsertionMethod"
                     implicitWidth: 245
@@ -102,6 +102,18 @@ ScrollView {
                         if (action === "saveTextInsertionMethod")
                             bridge.request("snapshot");
                     }
+                }
+            }
+            Setting {
+                ui: root.ui
+                visible: portalShortcuts.plasma
+                title: "Keyboard access"
+                detail: root.ui.snapshot.keyboardAccess === "ready" ? "Enabled for this computer." : root.ui.snapshot.keyboardAccess === "requesting" ? "Complete the desktop permission dialog." : "Allow DictaDuo to type and paste into focused text fields."
+                SButton {
+                    ui: root.ui
+                    text: root.ui.snapshot.keyboardAccess === "ready" ? "Enabled" : "Enable"
+                    enabled: bridge.connected && !root.ui.busy && !bridge.preview && root.ui.snapshot.keyboardAccess !== "ready" && root.ui.snapshot.keyboardAccess !== "requesting"
+                    onClicked: bridge.request("enableKeyboardAccess")
                 }
             }
             Setting {

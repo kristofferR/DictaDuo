@@ -41,6 +41,12 @@ export function loginSessionPath(reply: string) {
  * unknown screen-lock/session state. */
 export class PlasmaDesktop implements Desktop {
   readonly kind = "plasma";
+  get keyboardAccess() {
+    return this.destinations.keyboardAccess;
+  }
+  enableKeyboardAccess(): void {
+    this.destinations.enableKeyboardAccess();
+  }
   private screen?: ReturnType<typeof Bun.spawn>;
   private session?: ReturnType<typeof Bun.spawn>;
   private connected = false;
@@ -221,7 +227,7 @@ export class PlasmaDesktop implements Desktop {
   }
 
   close(): void {
-    this.destinations.invalidate();
+    this.destinations.close();
     this.connected = false;
     this.screen?.kill();
     this.session?.kill();

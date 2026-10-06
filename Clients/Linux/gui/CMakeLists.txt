@@ -24,10 +24,14 @@ install(TARGETS dictaduo-gui RUNTIME DESTINATION bin)
 install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/../../../build/linux-client/dictaduo"
                  "${CMAKE_CURRENT_SOURCE_DIR}/../../../build/linux-client/dictaduo-destination"
                  "${CMAKE_CURRENT_SOURCE_DIR}/../../../build/linux-client/dictaduo-type"
+                 "${CMAKE_CURRENT_SOURCE_DIR}/../../../build/linux-client/dictaduo-clipboard"
+                 "${CMAKE_CURRENT_SOURCE_DIR}/../../../build/linux-client/dictaduo-clipboard-ext"
+                 "${CMAKE_CURRENT_SOURCE_DIR}/../../../build/linux-client/dictaduo-literal"
+                 "${CMAKE_CURRENT_SOURCE_DIR}/../../../build/linux-client/dictaduo-portal-keyboard"
         DESTINATION bin)
 install(FILES dictaduo.desktop DESTINATION share/applications)
 install(FILES mark.svg DESTINATION share/icons/hicolor/scalable/apps RENAME dictaduo.svg)
-install(FILES "../native/virtual-keyboard-unstable-v1.xml" DESTINATION share/licenses/dictaduo)
+install(FILES "../native/virtual-keyboard-unstable-v1.xml" "../native/input-method-unstable-v2.xml" "../native/wlr-data-control-unstable-v1.xml" "../native/ext-data-control-v1.xml" DESTINATION share/licenses/dictaduo)
 
 include(CTest)
 if(BUILD_TESTING)

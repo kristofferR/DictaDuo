@@ -1,6 +1,8 @@
 import type { Destination } from "./controller.ts";
 import { dirname, join } from "node:path";
-import { typingChunks, type TextInsertionMethod } from "./text-insertion.ts";
+import { literalTextChunks, typingChunks, type TextInsertionMethod } from "./text-insertion.ts";
+import { WaylandClipboard } from "./wayland-clipboard.ts";
+import { PortalKeyboard } from "./portal-keyboard.ts";
 
 const preview = (reason?: string): Destination => ({
   reason,
@@ -14,9 +16,18 @@ export class NativeDestinations {
   private capturing: Promise<unknown> = Promise.resolve();
   private revision = 0;
   private warmed = new Map<string, number>();
+  private clipboard?: WaylandClipboard;
+  private keyboard?: PortalKeyboard;
+  get keyboardAccess() {
+    return this.keyboard?.status ?? "disabled";
+  }
+  enableKeyboardAccess(): void {
+    this.keyboard?.enable();
+  }
 
   /** Start the accessibility registry before a take, without reading fields. */
   warm(helper: string, target?: string): void {
+    this.keyboard ??= new PortalKeyboard(join(dirname(helper), "dictaduo-portal-keyboard"));
     const key = target ?? "all";
     if (Date.now() - (this.warmed.get(key) ?? 0) < 3000) return;
     if (this.warmed.size >= 64) this.warmed.clear();
@@ -52,9 +63,17 @@ export class NativeDestinations {
         destination = undefined;
       }
       if (!session) {
-        session = new NativeSession(helper, target, () => {
-          if (this.sessions.get(target) === session) this.sessions.delete(target);
-        });
+        this.clipboard ??= new WaylandClipboard(join(dirname(helper), "dictaduo-clipboard"));
+        this.keyboard ??= new PortalKeyboard(join(dirname(helper), "dictaduo-portal-keyboard"));
+        session = new NativeSession(
+          helper,
+          target,
+          () => {
+            if (this.sessions.get(target) === session) this.sessions.delete(target);
+          },
+          this.clipboard,
+          this.keyboard,
+        );
         if (!(await session.ready())) {
           session.close();
           return preview(session.reason);
@@ -77,6 +96,11 @@ export class NativeDestinations {
     for (const session of this.sessions.values()) session.close();
     this.sessions.clear();
   }
+  close(): void {
+    this.invalidate();
+    this.clipboard?.close();
+    this.keyboard?.close();
+  }
 }
 
 class NativeSession {
@@ -91,13 +115,19 @@ class NativeSession {
   private web = false;
   private chromium = false;
   private keyboard?: Bun.Subprocess<"pipe", "ignore", "ignore">;
-  private typingSupported?: boolean;
+  private typingBackend?: "wayland" | "portal";
+  private portalActive = false;
+  private literal?: Bun.Subprocess<"pipe", "pipe", "ignore">;
+  private literalReader?: ReadableStreamDefaultReader<Uint8Array>;
+  private literalBuffer = "";
   reason?: string;
 
   constructor(
     private helper: string,
     target: string,
     private onClose: () => void,
+    private clipboard: WaylandClipboard,
+    private portal: PortalKeyboard,
   ) {
     this.child = Bun.spawn([helper, target, "queue"], {
       stdin: "pipe",
@@ -113,6 +143,11 @@ class NativeSession {
     if (this.closed) return;
     this.closed = true;
     this.keyboard?.kill("SIGKILL");
+    if (this.portalActive) {
+      this.portal.abort();
+      this.portal.enable(true);
+    }
+    this.literal?.kill("SIGKILL");
     this.child.kill("SIGKILL");
     this.onClose();
   }
@@ -142,7 +177,11 @@ class NativeSession {
   }
 
   private async command(
-    value: boolean | { text: string; method: TextInsertionMethod } | { type: string },
+    value:
+      | boolean
+      | { disarm: true }
+      | { text: string; method: TextInsertionMethod }
+      | { type: string; transport?: "paste" | "literal" | "portal" },
   ): Promise<string> {
     if (this.closed) return "preview";
     this.input.write(JSON.stringify(value) + "\n");
@@ -150,9 +189,13 @@ class NativeSession {
     const result = await this.line(2000);
     if (result.startsWith("preview:")) {
       this.reason =
-        result === "preview:changed"
-          ? "The original field, text or caret changed. Your dictation is saved in History."
-          : "This app did not expose a readable, focused text field. Your dictation is saved in History.";
+        result === "preview:modifiers"
+          ? "Release modifier keys and mouse buttons before insertion. Your dictation is saved in History."
+          : result === "preview:multiline"
+            ? "This field does not support paragraphs. Your dictation is saved in History."
+            : result === "preview:changed"
+              ? "The original field, text or caret changed. Your dictation is saved in History."
+              : "This app did not expose a readable, focused text field. Your dictation is saved in History.";
       return "preview";
     }
     return result;
@@ -160,11 +203,19 @@ class NativeSession {
 
   /** An empty probe checks compositor support without sending keys. Payloads
    * use stdin, keeping transcripts out of process arguments and shell parsing. */
-  private async type(text: string): Promise<boolean> {
+  private async type(text: string, paste = false): Promise<boolean> {
+    if ((text || paste) && this.typingBackend === "portal") {
+      this.portalActive = true;
+      try {
+        return (await this.portal.type(text, paste)) && !this.closed;
+      } finally {
+        this.portalActive = false;
+      }
+    }
     const helper = join(dirname(this.helper), "dictaduo-type");
     if (this.closed || !process.env.WAYLAND_DISPLAY || !(await Bun.file(helper).exists()))
       return false;
-    const child = Bun.spawn(text ? [helper] : [helper, "--probe"], {
+    const child = Bun.spawn(paste ? [helper, "--paste"] : text ? [helper] : [helper, "--probe"], {
       stdin: "pipe",
       stdout: "ignore",
       stderr: "ignore",
@@ -183,16 +234,94 @@ class NativeSession {
     }
   }
 
+  private async literalLine(): Promise<string> {
+    const timer = setTimeout(() => this.literal?.kill("SIGKILL"), 1500);
+    try {
+      while (!this.literalBuffer.includes("\n")) {
+        const next = await this.literalReader?.read();
+        if (!next || next.done) return "unavailable";
+        this.literalBuffer += new TextDecoder().decode(next.value);
+        if (this.literalBuffer.length > 100) return "unavailable";
+      }
+      const at = this.literalBuffer.indexOf("\n");
+      const value = this.literalBuffer.slice(0, at);
+      this.literalBuffer = this.literalBuffer.slice(at + 1);
+      return value;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  private async canCommitLiteral(): Promise<boolean> {
+    if (this.literal) return true;
+    const helper = join(dirname(this.helper), "dictaduo-literal");
+    if (!(await Bun.file(helper).exists())) return false;
+    this.literal = Bun.spawn([helper], { stdin: "pipe", stdout: "pipe", stderr: "ignore" });
+    this.literalReader = this.literal.stdout.getReader();
+    if ((await this.literalLine()) === "ready" && !this.closed) return true;
+    this.literal.kill("SIGKILL");
+    this.literal = undefined;
+    return false;
+  }
+  private async commitLiteral(text: string, held: () => boolean): Promise<string> {
+    let attempted = false;
+    for (const value of literalTextChunks(text)) {
+      if (held()) return attempted ? "uncertain" : "held";
+      if ((await this.command({ type: value, transport: "literal" })) !== "ready")
+        return attempted ? "uncertain" : "preview";
+      if (held() || this.closed) {
+        await this.command({ disarm: true });
+        return attempted ? "uncertain" : "held";
+      }
+      attempted = true;
+      this.literal!.stdin.write(JSON.stringify(value) + "\n");
+      await this.literal!.stdin.flush();
+      if ((await this.literalLine()) !== "sent" || (await this.command(false)) !== "inserted")
+        return "uncertain";
+    }
+    return "inserted";
+  }
+  private async paste(text: string, held: () => boolean): Promise<string> {
+    if (!(await this.canType())) return "preview";
+    let attempted = false;
+    try {
+      return await this.clipboard.lease(text, async (owns) => {
+        if (held()) return "held";
+        if ((await this.command({ type: text, transport: "paste" })) !== "ready") return "preview";
+        if (held()) {
+          await this.command({ disarm: true });
+          return "held";
+        }
+        if (this.closed || !(await owns())) {
+          this.reason =
+            "The clipboard changed before insertion. Your dictation is saved in History.";
+          return "preview";
+        }
+        if (held()) {
+          await this.command({ disarm: true });
+          return "held";
+        }
+        attempted = true;
+        if (!(await this.type("", true))) return "uncertain";
+        return (await this.command(false)) === "inserted" ? "inserted" : "uncertain";
+      });
+    } catch {
+      this.reason =
+        "The clipboard could not be preserved safely. Your dictation is saved in History.";
+      return attempted ? "uncertain" : "preview";
+    }
+  }
+
   private async canType(): Promise<boolean> {
     if (this.closed) return false;
-    const supported = this.typingSupported === true || (await this.type(""));
+    const virtual = this.typingBackend === "wayland" || (await this.type(""));
+    const supported = virtual || this.portal.status === "ready";
+    if (supported) this.typingBackend = virtual ? "wayland" : "portal";
     if (supported && !this.closed) {
-      this.typingSupported = true;
       this.reason = undefined;
     }
     if (!supported)
       this.reason =
-        "Type text needs a supported Wayland virtual keyboard. Choose Automatic or copy from History.";
+        "Keyboard access is unavailable. Enable keyboard access in This computer, or copy from History.";
     return supported;
   }
 
@@ -204,6 +333,20 @@ class NativeSession {
     if (this.closed) return "preview";
     if (held()) return "held";
     const chunks = typingChunks(text);
+    const requiresLiteral = !chunks || (this.chromium && /[\u{10000}-\u{10ffff}]/u.test(text));
+    if (requiresLiteral) {
+      // Native writes and input-method commits carry literal text, never Return
+      // or Tab actions. A potentially applied native write is never retried.
+      if (!this.web) {
+        const result = await this.command({ text, method: "automatic" });
+        if (result !== "typing") return result;
+      }
+      if (await this.canCommitLiteral()) return this.commitLiteral(text, held);
+      if (method === "automatic") return this.paste(text, held);
+      this.reason =
+        "This field has no clipboard-free literal-text transport. Choose Automatic or copy from History.";
+      return "preview";
+    }
     // Browser accessibility often advertises EditableText without implementing
     // its writes. Prefer verified keyboard input when the compositor supports it.
     const typing =
@@ -216,25 +359,19 @@ class NativeSession {
     }
     // "typing" means no accessible write was attempted. Every other failure is
     // terminal; dispatch success alone never proves that text reached the field.
-    if (!chunks) {
-      this.reason =
-        "Type text cannot safely enter line breaks, tabs or control characters. Choose Automatic or copy from History.";
-      return "preview";
-    }
-    // Chromium 153 failed readback for supplementary symbols on Wayland.
-    // Refuse before the first packet rather than corrupting an emoji mid-take.
-    if (this.chromium && /[\u{10000}-\u{10ffff}]/u.test(text)) {
-      this.reason =
-        "Chromium cannot safely receive emoji through Wayland keyboard input. Copy this dictation from History.";
-      return "preview";
-    }
-    if (!(await this.canType())) return "preview";
+    if (!(await this.canType())) return method === "automatic" ? this.paste(text, held) : "preview";
     let attempted = false;
-    for (const chunk of chunks) {
+    for (const chunk of chunks!) {
       if (held()) return attempted ? "uncertain" : "held";
-      const ready = await this.command({ type: chunk });
+      const ready = await this.command({
+        type: chunk,
+        ...(this.typingBackend === "portal" ? { transport: "portal" as const } : {}),
+      });
       if (ready !== "ready") return attempted ? "uncertain" : "preview";
-      if (held()) return attempted ? "uncertain" : "held";
+      if (held()) {
+        await this.command({ disarm: true });
+        return attempted ? "uncertain" : "held";
+      }
       attempted = true;
       if (!(await this.type(chunk))) return "uncertain";
       if ((await this.command(false)) !== "inserted") return "uncertain";
@@ -284,7 +421,14 @@ class NativeSession {
       },
       close,
       deliver: async (text, held = () => false) => {
-        if (closed || attempted || !text || /[\u0000-\u0008\u000b-\u001f\u007f]/.test(text)) {
+        if (
+          closed ||
+          attempted ||
+          !text ||
+          /[\u0000-\u0008\u000b-\u001f\u007f]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/u.test(
+            text,
+          )
+        ) {
           close();
           return "preview";
         }

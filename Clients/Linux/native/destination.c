@@ -1,5 +1,7 @@
 /* Queued takes retain one guarded accessible. Every write needs text/caret readback. */
 #include <atspi/atspi.h>
+#include <atspi/atspi-device.h>
+#include <xkbcommon/xkbcommon.h>
 #include <json-glib/json-glib.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,6 +9,10 @@
 #include <sys/prctl.h>
 #include <signal.h>
 #include <unistd.h>
+#include <glib-unix.h>
+#include <fcntl.h>
+#include <linux/input.h>
+#include <sys/ioctl.h>
 
 static AtspiAccessible *target;
 static gchar *original;
@@ -26,6 +32,99 @@ static gchar *own_deleted;
 static gboolean own_delete_seen, own_selection_seen;
 static gint own_start;
 static gboolean chromium;
+static gboolean paste_pending;
+static gboolean literal_pending;
+static gboolean portal_pending;
+static gboolean guarding_input;
+static guint own_key_index;
+static gboolean own_key_down;
+static GArray *input_fds;
+static AtspiDevice *input_device;
+static guint observed_modifiers;
+static const guint modifier_mask = (1U << ATSPI_MODIFIER_SHIFT) | (1U << ATSPI_MODIFIER_CONTROL) |
+  (1U << ATSPI_MODIFIER_ALT) | (1U << ATSPI_MODIFIER_SUPER);
+static const guint keycodes[] = {30,48,46,32,18,33,34,35,23,36,37,38,50,49,24,25};
+
+static void interrupt_input(void) {
+  invalidated = TRUE;
+  if (typing_pending) atspi_event_quit();
+}
+static void key_event(AtspiDevice *device, gboolean pressed, guint keycode, guint keysym,
+                      guint modifiers, const gchar *text, void *data) {
+  (void)device; (void)text; (void)data;
+  observed_modifiers = modifiers & modifier_mask;
+  guint modifier = 0;
+  if (keysym == 0xffe1 || keysym == 0xffe2) modifier = 1U << ATSPI_MODIFIER_SHIFT;
+  else if (keysym == 0xffe3 || keysym == 0xffe4) modifier = 1U << ATSPI_MODIFIER_CONTROL;
+  else if (keysym == 0xffe9 || keysym == 0xffea) modifier = 1U << ATSPI_MODIFIER_ALT;
+  else if (keysym == 0xffeb || keysym == 0xffec || keysym == 0xffe7 || keysym == 0xffe8) modifier = 1U << ATSPI_MODIFIER_SUPER;
+  if (pressed) observed_modifiers |= modifier; else observed_modifiers &= ~modifier;
+  if (!guarding_input) return;
+  if (typing_pending && paste_pending) {
+    const guint keys[] = {0xffe3, 'v', 'v', 0xffe3};
+    const gboolean states[] = {TRUE, TRUE, FALSE, FALSE};
+    if (own_key_index < 4 && keysym == keys[own_key_index] && pressed == states[own_key_index]) { own_key_index++; return; }
+  } else if (typing_pending && !literal_pending && own_text && own_key_index < (guint)g_utf8_strlen(own_text, -1) && own_key_index < 16) {
+    gunichar c = g_utf8_get_char(g_utf8_offset_to_pointer(own_text, own_key_index));
+    guint expected = xkb_utf32_to_keysym(c);
+    if ((portal_pending || keycode == keycodes[own_key_index] || keycode == keycodes[own_key_index] + 8) &&
+        keysym == expected && pressed != own_key_down) {
+      own_key_down = pressed; if (!pressed) own_key_index++; return;
+    }
+  }
+  if (pressed) interrupt_input();
+}
+static gboolean physical_event(gint fd, GIOCondition condition, gpointer data) {
+  (void)data;
+  if (condition & (G_IO_ERR | G_IO_HUP)) { if (guarding_input) interrupt_input(); return G_SOURCE_REMOVE; }
+  struct input_event events[32]; ssize_t bytes;
+  while ((bytes = read(fd, events, sizeof(events))) > 0) {
+    for (guint i = 0; i < (guint)bytes / sizeof(events[0]); i++) {
+      if (!guarding_input) continue;
+      if ((events[i].type == EV_KEY && events[i].value > 0) ||
+          (events[i].type == EV_REL && (events[i].code == REL_WHEEL || events[i].code == REL_HWHEEL)) ||
+          (events[i].type == EV_SYN && events[i].code == SYN_DROPPED)) interrupt_input();
+    }
+  }
+  if (bytes < 0 && errno != EAGAIN && errno != EINTR && guarding_input) interrupt_input();
+  return G_SOURCE_CONTINUE;
+}
+static void monitor_input(void) {
+  /* Listen without grabbing input or changing device permissions. AT-SPI uses
+   * the compositor/backend available to it; readable evdev devices distinguish
+   * physical input from our Wayland and portal events. No keys are stored. */
+  input_device = atspi_device_new();
+  if (input_device) atspi_device_add_key_watcher(input_device, key_event, NULL, NULL);
+  input_fds = g_array_new(FALSE, FALSE, sizeof(int));
+  GDir *directory = g_dir_open("/dev/input", 0, NULL); if (!directory) return;
+  const gchar *name;
+  while ((name = g_dir_read_name(directory))) {
+    if (!g_str_has_prefix(name, "event")) continue;
+    gchar *path = g_build_filename("/dev/input", name, NULL);
+    int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC); g_free(path);
+    if (fd < 0) continue;
+    unsigned long types[(EV_MAX + 8 * sizeof(long)) / (8 * sizeof(long))] = {0};
+    if (ioctl(fd, EVIOCGBIT(0, sizeof(types)), types) < 0 || !(types[0] & (1UL << EV_KEY))) { close(fd); continue; }
+    g_array_append_val(input_fds, fd);
+    g_unix_fd_add(fd, G_IO_IN | G_IO_ERR | G_IO_HUP, physical_event, NULL);
+  }
+  g_dir_close(directory);
+}
+static gboolean arm_input(void) {
+  if (observed_modifiers) return FALSE;
+  // Discard events before this write, including the dictation shortcut release.
+  for (guint i = 0; input_fds && i < input_fds->len; i++) {
+    int fd = g_array_index(input_fds, int, i); struct input_event events[32];
+    while (read(fd, events, sizeof(events)) > 0) {}
+    unsigned long keys[(KEY_MAX + 8 * sizeof(long)) / (8 * sizeof(long))] = {0};
+    if (ioctl(fd, EVIOCGKEY(sizeof(keys)), keys) < 0) continue;
+    const guint held[] = {KEY_LEFTCTRL, KEY_RIGHTCTRL, KEY_LEFTSHIFT, KEY_RIGHTSHIFT,
+      KEY_LEFTALT, KEY_RIGHTALT, KEY_LEFTMETA, KEY_RIGHTMETA, BTN_LEFT, BTN_RIGHT, BTN_MIDDLE};
+    for (guint key = 0; key < G_N_ELEMENTS(held); key++)
+      if (keys[held[key] / (8 * sizeof(long))] & (1UL << (held[key] % (8 * sizeof(long))))) return FALSE;
+  }
+  own_key_index = 0; own_key_down = FALSE; guarding_input = TRUE; return TRUE;
+}
 
 static void reply(const char *status) { puts(status); fflush(stdout); }
 
@@ -250,6 +349,7 @@ static gboolean confirm(void) {
     gboolean matches = current && g_strcmp0(current, expected) == 0 && position == own_caret && start == -1;
     g_free(current);
     if (matches && !invalidated) {
+      guarding_input = FALSE;
       g_free(original);
       original = g_strdup(expected);
       caret = position;
@@ -260,6 +360,7 @@ static gboolean confirm(void) {
     g_usleep(5000);
   }
   invalidated = TRUE;
+  guarding_input = FALSE;
   return FALSE;
 }
 
@@ -276,8 +377,19 @@ static gboolean input(GIOChannel *channel, GIOCondition condition, gpointer unus
   JsonNode *node = parsed ? json_parser_get_root(parser) : NULL;
   const gchar *value = node && JSON_NODE_HOLDS_VALUE(node) && json_node_get_value_type(node) == G_TYPE_STRING ? json_node_get_string(node) : NULL;
   gboolean type_request = FALSE;
+  gboolean paste_request = FALSE;
   if (node && JSON_NODE_HOLDS_OBJECT(node)) {
     JsonObject *object = json_node_get_object(node);
+    if (json_object_has_member(object, "type") || json_object_has_member(object, "text"))
+      paste_pending = literal_pending = portal_pending = FALSE;
+    JsonNode *transport = json_object_get_member(object, "transport");
+    if (transport && JSON_NODE_HOLDS_VALUE(transport) && json_node_get_value_type(transport) == G_TYPE_STRING) {
+      const char *name = json_node_get_string(transport);
+      paste_request = g_strcmp0(name, "paste") == 0 || g_strcmp0(name, "literal") == 0;
+      paste_pending = g_strcmp0(name, "paste") == 0;
+      literal_pending = g_strcmp0(name, "literal") == 0;
+      portal_pending = g_strcmp0(name, "portal") == 0;
+    }
     JsonNode *payload = json_object_get_member(object, "type");
     type_request = payload != NULL;
     if (!payload) payload = json_object_get_member(object, "text");
@@ -299,6 +411,14 @@ static gboolean input(GIOChannel *channel, GIOCondition condition, gpointer unus
   gchar *current = invalidated ? NULL : snapshot(&position, &content, &start, &end);
   gboolean unchanged = !invalidated && current && g_strcmp0(original, current) == 0 &&
     position == caret && start == selection_start && end == selection_end;
+  if (node && JSON_NODE_HOLDS_OBJECT(node) && json_object_has_member(json_node_get_object(node), "disarm")) {
+    guarding_input = typing_pending = paste_pending = literal_pending = portal_pending = FALSE;
+    g_free(own_text); own_text = NULL;
+    g_free(current); g_free(content); g_object_unref(parser); g_free(line);
+    reply(unchanged ? "ready" : "preview:changed");
+    if (unchanged) return G_SOURCE_CONTINUE;
+    atspi_event_quit(); return G_SOURCE_REMOVE;
+  }
   /* A new take may join only the still-valid field retained by this helper. */
   if (queued && node && JSON_NODE_HOLDS_VALUE(node) &&
       json_node_get_value_type(node) == G_TYPE_BOOLEAN && json_node_get_boolean(node)) {
@@ -312,14 +432,22 @@ static gboolean input(GIOChannel *channel, GIOCondition condition, gpointer unus
     strlen(value) <= 131072 && g_utf8_validate(value, -1, NULL) && !strchr(value, '\r') &&
     g_utf8_strlen(content, -1) + g_utf8_strlen(value, -1) -
       (selection_start >= 0 ? selection_end - selection_start : 0) <= 65536;
+  gboolean multiline_rejected = FALSE;
+  if (valid && strchr(value, '\n')) {
+    AtspiStateSet *states = atspi_accessible_get_state_set(target);
+    valid = states && atspi_state_set_contains(states, ATSPI_STATE_MULTI_LINE);
+    multiline_rejected = !valid;
+    g_clear_object(&states);
+  }
   g_free(current);
   if (valid) {
     if (type_request) {
-      gboolean printable = *value && g_utf8_strlen(value, -1) <= 16;
+      gboolean printable = *value && (paste_request || g_utf8_strlen(value, -1) <= 16);
       for (const gchar *p = value; printable && *p; p = g_utf8_next_char(p))
-        if (g_utf8_get_char(p) < 32 || g_utf8_get_char(p) == 127) printable = FALSE;
-      if (printable) { prepare(content, value, TRUE); reply("ready"); }
-      else { valid = FALSE; reply("preview"); }
+        if ((g_utf8_get_char(p) < 32 && !(paste_request && (g_utf8_get_char(p) == 10 || g_utf8_get_char(p) == 9))) || g_utf8_get_char(p) == 127) printable = FALSE;
+      gboolean armed = printable && arm_input();
+      if (armed) { prepare(content, value, TRUE); reply("ready"); }
+      else { valid = FALSE; reply(printable ? "preview:modifiers" : "preview"); }
       g_object_unref(parser); g_free(content); g_free(line);
       if (queued && valid) return G_SOURCE_CONTINUE;
       atspi_event_quit();
@@ -330,6 +458,10 @@ static gboolean input(GIOChannel *channel, GIOCondition condition, gpointer unus
     AtspiEditableText *editable = selection_start < 0 ? atspi_accessible_get_editable_text_iface(target) : NULL;
     if (editable) {
       GError *error = NULL;
+      if (!arm_input()) {
+        reply("preview:modifiers"); g_object_unref(editable); g_object_unref(parser); g_free(content); g_free(line);
+        atspi_event_quit(); return G_SOURCE_REMOVE;
+      }
       prepare(content, value, FALSE);
       gboolean inserted = atspi_editable_text_insert_text(editable, caret, value, (gint)strlen(value), &error);
       if (!inserted || error || !confirm()) invalidated = TRUE;
@@ -338,7 +470,7 @@ static gboolean input(GIOChannel *channel, GIOCondition condition, gpointer unus
       g_clear_error(&error);
       g_object_unref(editable);
     } else { reply("typing"); }
-  } else reply("preview:changed");
+  } else reply(multiline_rejected ? "preview:multiline" : "preview:changed");
   g_object_unref(parser);
   g_free(content);
   g_free(line);
@@ -394,6 +526,7 @@ int main(int argc, char **argv) {
   if (!queued) alarm(600);
   if (atspi_init()) { reply("preview:service"); return 0; }
   atspi_set_timeout(100, 100);
+  monitor_input();
   deadline = g_get_monotonic_time() + 1000000;
   AtspiEventListener *listener = atspi_event_listener_new(changed, NULL, NULL);
   const char *events[] = { "object:state-changed:focused", "object:text-changed", "object:text-caret-moved", "object:text-selection-changed", "object:state-changed:defunct" };
@@ -469,6 +602,9 @@ int main(int argc, char **argv) {
   g_free(own_deleted);
   g_object_unref(target);
   g_object_unref(listener);
+  g_clear_object(&input_device);
+  for (guint i = 0; input_fds && i < input_fds->len; i++) close(g_array_index(input_fds, int, i));
+  if (input_fds) g_array_unref(input_fds);
   atspi_exit();
   return 0;
 }

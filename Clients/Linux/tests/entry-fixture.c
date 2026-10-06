@@ -3,6 +3,10 @@
 #include <string.h>
 static GtkWidget *entry, *other, *view;
 static gboolean multiline;
+static void print_text(const gchar *text) {
+  gchar *encoded = g_base64_encode((const guchar *)text, strlen(text));
+  printf("text:%s\n", encoded); g_free(encoded);
+}
 static gboolean input(GIOChannel *channel, GIOCondition condition, gpointer unused) {
   (void)unused;
   if (!(condition & G_IO_IN)) { gtk_main_quit(); return G_SOURCE_REMOVE; }
@@ -18,8 +22,8 @@ static gboolean input(GIOChannel *channel, GIOCondition condition, gpointer unus
       GtkTextIter start, end;
       gtk_text_buffer_get_bounds(buffer, &start, &end);
       gchar *text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
-      puts(text); g_free(text);
-    } else puts(gtk_entry_get_text(GTK_ENTRY(entry)));
+      print_text(text); g_free(text);
+    } else print_text(gtk_entry_get_text(GTK_ENTRY(entry)));
     fflush(stdout);
   }
   else if (g_str_has_prefix(line, "change")) gtk_entry_set_text(GTK_ENTRY(entry), "changed");

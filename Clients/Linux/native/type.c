@@ -30,12 +30,13 @@ static const struct wl_registry_listener listener = { global, removed };
 
 int main(int argc, char **argv) {
   gboolean probe = argc == 2 && strcmp(argv[1], "--probe") == 0;
-  if (argc != 1 && !probe) return 2;
+  gboolean paste = argc == 2 && strcmp(argv[1], "--paste") == 0;
+  if (argc != 1 && !probe && !paste) return 2;
   pid_t parent = getppid();
   if (prctl(PR_SET_PDEATHSIG, SIGKILL) || getppid() != parent) return 2;
   alarm(2);
   gchar text[257] = {0};
-  if (!probe) {
+  if (!probe && !paste) {
     gsize length = fread(text, 1, sizeof(text) - 1, stdin);
     if (ferror(stdin) || !feof(stdin) || !length || strlen(text) != length ||
         !g_utf8_validate(text, length, NULL) || g_utf8_strlen(text, -1) > 16) return 2;
@@ -48,6 +49,24 @@ int main(int argc, char **argv) {
   wl_registry_add_listener(registry, &listener, NULL);
   if (wl_display_roundtrip(display) < 0 || !manager || !seat) return 1;
   if (probe) { wl_display_disconnect(display); return 0; }
+  if (paste) {
+    const char *map = "xkb_keymap { xkb_keycodes { minimum=8; maximum=256; <CTRL>=37; <PASTE>=55; }; xkb_types { include \"complete\" }; xkb_compatibility { include \"complete\" }; xkb_symbols { key <CTRL> { [ Control_L ] }; key <PASTE> { [ v ] }; modifier_map Control { <CTRL> }; }; };";
+    int fd = memfd_create("dictaduo-paste-keymap", MFD_CLOEXEC);
+    if (fd < 0 || write(fd, map, strlen(map) + 1) != (ssize_t)(strlen(map) + 1)) return 1;
+    struct zwp_virtual_keyboard_v1 *keyboard = zwp_virtual_keyboard_manager_v1_create_virtual_keyboard(manager, seat);
+    zwp_virtual_keyboard_v1_keymap(keyboard, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1, fd, strlen(map) + 1); close(fd);
+    /* Complete the chord in one protocol batch, including modifier release.
+     * There is no asynchronous suspension while Control is held. */
+    zwp_virtual_keyboard_v1_modifiers(keyboard, 4, 0, 0, 0);
+    zwp_virtual_keyboard_v1_key(keyboard, 0, 29, WL_KEYBOARD_KEY_STATE_PRESSED);
+    zwp_virtual_keyboard_v1_key(keyboard, 0, 47, WL_KEYBOARD_KEY_STATE_PRESSED);
+    zwp_virtual_keyboard_v1_key(keyboard, 0, 47, WL_KEYBOARD_KEY_STATE_RELEASED);
+    zwp_virtual_keyboard_v1_key(keyboard, 0, 29, WL_KEYBOARD_KEY_STATE_RELEASED);
+    zwp_virtual_keyboard_v1_modifiers(keyboard, 0, 0, 0, 0);
+    gboolean sent = wl_display_roundtrip(display) >= 0;
+    zwp_virtual_keyboard_v1_destroy(keyboard); wl_display_roundtrip(display); wl_display_disconnect(display);
+    return sent ? 0 : 1;
+  }
   /* A–P physical keys, rather than Escape/Tab/Enter/Backspace positions. Each
    * scalar gets an unmodified symbol; no user's keyboard layout is assumed. */
   const uint32_t codes[] = {30,48,46,32,18,33,34,35,23,36,37,38,50,49,24,25};

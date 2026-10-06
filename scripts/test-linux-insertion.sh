@@ -39,4 +39,4 @@ if [[ ! -S "$task_dir/bus" ]]; then
   echo "The private accessibility bus did not start." >&2
   exit 1
 fi
-DICTADUO_TEST_DESKTOP=1 bun test "$ROOT/Clients/Linux/tests/native-destination.test.ts"
+DICTADUO_TEST_DESKTOP=1 bun test "$ROOT/Clients/Linux/tests/native-destination.test.ts" "$@"
