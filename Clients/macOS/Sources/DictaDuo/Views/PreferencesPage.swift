@@ -72,6 +72,11 @@ private struct DevicePreferencesForm: View {
                 }
                 Toggle("Mute system audio while recording", isOn: $controller.muteOutputWhileRecording)
                     .accessibilityIdentifier("preferences.mute-output")
+                Picker("Text insertion", selection: $preferences.textInsertionMethod) {
+                    ForEach(TextInsertionMethod.allCases) { method in Text(method.title).tag(method) }
+                }
+                .accessibilityIdentifier("preferences.text-insertion")
+                Text(preferences.textInsertionMethod.detail).font(.caption).foregroundStyle(DictaDuoPalette.muted)
                 Toggle("Start \(DictaDuoBuild.current.displayName) at login", isOn: $controller.launchAtLogin)
                 if let error = controller.loginItemError {
                     Text(error).font(.caption).foregroundStyle(DictaDuoPalette.warning)

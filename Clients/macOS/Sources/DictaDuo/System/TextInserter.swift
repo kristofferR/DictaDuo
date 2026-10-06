@@ -25,6 +25,7 @@ enum InsertionOutcome: Equatable {
     case inserted
     case copied(reason: String)
     case unconfirmed(clipboardBackup: Bool)
+    case interrupted(reason: String)
     case failed(reason: String)
 }
 
@@ -111,11 +112,13 @@ enum InsertionFieldPolicy {
         case unverified
     }
 
-    static func eligibility(role: String?, subrole: String?, protectedContent: Bool, enabled: Bool) -> Eligibility {
+    static func eligibility(role: String?, subrole: String?, protectedContent: Bool, enabled: Bool,
+                            editable: Bool = false, valueSettable: Bool = false) -> Eligibility {
         guard !protectedContent, subrole != kAXSecureTextFieldSubrole as String else { return .protected }
         guard let role, !role.isEmpty else { return .unverified }
-        let textRoles = [kAXTextFieldRole as String, kAXTextAreaRole as String, kAXComboBoxRole as String]
-        return enabled && textRoles.contains(role) ? .editable : .notEditable
+        let textRoles = [kAXTextFieldRole as String, kAXTextAreaRole as String, kAXComboBoxRole as String, "AXSearchField"]
+        let editableContainer = ["AXGroup", "AXWebArea"].contains(role) && (editable || valueSettable)
+        return enabled && (textRoles.contains(role) || editableContainer) ? .editable : .notEditable
     }
 
     static func allows(role: String?, subrole: String?, protectedContent: Bool, enabled: Bool) -> Bool {
@@ -218,6 +221,7 @@ final class TextInserter {
 
     func deliver(_ text: String, copying clipboardText: String, to destination: InsertionDestination,
                  clipboardUnchangedSince changeCount: Int,
+                 method: TextInsertionMethod = .automatic,
                  waitUntilReady: (() async -> Void)? = nil,
                  isCaptureActive: (() -> Bool)? = nil) async -> InsertionOutcome {
         confirmedAnchor = nil
@@ -232,7 +236,7 @@ final class TextInserter {
                 validate: { await Self.validate(target) },
                 modifiersAreHeld: { Self.modifiersAreHeld },
                 replaceSelection: { Self.replaceSelection($0, in: target, willDispatch: $1) },
-                postPaste: { Self.postPaste(into: target, canDispatch: $0) },
+                postPaste: { await Self.postPaste(into: target, canDispatch: $0) },
                 confirmation: { [weak self] text in
                     guard let self else { return .blocked }
                     return await self.confirm(text, in: target)
@@ -240,13 +244,18 @@ final class TextInserter {
                 pause: { try await Task.sleep(nanoseconds: $0) },
                 waitUntilReady: waitUntilReady,
                 isCaptureActive: isCaptureActive,
-                willDispatch: { [weak self] in self?.dispatchedAt = ProcessInfo.processInfo.systemUptime }
+                willDispatch: { [weak self] in self?.dispatchedAt = ProcessInfo.processInfo.systemUptime },
+                typeText: { text, canDispatch in
+                    await Self.typeUnicode(text, in: target, canDispatch: canDispatch)
+                }
             )
             return await TextDeliveryTransaction(pasteboard: pasteboard, environment: environment)
-                .deliver(text, copying: clipboardText, strategy: target.snapshot.strategy,
+                .deliver(text, copying: clipboardText,
+                         strategy: method == .unicodeTyping ? .unicodeTyping : target.snapshot.strategy,
                          clipboardUnchangedSince: changeCount)
         case .blocked(let reason): return .failed(reason: reason)
         case .clipboard(let reason):
+            if method == .unicodeTyping { return .failed(reason: reason + " Your words are ready to copy.") }
             switch DictationClipboard.copy(clipboardText, to: pasteboard, onlyIfUnchangedSince: changeCount) {
             case .success: return .copied(reason: "Copied to clipboard. " + reason)
             case .failure(let error): return .failed(reason: error.localizedDescription)
@@ -327,7 +336,7 @@ final class TextInserter {
         }
     }
 
-    private static func postPaste(into target: InsertionTarget, canDispatch: () -> Bool) -> PasteDispatch {
+    private static func postPaste(into target: InsertionTarget, canDispatch: () -> Bool) async -> PasteDispatch {
         guard !Task.isCancelled, AXIsProcessTrusted(), !target.application.isTerminated else {
             return .blocked(reason: "Insertion was interrupted.")
         }
@@ -344,19 +353,10 @@ final class TextInserter {
         }
         // Only a definitely unattempted/unsupported menu action can fall back.
         // Never send a second route after a successful or timed-out AX action.
-        guard let source = CGEventSource(stateID: .combinedSessionState),
-              let down = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false) else {
-            return .unavailable
-        }
-        down.flags = .maskCommand
-        up.flags = .maskCommand
-        guard CGPreflightPostEventAccess(), readyToDispatch(into: target), canDispatch() else {
-            return .blocked(reason: "Focus, cursor, clipboard, or input access changed before pasting.")
-        }
-        down.postToPid(target.processIdentifier)
-        up.postToPid(target.processIdentifier)
-        return .sent
+        return await SystemPasteShortcut.post(
+            canStart: { readyToDispatch(into: target) },
+            canPaste: { readyToDispatch(into: target) && canDispatch() }
+        )
     }
 
     private static func readyToDispatch(into target: InsertionTarget) -> Bool {
@@ -370,6 +370,70 @@ final class TextInserter {
     private static var modifiersAreHeld: Bool {
         let modifiers: CGEventFlags = [.maskShift, .maskControl, .maskAlternate, .maskCommand, .maskSecondaryFn]
         return !CGEventSource.flagsState(.hidSystemState).intersection(modifiers).isEmpty
+    }
+
+    private static func typeUnicode(_ text: String, in target: InsertionTarget,
+                                    canDispatch: () -> Bool) async -> TypingDispatch {
+        // A single-line field may interpret a newline as submission even when
+        // no Return key is sent. Check this before typing any part of the text.
+        if text.contains(where: { $0.isNewline }) {
+            let multiline = await readOffMain {
+                let role = checkedAttribute(kAXRoleAttribute as CFString, of: target.snapshot.focus.element)
+                let attribute = checkedAttribute("AXMultiline" as CFString, of: target.snapshot.focus.element)
+                return role.value as? String == kAXTextAreaRole as String || attribute.value as? Bool == true
+            }
+            guard multiline else {
+                return .interrupted(reason: "Use Automatic insertion for line breaks in this field. Your words are ready to copy.", dispatched: false)
+            }
+        }
+        guard let source = CGEventSource(stateID: .privateState) else { return .unavailable }
+        let input = TextInputInterruptionMonitor()
+        guard input.start() else { return .unavailable }
+        defer { input.stop() }
+        let typing = UnicodeTypingDelivery(
+            validate: { sentUnits in await validateTypingProgress(target, sentUnits: sentUnits) },
+            canContinue: {
+                !input.interrupted && AXIsProcessTrusted() && CGPreflightPostEventAccess() &&
+                    !target.application.isTerminated && !modifiersAreHeld
+            },
+            post: { units in
+                guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+                      let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else { return false }
+                for event in [down, up] {
+                    event.flags = []
+                    TextInputEvents.mark(event)
+                }
+                // Some editors insert a Unicode payload on key-up as well.
+                down.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
+                down.post(tap: .cghidEventTap)
+                up.post(tap: .cghidEventTap)
+                return true
+            },
+            pause: { try await Task.sleep(for: .milliseconds(5)) }
+        )
+        return await typing.type(text, canDispatch: canDispatch)
+    }
+
+    private static func validateTypingProgress(_ target: InsertionTarget, sentUnits: Int) async -> TargetValidation {
+        guard !target.application.isTerminated else { return .changed(reason: "The original app closed.") }
+        for attempt in 0...1 {
+            let probe = await readOffMain { probeField(target.snapshot.focus) }
+            switch probe {
+            case .blocked(let reason): return .blocked(reason: reason)
+            case .changed(let reason): return .changed(reason: reason)
+            case .valid(let selection):
+                guard let original = target.selection else { return .valid }
+                guard original.location <= Int.max - sentUnits else { return .blocked(reason: "The cursor position is invalid.") }
+                let expected = sentUnits == 0 ? original : NSRange(location: original.location + sentUnits, length: 0)
+                if selection == expected { return .valid }
+                // Give the previous Unicode event one frame to update AX.
+                if attempt == 0, sentUnits > 0 {
+                    do { try await Task.sleep(for: .milliseconds(60)) }
+                    catch { return .blocked(reason: "Dictation was cancelled.") }
+                } else { return .changed(reason: "The cursor or selection changed, or typed text was not acknowledged.") }
+            }
+        }
+        return .blocked(reason: "The cursor could not be verified.")
     }
 
     private static func readOffMain<Value: Sendable>(_ operation: @escaping @Sendable () async -> Value) async -> Value {
@@ -565,7 +629,31 @@ final class TextInserter {
         let latestApp = elementAttribute(kAXFocusedApplicationAttribute as CFString, of: system)
         guard let latest = latestApp.element, CFEqual(app, latest) else { return .unverified }
         AXUIElementSetMessagingTimeout(element, 0.2)
-        return .found(FocusedFieldSnapshot(applicationPID: applicationPID, elementPID: elementPID, element: element))
+        let resolver = FocusedEditorResolver<AXUIElement>(
+            eligibility: fieldEligibility,
+            editableAncestor: { checkedElementAttribute("AXEditableAncestor" as CFString, of: $0) },
+            parent: { checkedElementAttribute(kAXParentAttribute as CFString, of: $0) },
+            sameElement: { CFEqual($0, $1) },
+            sameOwner: { lhs, rhs in
+                var a: pid_t = 0, b: pid_t = 0
+                return AXUIElementGetPid(lhs, &a) == .success && AXUIElementGetPid(rhs, &b) == .success && a == b
+            }
+        )
+        switch resolver.resolve(element) {
+        case .editor(let editor):
+            return .found(FocusedFieldSnapshot(applicationPID: applicationPID, elementPID: elementPID, element: editor))
+        case .noneditable:
+            return .found(FocusedFieldSnapshot(applicationPID: applicationPID, elementPID: elementPID, element: element))
+        case .blocked: return .unverified
+        }
+    }
+
+    private nonisolated static func checkedElementAttribute(_ attribute: CFString, of element: AXUIElement) -> AXUIElement? {
+        let read = checkedAttribute(attribute, of: element)
+        guard let value = read.value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        let result = value as! AXUIElement
+        AXUIElementSetMessagingTimeout(result, 0.05)
+        return result
     }
 
     private nonisolated static func elementAttribute(_ attribute: CFString, of element: AXUIElement)
@@ -623,9 +711,24 @@ final class TextInserter {
               subrole.value == nil || subrole.value as? String != nil,
               protected.value == nil || protected.value as? Bool != nil,
               enabled.value == nil || enabled.value as? Bool != nil else { return nil }
+        var editable = false, valueSettable = false
+        if let name = role.value as? String, ["AXGroup", "AXWebArea"].contains(name) {
+            let editability = checkedAttribute("AXEditable" as CFString, of: element)
+            var settable = DarwinBoolean(false)
+            let result = AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable)
+            guard editability.verified, editability.value == nil || editability.value as? Bool != nil,
+                  result == .success || result == .attributeUnsupported || result == .notImplemented else { return nil }
+            editable = editability.value as? Bool ?? false
+            valueSettable = result == .success && settable.boolValue
+            if !editable, !valueSettable {
+                let ancestor = checkedElementAttribute("AXEditableAncestor" as CFString, of: element)
+                editable = ancestor.map { CFEqual($0, element) } ?? false
+            }
+        }
         return InsertionFieldPolicy.eligibility(
             role: role.value as? String, subrole: subrole.value as? String,
-            protectedContent: protected.value as? Bool ?? false, enabled: enabled.value as? Bool ?? true
+            protectedContent: protected.value as? Bool ?? false, enabled: enabled.value as? Bool ?? true,
+            editable: editable, valueSettable: valueSettable
         )
     }
 

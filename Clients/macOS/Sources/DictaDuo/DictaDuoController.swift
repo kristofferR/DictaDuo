@@ -2395,6 +2395,7 @@ final class DictaDuoController: ObservableObject {
             let inserter = TextInserter()
             let outcome = await inserter.deliver(record.insertionText, copying: record.finalText,
                                                   to: destination, clipboardUnchangedSince: clipboardCount,
+                                                  method: preferences.textInsertionMethod,
                                                   waitUntilReady: { await self.waitForCaptureRelease() },
                                                   isCaptureActive: { self.isHoldingCapture })
             guard !Task.isCancelled else { return (DeliveryReceipt(status: "failed", message: "Delivery cancelled"), {}) }
@@ -2415,6 +2416,10 @@ final class DictaDuoController: ObservableObject {
             case .unconfirmed(let backup):
                 transcript = record.finalText
                 message = backup ? "Insertion unconfirmed. Copied to clipboard if needed." : "Insertion unconfirmed. Your words are here to copy."
+                deliveryStatus = .unconfirmed; status = "Check insertion"
+            case .interrupted(let reason):
+                insertionLogger.notice("Typing interrupted: \(reason, privacy: .public)")
+                transcript = record.finalText; message = reason
                 deliveryStatus = .unconfirmed; status = "Check insertion"
             case .failed(let reason):
                 insertionLogger.error("Insertion failed: \(reason, privacy: .public)")
