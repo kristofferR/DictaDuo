@@ -1,6 +1,6 @@
 import AppKit
 
-enum TextDeliveryStrategy: Equatable { case nativeSelection, keyboardPaste }
+enum TextDeliveryStrategy: Equatable { case nativeSelection, keyboardPaste, unicodeTyping }
 
 enum TargetValidation: Equatable {
     case valid
@@ -34,16 +34,17 @@ struct TextDeliveryEnvironment {
     var replaceSelection: (_ text: String, _ willDispatch: () -> Void) -> NativeTextWrite
     /// Recheck the supplied clipboard/cancellation guard after slow metadata
     /// reads, immediately before dispatch. Sent is not an insertion receipt.
-    var postPaste: (_ canDispatch: () -> Bool) -> PasteDispatch
+    var postPaste: (_ canDispatch: () -> Bool) async -> PasteDispatch
     var confirmation: (String) async -> DeliveryConfirmation
     var pause: (UInt64) async throws -> Void
     var waitUntilReady: (() async -> Void)? = nil
     var isCaptureActive: (() -> Bool)? = nil
     var willDispatch: (() -> Void)? = nil
+    var typeText: ((String, () -> Bool) async -> TypingDispatch)? = nil
 }
 
 /// Owns delivery and its temporary clipboard lease, not application discovery.
-/// The injected boundary never needs document contents to confirm caret movement.
+/// The injected boundary carries validation and receipt results.
 @MainActor
 struct TextDeliveryTransaction {
     let pasteboard: NSPasteboard
@@ -73,12 +74,32 @@ struct TextDeliveryTransaction {
         switch prepared {
         case .valid: break
         case .changed(let reason):
+            if strategy == .unicodeTyping { return .failed(reason: reason + " Your words are ready to copy.") }
             return copyInstead(clipboardText, expectedCount: changeCount, reason: reason)
         case .blocked(let reason): return .failed(reason: reason)
         }
         guard !Task.isCancelled else { return .failed(reason: Self.cancelled) }
         guard !environment.modifiersAreHeld() else {
             return .failed(reason: "A keyboard shortcut is still held. Your words are ready to copy.")
+        }
+
+        if strategy == .unicodeTyping {
+            guard let typeText = environment.typeText else { return .failed(reason: "Unicode typing is unavailable. Your words are ready to copy.") }
+            var dispatched = false
+            let result = await typeText(text, {
+                guard !Task.isCancelled, !shouldDeferForCapture else { return false }
+                if !dispatched { environment.willDispatch?(); dispatched = true }
+                return true
+            })
+            switch result {
+            case .unavailable: return .failed(reason: "macOS could not type the text. Your words are ready to copy.")
+            case .interrupted(let reason, let sent):
+                if !sent, shouldDeferForCapture { return nil }
+                return sent ? .interrupted(reason: reason + " Check the field; the complete transcript is saved in history.") : .failed(reason: reason)
+            case .sent:
+                let confirmation = await confirm(text)
+                return confirmation == .confirmed && !Task.isCancelled ? .inserted : .unconfirmed(clipboardBackup: false)
+            }
         }
 
         if strategy == .nativeSelection {
@@ -115,7 +136,7 @@ struct TextDeliveryTransaction {
         case .blocked(let reason): return .failed(reason: reason)
         case .changed(let reason):
             let copied = clipboard.keepBackup(clipboardText, unchangedSince: changeCount)
-            return copied ? .copied(reason: "Copied to clipboard") : .failed(reason: reason)
+            return copied ? .copied(reason: "Copied to clipboard. " + reason) : .failed(reason: reason)
         }
         guard !environment.modifiersAreHeld() else {
             return .failed(reason: "A keyboard shortcut is still held. Your words are ready to copy.")
@@ -125,7 +146,7 @@ struct TextDeliveryTransaction {
             return .failed(reason: ClipboardCopyError.changed.localizedDescription)
         }
         guard !Task.isCancelled else { return .failed(reason: Self.cancelled) }
-        switch environment.postPaste({
+        switch await environment.postPaste({
             guard !Task.isCancelled, !shouldDeferForCapture, pasteboard.changeCount == stagedChangeCount else { return false }
             environment.willDispatch?()
             return true
@@ -137,7 +158,7 @@ struct TextDeliveryTransaction {
         case .unavailable:
             if shouldDeferForCapture { return nil }
             let copied = clipboard.keepBackup(clipboardText, unchangedSince: changeCount)
-            return copied ? .copied(reason: "Copied to clipboard") :
+            return copied ? .copied(reason: "Copied to clipboard. macOS could not send the paste.") :
                 .failed(reason: "macOS could not send the paste. Your words are ready to copy.")
         }
 
@@ -190,7 +211,7 @@ struct TextDeliveryTransaction {
 
     private func copyInstead(_ text: String, expectedCount: Int, reason: String) -> InsertionOutcome {
         guard !Task.isCancelled else { return .failed(reason: Self.cancelled) }
-        return copyNewChunk(text, expectedCount: expectedCount) ? .copied(reason: "Copied to clipboard") :
+        return copyNewChunk(text, expectedCount: expectedCount) ? .copied(reason: "Copied to clipboard. " + reason) :
             .failed(reason: reason + " Your words are ready to copy.")
     }
 

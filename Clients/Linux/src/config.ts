@@ -5,11 +5,13 @@ import { randomUUID } from "node:crypto";
 import { validateBody } from "../../../Server/src/validation.ts";
 import { profileFields, type ConfiguredSources } from "./microphones.ts";
 import type { SourcePreferences } from "./sources.ts";
+import type { TextInsertionMethod } from "./text-insertion.ts";
 export interface Config {
   buttonEnabled: boolean;
   /** Hold the key to dictate, or double tap it to toggle recording. */
   activationMode: "hold" | "doubleTap";
   muteOutputWhileRecording: boolean;
+  textInsertionMethod: TextInsertionMethod;
   server: string;
   tokenFile: string;
   device: { id: string; name: string };
@@ -67,6 +69,8 @@ export function parseConfig(value: unknown): Config {
     buttonEnabled: value.buttonEnabled === true,
     activationMode: value.activationMode === "doubleTap" ? "doubleTap" : "hold",
     muteOutputWhileRecording: value.muteOutputWhileRecording === true,
+    textInsertionMethod:
+      value.textInsertionMethod === "unicodeTyping" ? "unicodeTyping" : "automatic",
     server: endpoint(value.server),
     tokenFile: value.tokenFile,
     device: validateBody("DeviceIdentity", value.device),

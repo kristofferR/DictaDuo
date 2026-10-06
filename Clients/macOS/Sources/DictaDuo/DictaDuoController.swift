@@ -3,6 +3,7 @@ import Combine
 import DictaDuoAPI
 import DictaDuoCore
 import ServiceManagement
+import os
 
 private enum DictationDestination: Equatable {
     case test
@@ -181,7 +182,7 @@ final class DictaDuoController: ObservableObject {
     var isRecording: Bool { activity == .recording }
     var isTestRecording: Bool { isTestSession && isCapturing }
     var isCapturing: Bool { activity.isCapturing }
-    var recordingUsesClipboard: Bool { isCapturing && insertionDestination == .clipboard }
+    var recordingUsesClipboard: Bool { isCapturing && insertionDestination?.usesClipboard == true }
     var isBusy: Bool { activity.isBusy || !pendingDictations.isEmpty }
     var isUndoPending: Bool { undoDeadline != nil }
     var hudExpanded: Bool { isCapturing || isUndoPending }
@@ -318,6 +319,8 @@ final class DictaDuoController: ObservableObject {
     private var isShuttingDown = false
     private var observers: [NSObjectProtocol] = []
     private var workspaceObservers: [NSObjectProtocol] = []
+    private let accessibilityWarmup = InsertionAccessibilityWarmup()
+    private let insertionLogger = Logger(subsystem: DictaDuoBuild.current.bundleIdentifier, category: "text-insertion")
     private var lockObserver: NSObjectProtocol?
     private var unlockObserver: NSObjectProtocol?
 
@@ -1518,6 +1521,7 @@ final class DictaDuoController: ObservableObject {
         configuration.stopWatching()
         subscriptions.removeAll()
         audioDevices.stop(); hotkey.stop(); djiMicButton.stop(); continuationAnchors.removeAll()
+        accessibilityWarmup.stop()
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         for observer in workspaceObservers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
         if let lockObserver { DistributedNotificationCenter.default().removeObserver(lockObserver) }
@@ -1746,7 +1750,7 @@ final class DictaDuoController: ObservableObject {
             // The hold starts once the capture is ready; a context sent after it is ignored.
             let holdDeadline = ProcessInfo.processInfo.systemUptime + Self.remoteContextHold
             recordingContextTask = Task { [weak self] in
-                let destination: InsertionDestination = isTest ? .clipboard : (await destinationCapture?.value ?? .clipboard)
+                let destination: InsertionDestination = isTest ? .clipboard(reason: "Microphone tests do not insert text.") : (await destinationCapture?.value ?? .clipboard(reason: "The dictation destination was unavailable."))
                 guard let self, !Task.isCancelled else { return }
                 let continuationID = continuationID(for: destination, isTest: isTest) { $0.id == created.id }
                 // Retry transient failures while the hold lasts; a rejection is final.
@@ -1833,7 +1837,7 @@ final class DictaDuoController: ObservableObject {
             // The uploader waits for this persisted decision, so it must outlive
             // the HUD session: a newer take must never strand an earlier upload.
             recordingContextTask = Task { [weak self] in
-                let destination: InsertionDestination = isTest ? .clipboard : (await destinationCapture?.value ?? .clipboard)
+                let destination: InsertionDestination = isTest ? .clipboard(reason: "Microphone tests do not insert text.") : (await destinationCapture?.value ?? .clipboard(reason: "The dictation destination was unavailable."))
                 guard let self, !Task.isCancelled else { return }
                 let continuationID = continuationID(for: destination, isTest: isTest) { $0.spool === spool }
                 do { try spool.setContinuationID(continuationID) }
@@ -1905,7 +1909,7 @@ final class DictaDuoController: ObservableObject {
         pending.suppressDelivery = suppressDelivery
         if let spool = activeSpool { recoveredSpoolIDs.remove(spool.snapshot.id) }
         // Usually known at release, so a later take can continue a list in another field.
-        let knownDestination: InsertionDestination? = test ? .clipboard : insertionDestination
+        let knownDestination: InsertionDestination? = test ? .clipboard(reason: "Microphone tests do not insert text.") : insertionDestination
         pending.target = knownDestination.map { Self.resolve($0, isTest: test, releasedAt: releasedAt) }
         pendingDictations.append(pending)
         if cancelled { openUndoWindow(for: pending) }
@@ -1950,7 +1954,7 @@ final class DictaDuoController: ObservableObject {
                 let target: (destination: InsertionDestination, anchor: DictationDestination?)
                 if let known = pending.target { target = known }
                 else {
-                    target = Self.resolve(await pending.destination?.value ?? .clipboard, isTest: test, releasedAt: releasedAt)
+                    target = Self.resolve(await pending.destination?.value ?? .clipboard(reason: "The dictation destination was unavailable."), isTest: test, releasedAt: releasedAt)
                     pending.target = target
                 }
                 let resolved = target.destination, anchor = target.anchor
@@ -2119,7 +2123,7 @@ final class DictaDuoController: ObservableObject {
                                 releasedAt: TimeInterval) -> (destination: InsertionDestination, anchor: DictationDestination?) {
         var resolved = destination
         if let target = destination.target, !InsertionCapturePolicy.permitsInsertion(capturedAt: target.capturedAt, releasedAt: releasedAt) {
-            resolved = .clipboard
+            resolved = .clipboard(reason: "The text field was detected after recording stopped.")
         }
         return (resolved, isTest ? .test : resolved.target.flatMap { $0.selection == nil ? nil : .field($0) })
     }
@@ -2391,6 +2395,7 @@ final class DictaDuoController: ObservableObject {
             let inserter = TextInserter()
             let outcome = await inserter.deliver(record.insertionText, copying: record.finalText,
                                                   to: destination, clipboardUnchangedSince: clipboardCount,
+                                                  method: preferences.textInsertionMethod,
                                                   waitUntilReady: { await self.waitForCaptureRelease() },
                                                   isCaptureActive: { self.isHoldingCapture })
             guard !Task.isCancelled else { return (DeliveryReceipt(status: "failed", message: "Delivery cancelled"), {}) }
@@ -2406,12 +2411,18 @@ final class DictaDuoController: ObservableObject {
                 }
                 message = "Inserted at your cursor"; deliveryStatus = .inserted; status = "Inserted"
             case .copied(let reason):
+                insertionLogger.notice("Insertion skipped: \(reason, privacy: .public)")
                 transcript = record.finalText; message = reason; deliveryStatus = .copied; status = "Copied"
             case .unconfirmed(let backup):
                 transcript = record.finalText
                 message = backup ? "Insertion unconfirmed. Copied to clipboard if needed." : "Insertion unconfirmed. Your words are here to copy."
                 deliveryStatus = .unconfirmed; status = "Check insertion"
+            case .interrupted(let reason):
+                insertionLogger.notice("Typing interrupted: \(reason, privacy: .public)")
+                transcript = record.finalText; message = reason
+                deliveryStatus = .unconfirmed; status = "Check insertion"
             case .failed(let reason):
+                insertionLogger.error("Insertion failed: \(reason, privacy: .public)")
                 transcript = record.finalText; message = reason; deliveryStatus = .failed; status = "Ready to copy"
             }
         }
@@ -2498,6 +2509,12 @@ final class DictaDuoController: ObservableObject {
     }
 
     private func installLifecycleObservers() {
+        accessibilityWarmup.prepare(NSWorkspace.shared.frontmostApplication)
+        workspaceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) {
+            [weak self] notification in MainActor.assumeIsolated {
+                _ = self?.accessibilityWarmup.prepare(notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)
+            }
+        })
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) {
             [weak self] _ in MainActor.assumeIsolated { self?.refreshPermissions(); self?.refreshServer() }
         })
@@ -2624,6 +2641,7 @@ final class DictaDuoController: ObservableObject {
     func refreshPermissions() {
         let current = PermissionSnapshot.capture()
         if current != permissions { permissions = current }
+        accessibilityWarmup.prepare(NSWorkspace.shared.frontmostApplication)
         audioDevices.refresh()
         refreshDJIMicButton()
         if permissions.canListenForHotkey {

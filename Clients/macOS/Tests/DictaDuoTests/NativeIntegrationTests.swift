@@ -1044,11 +1044,11 @@ final class NativeIntegrationTests: XCTestCase {
         let composed = DictationComposer.compose(formatted, previous: first.continuation)
 
         let outcome = await TextInserter(pasteboard: pasteboard).deliver(
-            composed.insertion, copying: formatted.text, to: .clipboard,
+            composed.insertion, copying: formatted.text, to: .clipboard(reason: "No editable text field was detected."),
             clipboardUnchangedSince: initialCount
         )
 
-        XCTAssertEqual(outcome, .copied(reason: "Copied to clipboard"))
+        XCTAssertEqual(outcome, .copied(reason: "Copied to clipboard. No editable text field was detected."))
         XCTAssertEqual(pasteboard.string(forType: .string), "3. oranges")
         XCTAssertNil(pasteboard.data(forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType")))
     }
@@ -1064,7 +1064,7 @@ final class NativeIntegrationTests: XCTestCase {
         let latestCount = pasteboard.changeCount
 
         let outcome = await TextInserter(pasteboard: pasteboard).deliver(
-            "Spoken words. ", copying: "Spoken words.", to: .clipboard,
+            "Spoken words. ", copying: "Spoken words.", to: .clipboard(reason: "No editable text field was detected."),
             clipboardUnchangedSince: initialCount
         )
 
@@ -1081,7 +1081,7 @@ final class NativeIntegrationTests: XCTestCase {
         let initialCount = pasteboard.changeCount
         let task = Task { @MainActor in
             await TextInserter(pasteboard: pasteboard).deliver(
-                "Cancelled words", copying: "Cancelled words", to: .clipboard,
+                "Cancelled words", copying: "Cancelled words", to: .clipboard(reason: "No editable text field was detected."),
                 clipboardUnchangedSince: initialCount
             )
         }
@@ -1103,7 +1103,7 @@ final class NativeIntegrationTests: XCTestCase {
         let start = DictationComposer.compose(SpokenListFormatter.format("Start a list. One, apples."))
         let ending = SpokenListFormatter.format("End list.", context: start.continuation?.list)
         let composed = DictationComposer.compose(ending, previous: start.continuation)
-        let empty = await inserter.deliver(composed.insertion, copying: ending.text, to: .clipboard,
+        let empty = await inserter.deliver(composed.insertion, copying: ending.text, to: .clipboard(reason: "No editable text field was detected."),
                                            clipboardUnchangedSince: initialCount)
         XCTAssertEqual(empty, .failed(reason: "There is no text to deliver."))
 
@@ -1113,6 +1113,33 @@ final class NativeIntegrationTests: XCTestCase {
         XCTAssertEqual(blocked, .failed(reason: "Protected field"))
         XCTAssertEqual(pasteboard.changeCount, initialCount)
         XCTAssertEqual(pasteboard.string(forType: .string), "Keep this")
+    }
+
+    @MainActor
+    func testAutomaticReceiptRejectsTransformedOrUnreadableTextEvenWhenCaretMatches() async throws {
+        let receipt = try XCTUnwrap(TextInsertionReceipt(original: "before OLD after",
+                                                        selection: NSRange(location: 7, length: 3), text: "hello -- world"))
+        let caret = NSRange(location: 7 + receipt.text.utf16.count, length: 0)
+        let expected = "before hello -- world after"
+        let values: [String?] = [expected, "before HELLO -- WORLD after", "before hello –– world after", nil]
+        for strategy in [TextDeliveryStrategy.nativeSelection, .keyboardPaste] {
+            for value in values {
+                let fixture = TextDeliveryFixture()
+                defer { fixture.pasteboard.releaseGlobally() }
+                fixture.nativeResult = .acknowledged
+                fixture.onConfirmation = { _ in receipt.confirmation(value: value, selection: caret) }
+                let outcome = await fixture.transaction.deliver(receipt.text, copying: receipt.text,
+                    strategy: strategy, clipboardUnchangedSince: fixture.holdStartCount)
+                let exact = value == expected
+                XCTAssertEqual(outcome, exact ? .inserted : .unconfirmed(clipboardBackup: true))
+                XCTAssertEqual(fixture.pasteAttempts, strategy == .keyboardPaste ? 1 : 0)
+                XCTAssertEqual(fixture.nativeWrites.count, strategy == .nativeSelection ? 1 : 0)
+                XCTAssertEqual(fixture.pasteboard.string(forType: .string), exact ? "Original clipboard" : receipt.text)
+            }
+        }
+        XCTAssertEqual(receipt.confirmation(value: receipt.original, selection: receipt.selection), .pending)
+        XCTAssertEqual(receipt.confirmation(value: expected, selection: receipt.selection), .unavailable)
+        XCTAssertEqual(receipt.confirmation(value: expected, selection: nil), .unavailable)
     }
 
     @MainActor
@@ -1264,7 +1291,7 @@ final class NativeIntegrationTests: XCTestCase {
             let outcome = await fixture.transaction.deliver("New words. ", copying: "New words.",
                 strategy: .nativeSelection, clipboardUnchangedSince: fixture.holdStartCount)
 
-            XCTAssertEqual(outcome, blocked ? .failed(reason: "Protected field") : .copied(reason: "Copied to clipboard"))
+            XCTAssertEqual(outcome, blocked ? .failed(reason: "Protected field") : .copied(reason: "Copied to clipboard. Cursor moved"))
             XCTAssertEqual(fixture.nativeWrites, [])
             XCTAssertEqual(fixture.pasteAttempts, 0)
             XCTAssertEqual(fixture.pasteboard.string(forType: .string), blocked ? "Original clipboard" : "New words.")
@@ -1295,7 +1322,7 @@ final class NativeIntegrationTests: XCTestCase {
             XCTAssertEqual(fixture.confirmationReads, 0)
             switch change {
             case "focus":
-                XCTAssertEqual(outcome, .copied(reason: "Copied to clipboard"))
+                XCTAssertEqual(outcome, .copied(reason: "Copied to clipboard. Focus changed"))
                 XCTAssertEqual(fixture.pasteboard.string(forType: .string), "Words.")
             case "clipboard":
                 XCTAssertEqual(outcome, .failed(reason: ClipboardCopyError.changed.localizedDescription))
@@ -1349,7 +1376,7 @@ final class NativeIntegrationTests: XCTestCase {
             if newerCopy {
                 guard case .failed = outcome else { XCTFail("An unsent paste must preserve the newer copy"); return }
             } else {
-                XCTAssertEqual(outcome, .copied(reason: "Copied to clipboard"))
+                XCTAssertEqual(outcome, .copied(reason: "Copied to clipboard. macOS could not send the paste."))
             }
             XCTAssertEqual(fixture.confirmationReads, 0)
             XCTAssertEqual(fixture.pasteboard.string(forType: .string), newerCopy ? "Newer user copy" : "Words.")

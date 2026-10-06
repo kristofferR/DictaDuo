@@ -212,12 +212,29 @@ test("GUI requests are versioned and scoped; source preferences persist without 
     expect(buttons.enabled).toBe(false);
     expect(requests.at(-1)?.startsWith("DELETE")).toBe(true);
     expect(JSON.parse(await readFile(process.env.DICTADUO_CLIENT_CONFIG, "utf8"))).toEqual(config);
+    await expect(
+      gui({ version: 1, action: "saveTextInsertionMethod", method: "paste" }),
+    ).rejects.toThrow("Choose");
+    await gui({ version: 1, action: "saveTextInsertionMethod", method: "unicodeTyping" });
+    expect(controller.textInsertionMethod).toBe("unicodeTyping");
+    expect(await gui({ version: 1, action: "snapshot" })).toMatchObject({
+      textInsertionMethod: "unicodeTyping",
+    });
+    expect(JSON.parse(await readFile(process.env.DICTADUO_CLIENT_CONFIG, "utf8"))).toEqual({
+      ...config,
+      textInsertionMethod: "unicodeTyping",
+    });
     Object.defineProperty(controller, "busy", { configurable: true, get: () => true });
+    await expect(
+      gui({ version: 1, action: "saveTextInsertionMethod", method: "automatic" }),
+    ).rejects.toThrow("Finish dictation");
+    expect(controller.textInsertionMethod).toBe("unicodeTyping");
     await expect(gui({ version: 1, action: "saveButton", enabled: true })).rejects.toThrow(
       "Finish dictation",
     );
     expect(buttons.enabled).toBe(false);
     Object.defineProperty(controller, "busy", { configurable: true, get: () => false });
+    await gui({ version: 1, action: "saveTextInsertionMethod", method: "automatic" });
     const sources = { ...config.sources, priority: [{ hostID: "desktop", id: "dji" }] };
     await gui({ version: 1, action: "saveSources", value: sources });
     expect(JSON.parse(await readFile(process.env.DICTADUO_CLIENT_CONFIG, "utf8"))).toEqual({

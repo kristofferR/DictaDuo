@@ -16,6 +16,10 @@ test("endpoint changes cannot silently reuse another server's microphone prefere
     },
   };
   expect(parseConfig(value).sources.hostID).toBe("desktop");
+  expect(parseConfig(value).textInsertionMethod).toBe("automatic");
+  expect(parseConfig({ ...value, textInsertionMethod: "unicodeTyping" }).textInsertionMethod).toBe(
+    "unicodeTyping",
+  );
   expect(() => parseConfig({ ...value, server: "http://other-server:8391" })).toThrow(
     "another server",
   );

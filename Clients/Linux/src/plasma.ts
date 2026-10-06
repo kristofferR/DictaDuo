@@ -3,6 +3,7 @@ import type { Desktop, Destination } from "./controller.ts";
 import { command, Notifier } from "./desktop.ts";
 import type { SourceID } from "./sources.ts";
 import { NativeDestinations } from "./native-destination.ts";
+import type { TextInsertionMethod } from "./text-insertion.ts";
 
 const preview = (): Destination => ({ deliver: async () => "preview", close() {} });
 export function isPlasmaDesktop(names: (string | undefined)[]) {
@@ -40,12 +41,20 @@ export function loginSessionPath(reply: string) {
  * unknown screen-lock/session state. */
 export class PlasmaDesktop implements Desktop {
   readonly kind = "plasma";
+  get keyboardAccess() {
+    return this.destinations.keyboardAccess;
+  }
+  enableKeyboardAccess(): void {
+    this.destinations.enableKeyboardAccess();
+  }
   private screen?: ReturnType<typeof Bun.spawn>;
   private session?: ReturnType<typeof Bun.spawn>;
   private connected = false;
   private lockedSince = 0;
   private destinations = new NativeDestinations();
-  constructor(private helper: string) {}
+  constructor(private helper: string) {
+    this.destinations.warm(helper);
+  }
 
   async monitorSession(unsafe: () => void): Promise<void> {
     if (process.env.XDG_SESSION_TYPE !== "wayland")
@@ -198,11 +207,14 @@ export class PlasmaDesktop implements Desktop {
     this.notifier.notify(title, body);
   }
 
-  async capture(): Promise<Destination> {
+  async capture(method: TextInsertionMethod = "automatic"): Promise<Destination> {
     const startedAt = Date.now();
     if (!(await this.unlocked(startedAt))) return preview();
-    const destination = await this.destinations.capture(this.helper, "focused");
+    const destination = await this.destinations.capture(this.helper, "focused", method);
     return {
+      get reason() {
+        return destination.reason;
+      },
       close: () => destination.close(),
       deliver: async (text, held) => {
         if (!(await this.unlocked(startedAt))) {
@@ -215,7 +227,7 @@ export class PlasmaDesktop implements Desktop {
   }
 
   close(): void {
-    this.destinations.invalidate();
+    this.destinations.close();
     this.connected = false;
     this.screen?.kill();
     this.session?.kill();

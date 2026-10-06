@@ -312,6 +312,7 @@ final class HotkeyMonitor {
             recoverDisabledTap()
             return
         }
+        guard !TextInputEvents.isOwnEvent(event) else { return }
         let code = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
         if type == .flagsChanged || ((type == .keyDown || type == .keyUp) && code == key.keyCode) {
             diagnoseModifier(type: type, code: code, flags: event.flags)

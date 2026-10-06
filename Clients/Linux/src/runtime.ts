@@ -45,6 +45,7 @@ export class ClientRuntime {
     controller.feedbackVisible = () => Date.now() - this.guiSeenAt < 1500;
     controller.output = this.output;
     controller.muteOutput = config.muteOutputWhileRecording;
+    controller.textInsertionMethod = config.textInsertionMethod;
     const buttons = new ButtonDestinationClient(
       api,
       this.desktop,

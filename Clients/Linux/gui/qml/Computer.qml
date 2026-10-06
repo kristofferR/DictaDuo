@@ -83,8 +83,38 @@ ScrollView {
             }
             Setting {
                 ui: root.ui
-                title: "Shortcuts and text insertion"
-                detail: portalShortcuts.plasma ? "Use your Plasma shortcut while a text field is focused." : "Use your DictaDuo shortcut while a text field is focused."
+                title: "Text insertion"
+                detail: root.ui.snapshot.textInsertionMethod === "unicodeTyping" ? "Uses clipboard-free typing or literal text insertion where supported. Keep a text field focused." : "Uses native insertion or verified typing, with temporary paste when needed. Restores your clipboard."
+                ComboBox {
+                    objectName: "textInsertionMethod"
+                    implicitWidth: 245
+                    Accessible.name: "Text insertion"
+                    model: ["Automatic", "Type text"]
+                    currentIndex: root.ui.snapshot.textInsertionMethod === "unicodeTyping" ? 1 : 0
+                    enabled: bridge.connected && root.ui.snapshot.textInsertionMethod !== undefined && !root.ui.busy && !bridge.preview
+                    onActivated: bridge.request("saveTextInsertionMethod", {
+                        method: ["automatic", "unicodeTyping"][currentIndex]
+                    })
+                }
+                Connections {
+                    target: bridge
+                    function onReply(action, data) {
+                        if (action === "saveTextInsertionMethod")
+                            bridge.request("snapshot");
+                    }
+                }
+            }
+            Setting {
+                ui: root.ui
+                visible: portalShortcuts.plasma
+                title: "Keyboard access"
+                detail: root.ui.snapshot.keyboardAccess === "ready" ? "Enabled for this computer." : root.ui.snapshot.keyboardAccess === "requesting" ? "Complete the desktop permission dialog." : "Allow DictaDuo to type and paste into focused text fields."
+                SButton {
+                    ui: root.ui
+                    text: root.ui.snapshot.keyboardAccess === "ready" ? "Enabled" : "Enable"
+                    enabled: bridge.connected && !root.ui.busy && !bridge.preview && root.ui.snapshot.keyboardAccess !== "ready" && root.ui.snapshot.keyboardAccess !== "requesting"
+                    onClicked: bridge.request("enableKeyboardAccess")
+                }
             }
             Setting {
                 ui: root.ui

@@ -44,6 +44,24 @@ enum InsertionAccessibilityPolicy {
     }
 }
 
+/// Warmup and a take may overlap while Electron's mode getter still says false.
+/// Share successful requests so starting a take cannot restart that debounce.
+final class InsertionAccessibilityRequests: @unchecked Sendable {
+    private let lock = NSLock()
+    private var requestedAt: [pid_t: TimeInterval] = [:]
+
+    func enable(for pid: pid_t, now: TimeInterval = ProcessInfo.processInfo.systemUptime,
+                write: () -> AXError) -> InsertionAccessibilityActivation {
+        lock.withLock {
+            requestedAt = requestedAt.filter { now >= $0.value && now - $0.value < InsertionPreparation.readinessSeconds }
+            if requestedAt[pid] != nil { return .supported }
+            let result = InsertionAccessibilityPolicy.afterWrite(write())
+            if result == .supported { requestedAt[pid] = now }
+            return result
+        }
+    }
+}
+
 struct InsertionPreparationEnvironment<Value: Sendable>: Sendable {
     var read: @Sendable () -> InsertionPreparationRead<Value>
     var activate: @Sendable () -> InsertionAccessibilityActivation

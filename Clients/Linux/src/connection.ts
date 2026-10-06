@@ -197,6 +197,7 @@ export class ConnectionSettings {
       buttonEnabled: current?.buttonEnabled ?? false,
       activationMode: current?.activationMode ?? "hold",
       muteOutputWhileRecording: current?.muteOutputWhileRecording ?? false,
+      textInsertionMethod: current?.textInsertionMethod ?? "automatic",
       sources:
         current?.server === checked.server && current.sources.hostID === hostID
           ? current.sources

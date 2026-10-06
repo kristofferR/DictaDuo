@@ -339,7 +339,7 @@ test("while another computer's take holds the server, a take says who is using i
   ]);
   expect(f.starts).toEqual([]);
 });
-test("only outcomes that need attention notify; progress, a clean paste and a cancel do not", async () => {
+test("only outcomes that need attention notify; progress, a confirmed insertion and a cancel do not", async () => {
   const f = await fixture();
   f.controller.start();
   await until(() => f.controller.state.startsWith("recording"));
@@ -367,7 +367,7 @@ test("only outcomes that need attention notify; progress, a clean paste and a ca
   expect(f.notices).toEqual([
     {
       title: "Check the field",
-      body: "The paste couldn't be confirmed. If it's missing, copy it from the tray.",
+      body: "The insertion couldn't be confirmed. If it's missing, copy it from the tray.",
     },
   ]);
 });
@@ -438,14 +438,14 @@ test("without a GUI, the undo window and safety cancellations are announced", as
   f.controller.feedbackVisible = () => false;
   await Bun.sleep(300);
   await f.controller.cancel();
-  expect(f.notices.map((notice) => notice.title)).toEqual(["Not pasted"]);
+  expect(f.notices.map((notice) => notice.title)).toEqual(["Not inserted"]);
   f.controller.closeUndo();
   await f.controller.settled();
   await record(f);
   await f.controller.cancelAll(false, true);
   await f.controller.settled();
   expect(f.notices.map((notice) => notice.title)).toEqual([
-    "Not pasted",
+    "Not inserted",
     "Recording",
     "Dictation cancelled",
   ]);
@@ -1477,7 +1477,7 @@ test("an earlier preview notifies about recovery while the newer take owns the o
   held.release();
   await f.controller.settled();
   expect(f.notices).toContainEqual({
-    title: "Not pasted",
+    title: "Not inserted",
     body: "Earlier dictation: Your text is ready. Copy it from the tray or DictaDuo.",
   });
   expect(ids.delivered).toEqual(ids.started);

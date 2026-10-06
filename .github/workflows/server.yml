@@ -29,7 +29,7 @@ jobs:
       - name: Build essential Linux desktop client
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libatspi2.0-dev libjson-glib-dev
+          sudo apt-get install -y build-essential pkg-config libatspi2.0-dev libjson-glib-dev libwayland-dev libwayland-bin libxkbcommon-dev
           bash scripts/build-linux-client.sh
           ./build/linux-client/dictaduo --help
       - name: Install native capture dependencies

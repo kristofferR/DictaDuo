@@ -66,6 +66,8 @@ export function createGUIHandler(
         buttonEnabled: config.buttonEnabled,
         activationMode: config.activationMode,
         muteOutputWhileRecording: config.muteOutputWhileRecording,
+        textInsertionMethod: config.textInsertionMethod,
+        keyboardAccess: desktop.keyboardAccess ?? "disabled",
         shortcut: shortcuts?.snapshot() ?? null,
         buttonSettingsSupported: buttons !== undefined,
         button: buttons?.state
@@ -86,6 +88,13 @@ export function createGUIHandler(
     }
     if (!(await desktop.unlocked())) throw new ClientNotice("Unlock this computer first.");
     switch (request.action) {
+      case "enableKeyboardAccess":
+        if (controller.busy)
+          throw new ClientNotice("Finish dictation before enabling keyboard access.");
+        if (!desktop.enableKeyboardAccess)
+          throw new ClientNotice("Update the background client for keyboard access.");
+        desktop.enableKeyboardAccess();
+        return {};
       case "start":
         // The window and tray start a new take; only the shortcut pastes a cancelled one.
         // Settle the undo window only once a new take can actually start.
@@ -138,6 +147,14 @@ export function createGUIHandler(
         saveConfig(parseConfig({ ...config, muteOutputWhileRecording: request.enabled }));
         controller.muteOutput = request.enabled;
         return { enabled: request.enabled };
+      case "saveTextInsertionMethod":
+        if (request.method !== "automatic" && request.method !== "unicodeTyping")
+          throw new ClientNotice("Choose Automatic or Type text.");
+        if (controller.busy)
+          throw new ClientNotice("Finish dictation before changing text insertion.");
+        saveConfig(parseConfig({ ...config, textInsertionMethod: request.method }));
+        controller.textInsertionMethod = request.method;
+        return { method: request.method };
       case "saveButton": {
         if (!buttons)
           throw new ClientNotice("Update the background client to change DJI button settings.");

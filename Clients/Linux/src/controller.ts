@@ -3,20 +3,21 @@ import { APIError, type API, type Device, type Recording, type RecordingDetail }
 import { candidates, sourceKey, type SourceID, type SourcePreferences } from "./sources.ts";
 import { RecordingFeedback } from "./feedback.ts";
 import type { OutputMuter } from "./output.ts";
+import type { TextInsertionMethod } from "./text-insertion.ts";
 /** The server rejects shorter recordings, so they are discarded outright. */
 const minimumTakeMS = 250;
 const undoWindowMS = 4000;
 type Notice = readonly [title: string, body: string];
 /**
  * Desktop notifications are reserved for outcomes that need attention; progress,
- * a clean paste and a cancel show in the overlay and window instead.
+ * a confirmed insertion and a cancel show in the overlay and window instead.
  */
 const notices = {
   uncertain: [
     "Check the field",
-    "The paste couldn't be confirmed. If it's missing, copy it from the tray.",
+    "The insertion couldn't be confirmed. If it's missing, copy it from the tray.",
   ],
-  ready: ["Not pasted", "Your text is ready. Copy it from the tray or DictaDuo."],
+  ready: ["Not inserted", "Your text is ready. Copy it from the tray or DictaDuo."],
   transcription: [
     "Couldn't transcribe",
     "The audio is saved. Open History to transcribe it again.",
@@ -41,9 +42,9 @@ const notices = {
   ],
   safetySaved: [
     "Dictation cancelled",
-    "The screen locked or the computer slept, so nothing was pasted. The audio is saved in History.",
+    "The screen locked or the computer slept, so nothing was inserted. The audio is saved in History.",
   ],
-  undo: ["Not pasted", "Press the dictation key within 4 seconds to paste it."],
+  undo: ["Not inserted", "Press the dictation key within 4 seconds to insert it."],
 } as const satisfies Record<string, Notice>;
 /**
  * Decides whether a finished take is inserted. A cancelled take waits here until
@@ -76,6 +77,7 @@ class DeliveryGate {
   }
 }
 export interface Destination {
+  readonly reason?: string;
   /** Returns "held", without attempting, if `held` is true when the insertion is sent. */
   deliver(
     text: string,
@@ -85,8 +87,10 @@ export interface Destination {
 }
 export interface Desktop {
   kind?: "hyprland" | "plasma";
+  readonly keyboardAccess?: "disabled" | "requesting" | "ready" | "unavailable";
+  enableKeyboardAccess?(): void;
   unlocked(since?: number): Promise<boolean>;
-  capture(): Promise<Destination>;
+  capture(method?: TextInsertionMethod): Promise<Destination>;
   defaultInput(hostID: string): Promise<SourceID | undefined>;
   /** Shows one notification, replacing the previous one. */
   notify(title: string, body?: string): void;
@@ -158,6 +162,7 @@ export interface Result {
  * never reloads a generation for delivery.
  */
 export class Controller {
+  textInsertionMethod: TextInsertionMethod = "automatic";
   private take?: Take;
   private processing: Take[] = [];
   private tasks = new Set<Promise<void>>();
@@ -392,7 +397,7 @@ export class Controller {
     this.undoUntil = this.undoOpenedAt + undoWindowMS;
     this.undoTimer = setTimeout(() => this.closeUndo(), undoWindowMS);
     this.announce(
-      "Not pasted. Press the dictation key to paste.",
+      "Not inserted. Press the dictation key to insert.",
       take.activity.phase,
       take.activity,
     );
@@ -588,7 +593,7 @@ export class Controller {
     // Establish the focus-change guard immediately, before slower lock/discovery checks.
     take.destination = take.preview
       ? { deliver: async () => "preview", close() {} }
-      : await this.desktop.capture();
+      : await this.desktop.capture(this.textInsertionMethod);
     if (!this.live(take)) return;
     if (!(await this.desktop.unlocked(take.startedAt)))
       throw new Error("Desktop is locked or unavailable.");
@@ -824,14 +829,16 @@ export class Controller {
         take,
         "Insertion uncertain. Check the field before copying.",
         "completed",
-        notices.uncertain,
+        take.destination.reason
+          ? [notices.uncertain[0], take.destination.reason]
+          : notices.uncertain,
       );
     else
       this.setState(
         take,
-        "Text ready. Use dictaduo result or dictaduo copy.",
+        take.destination.reason ?? "Text ready. Use dictaduo result or dictaduo copy.",
         "completed",
-        notices.ready,
+        take.destination.reason ? [notices.ready[0], take.destination.reason] : notices.ready,
       );
     take.completed =
       !take.preview && Boolean(record.insertionText.trim()) && delivery !== "uncertain";

@@ -4,6 +4,27 @@ import XCTest
 @testable import DictaDuo
 
 final class InsertionPreparationTests: XCTestCase {
+    func testTakeDuringPendingWarmupDoesNotRestartElectronDebounce() {
+        let requests = InsertionAccessibilityRequests()
+        var writes = 0
+        let write = { writes += 1; return AXError.success }
+
+        XCTAssertEqual(requests.enable(for: 42, now: 0, write: write), .supported)
+        XCTAssertEqual(requests.enable(for: 42, now: 0.5, write: write), .supported)
+        XCTAssertEqual(writes, 1)
+        XCTAssertEqual(requests.enable(for: 42, now: 3.5, write: write), .supported)
+        XCTAssertEqual(writes, 2, "An expired request must allow reactivation if the renderer stopped exposing fields")
+    }
+
+    func testFailedWarmupDoesNotSuppressTakeActivationOrOtherApps() {
+        let requests = InsertionAccessibilityRequests()
+        var writes = 0
+        XCTAssertEqual(requests.enable(for: 42, now: 0, write: { .cannotComplete }), .unavailable)
+        XCTAssertEqual(requests.enable(for: 42, now: 0.5, write: { writes += 1; return .success }), .supported)
+        XCTAssertEqual(requests.enable(for: 43, now: 0.5, write: { writes += 1; return .success }), .supported)
+        XCTAssertEqual(writes, 2)
+    }
+
     func testReadyFieldAvoidsActivationAndWaiting() async {
         let fixture = PreparationFixture()
         fixture.readResult = .ready(42, capturedAt: 0)

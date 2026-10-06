@@ -4,6 +4,7 @@ import { pipeWireInputs } from "../../../Server/src/capture/pipewire-discovery.t
 import { type Desktop, type Destination } from "./controller.ts";
 import type { SourceID } from "./sources.ts";
 import { NativeDestinations } from "./native-destination.ts";
+import type { TextInsertionMethod } from "./text-insertion.ts";
 
 export async function command(args: string[], timeout = 1500, input?: string): Promise<string> {
   const child = Bun.spawn(args, {
@@ -72,13 +73,21 @@ async function activeWindow(): Promise<Window | undefined> {
 const preview = (): Destination => ({ deliver: async () => "preview", close() {} });
 export class HyprlandDesktop implements Desktop {
   readonly kind = "hyprland";
+  get keyboardAccess() {
+    return this.destinations.keyboardAccess;
+  }
+  enableKeyboardAccess(): void {
+    this.destinations.enableKeyboardAccess();
+  }
   private socket?: Socket;
   private monitor?: ReturnType<typeof Bun.spawn>;
   private connected = false;
   private destinations = new NativeDestinations();
   private focusRevision = 0;
   private unsafe = () => {};
-  constructor(private helper: string) {}
+  constructor(private helper: string) {
+    this.destinations.warm(helper);
+  }
   async monitorSession(
     unsafe: () => void,
     shortcut: (action: "start" | "stop" | "cancel" | "copy") => void = () => {},
@@ -116,6 +125,12 @@ export class HyprlandDesktop implements Desktop {
         if (line.startsWith("activewindowv2>>") || line.startsWith("closewindow>>")) {
           this.focusRevision++;
           this.destinations.invalidate();
+          if (line.startsWith("activewindowv2>>"))
+            void activeWindow()
+              .then((window) => {
+                if (window) this.destinations.warm(this.helper, String(window.pid));
+              })
+              .catch(() => {});
         }
         const action = shortcutEvent(line);
         if (action) shortcut(action);
@@ -218,17 +233,20 @@ export class HyprlandDesktop implements Desktop {
   notify(title: string, body?: string): void {
     this.notifier.notify(title, body);
   }
-  async capture(): Promise<Destination> {
+  async capture(method: TextInsertionMethod = "automatic"): Promise<Destination> {
     const startedAt = Date.now();
     const revision = this.focusRevision;
     const window = await activeWindow().catch(() => undefined);
     if (!window || revision !== this.focusRevision) return preview();
-    const destination = await this.destinations.capture(this.helper, String(window.pid));
+    const destination = await this.destinations.capture(this.helper, String(window.pid), method);
     if (revision !== this.focusRevision) {
       destination.close();
       return preview();
     }
     return {
+      get reason() {
+        return destination.reason;
+      },
       close: () => destination.close(),
       deliver: async (text, held) => {
         if (!(await this.unlocked(startedAt))) {
@@ -245,7 +263,7 @@ export class HyprlandDesktop implements Desktop {
     };
   }
   close(): void {
-    this.destinations.invalidate();
+    this.destinations.close();
     this.connected = false;
     this.socket?.destroy();
     this.monitor?.kill();
