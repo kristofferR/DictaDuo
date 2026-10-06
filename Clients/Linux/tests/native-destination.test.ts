@@ -1,8 +1,124 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
+import { mkdtemp, writeFile, rm, copyFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { NativeDestinations } from "../src/native-destination.ts";
 // Opt in only in a disposable test display or during an explicitly supervised desktop trial.
 const nativeTest = process.env.DICTADUO_TEST_DESKTOP === "1" ? test : test.skip;
+async function focusFixture(pid: number) {
+  if (!process.env.HYPRLAND_INSTANCE_SIGNATURE) return;
+  await Bun.spawn(["hyprctl", "dispatch", "focuswindow", `pid:${pid}`], {
+    stdout: "ignore",
+    stderr: "ignore",
+  }).exited;
+  await Bun.sleep(100);
+}
+nativeTest(
+  "Wayland typing confirms Unicode packets, guards queued edits and refuses action keys",
+  async () => {
+    const root = resolve(import.meta.dir, "../../..");
+    const entry = Bun.spawn([`${root}/.local/entry-fixture`], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    const destinations = new NativeDestinations();
+    const reader = entry.stdout.getReader();
+    const read = async () => new TextDecoder().decode((await reader.read()).value).trimEnd();
+    const send = async (value: string) => {
+      entry.stdin.write(value + "\n");
+      await entry.stdin.flush();
+      await Bun.sleep(150);
+      if (value === "reset") await focusFixture(entry.pid);
+    };
+    const capture = (method: "automatic" | "unicodeTyping" = "unicodeTyping") =>
+      destinations.capture(
+        `${root}/build/linux-client/dictaduo-destination`,
+        String(entry.pid),
+        method,
+      );
+    try {
+      expect(await read()).toBe("ready");
+      await Bun.sleep(900);
+      await focusFixture(entry.pid);
+      const text = "Hei æøå 👋🏽 e\u0301 👨‍👩‍👧‍👦 中文 ferdig";
+      const first = await capture();
+      const next = await capture();
+      expect(await first.deliver(text)).toBe("inserted");
+      expect(await next.deliver(" neste")).toBe("inserted");
+      await send("get");
+      expect(await read()).toBe("start " + text + " neste");
+      for (const text of ["first\nsubmit", "first\tother"]) {
+        await send("reset");
+        const destination = await capture();
+        expect(await destination.deliver(text)).toBe("preview");
+        await send("get");
+        expect(await read()).toBe("start");
+      }
+      await send("reset");
+      await send("web");
+      const web = await capture("automatic");
+      expect(await web.deliver("web æøå 👋")).toBe("inserted");
+      await send("get");
+      expect(await read()).toBe("start web æøå 👋");
+      for (const method of ["automatic", "unicodeTyping"] as const) {
+        await send("reset");
+        await send("select");
+        const selected = await capture(method);
+        expect(await selected.deliver("ny 👋🏽 tekst med flere pakker")).toBe("inserted");
+        await send("get");
+        expect(await read()).toBe("ny 👋🏽 tekst med flere pakkerart");
+      }
+      await send("textarea");
+      const paragraphs = await capture("automatic");
+      expect(await paragraphs.deliver("first\n\nsecond æøå 👋")).toBe("inserted");
+      await send("get");
+      expect(await read()).toBe("start first\n\nsecond æøå 👋");
+      await send("reset");
+      const stale = await capture();
+      await send("other");
+      expect(await stale.deliver("must not move")).toBe("preview");
+      await send("reset");
+      const interrupted = await capture();
+      let checks = 0;
+      expect(await interrupted.deliver("x".repeat(100), () => ++checks >= 5)).toBe("uncertain");
+      await send("get");
+      const partial = await read();
+      expect(partial.startsWith("start ")).toBe(true);
+      expect(partial.length).toBeGreaterThan(6);
+      expect(partial.length).toBeLessThan(106);
+      expect(await interrupted.deliver("x".repeat(100))).toBe("preview");
+      // A backend can exit successfully without sending anything. Readback must
+      // report uncertainty and never repeat it through native insertion.
+      await send("reset");
+      const dir = await mkdtemp(resolve(tmpdir(), "dictaduo-noop-"));
+      try {
+        await copyFile(
+          `${root}/build/linux-client/dictaduo-destination`,
+          resolve(dir, "dictaduo-destination"),
+        );
+        await writeFile(resolve(dir, "dictaduo-type"), "#!/bin/sh\ncat >/dev/null\nexit 0\n", {
+          mode: 0o700,
+        });
+        const silent = await destinations.capture(
+          resolve(dir, "dictaduo-destination"),
+          String(entry.pid),
+          "unicodeTyping",
+        );
+        expect(await silent.deliver("must not retry")).toBe("uncertain");
+        await send("get");
+        expect(await read()).toBe("start");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    } finally {
+      destinations.invalidate();
+      entry.kill();
+    }
+  },
+  20000,
+);
+
 nativeTest(
   "queued GTK takes preserve own insertions but reject user edits and focus changes",
   async () => {
@@ -19,6 +135,7 @@ nativeTest(
       entry.stdin.write(value + "\n");
       await entry.stdin.flush();
       await Bun.sleep(150);
+      if (value === "reset") await focusFixture(entry.pid);
     };
     let target = String(entry.pid);
     const capture = () =>
@@ -26,6 +143,7 @@ nativeTest(
     try {
       expect(await read()).toBe("ready");
       await Bun.sleep(900);
+      await focusFixture(entry.pid);
       for (const change of [undefined, "change", "caret", "select", "other", "password"]) {
         await send("reset");
         const first = await capture();
@@ -106,10 +224,12 @@ nativeTest(
       entry.stdin.write(value + "\n");
       await entry.stdin.flush();
       await Bun.sleep(150);
+      if (value === "reset") await focusFixture(entry.pid);
     };
     try {
       expect(await read()).toBe("ready");
       await Bun.sleep(900);
+      await focusFixture(entry.pid);
       for (const change of [undefined, "change", "caret", "select", "other", "password"]) {
         await send("reset");
         const destination = Bun.spawn([helper, String(entry.pid)], {
@@ -124,7 +244,10 @@ nativeTest(
           if (change) await send(change);
           destination.stdin.write(JSON.stringify("Hei æøå 👋") + "\n");
           await destination.stdin.flush();
-          const result = new TextDecoder().decode((await output.read()).value).trim();
+          const result = new TextDecoder()
+            .decode((await output.read()).value)
+            .trim()
+            .split(":")[0];
           expect(result).toBe(change ? "preview" : "inserted");
           await send("get");
           expect(await read()).toBe(
@@ -142,7 +265,7 @@ nativeTest(
         stdout: "pipe",
         stderr: "ignore",
       });
-      expect((await new Response(password.stdout).text()).trim()).toBe("preview");
+      expect((await new Response(password.stdout).text()).trim().split(":")[0]).toBe("preview");
     } finally {
       entry.kill();
     }
@@ -166,6 +289,7 @@ nativeTest(
     try {
       await reader.read();
       await Bun.sleep(800);
+      await focusFixture(entry.pid);
       expect(await desktop.unlocked()).toBe(true);
       const destination = await desktop.capture();
       expect(await destination.deliver("Norsk æøå")).toBe("inserted");

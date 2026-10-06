@@ -4,7 +4,7 @@ Direction A of the [design gallery](https://plans.kristofferr.com/d/fo12u4el8h2x
 
 ## Build and run
 
-Requires CMake 3.24+, a C++20 compiler, Qt 6.8+ (Quick, QuickControls2, Widgets, Network, Svg, DBus; Test for the default test build), LayerShellQt 6.6+, and the existing Bun Linux client toolchain. The default test build also needs dbus-run-session. On Arch these dependencies are provided by qt6-base, qt6-declarative, qt6-svg and layer-shell-qt.
+Requires CMake 3.24+, a C++20 compiler, Qt 6.8+ (Quick, QuickControls2, Widgets, Network, Svg, DBus; Test for the default test build), LayerShellQt 6.6+, and the existing Bun Linux client toolchain. Native delivery also needs Wayland development tools and libxkbcommon. The default test build needs dbus-run-session. On Arch these dependencies are provided by qt6-base, qt6-declarative, qt6-svg, layer-shell-qt, wayland and libxkbcommon.
 
 From the repository root:
 
@@ -15,6 +15,18 @@ build/linux-gui/dictaduo-gui --preview
 ```
 
 Preview mode uses bundled sample data. It never connects to the client, opens a microphone, saves settings, or changes the desktop theme. It can copy sample text when explicitly requested.
+
+**This computer → Text insertion** offers Automatic and Type text, matching the
+Mac's local setting. Automatic uses verified native insertion or guarded typing
+in supported web editors. Type text uses a bundled Wayland virtual keyboard and
+never changes the clipboard. The background client enables toolkit accessibility
+through AT-SPI's IsEnabled property; it does not enable a screen reader.
+
+Keyboard delivery refuses line breaks and tabs before typing. Native Automatic
+insertion supports literal paragraphs. Chromium supplementary symbols also stay
+in History because its Wayland keyboard path cannot reliably enter them. KWin
+does not support this keyboard protocol; Plasma keeps native insertion and
+reports unsupported Type text. See [source review and parity limits](../../../docs/text-input-research.md).
 
 For real use, start `build/linux-gui/dictaduo-gui` in your graphical session. **This computer → Background dictation** can install and start the matching `dictaduo` client as a systemd user service; it never overwrites a service configured outside DictaDuo. Open **This computer → Connection** to enter the server address, access token and device name. The daemon accepts setup requests even when its configuration or token is missing. Stored credentials are never sent to QML; a typed token is masked and cleared after submission or hiding the window.
 

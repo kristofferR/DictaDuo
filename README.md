@@ -78,7 +78,9 @@ The apps always need a reachable server, even in local-only mode. On Linux,
 the server records the microphone through PipeWire, so a Linux desktop needs
 the server's PipeWire capture enabled, even when both run on the same
 computer. Text insertion on Linux depends on each application's accessibility
-support; terminals use copy and paste.
+support. Automatic and Type text offer verified native/keyboard delivery on
+supported Wayland desktops; terminals use explicit copy and paste. See the
+[text input review](docs/text-input-research.md) for compatibility boundaries.
 
 History, including original microphone audio, stays on the server until you
 delete it. Back up the server's data directory to keep it; see

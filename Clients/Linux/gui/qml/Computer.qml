@@ -83,8 +83,26 @@ ScrollView {
             }
             Setting {
                 ui: root.ui
-                title: "Shortcuts and text insertion"
-                detail: portalShortcuts.plasma ? "Use your Plasma shortcut while a text field is focused." : "Use your DictaDuo shortcut while a text field is focused."
+                title: "Text insertion"
+                detail: root.ui.snapshot.textInsertionMethod === "unicodeTyping" ? "Types without using the clipboard on supported Wayland desktops. Line breaks and tabs stay in History." : "Uses native insertion, or verified typing in supported web editors. Keep a text field focused."
+                ComboBox {
+                    objectName: "textInsertionMethod"
+                    implicitWidth: 245
+                    Accessible.name: "Text insertion"
+                    model: ["Automatic", "Type text"]
+                    currentIndex: root.ui.snapshot.textInsertionMethod === "unicodeTyping" ? 1 : 0
+                    enabled: bridge.connected && root.ui.snapshot.textInsertionMethod !== undefined && !root.ui.busy && !bridge.preview
+                    onActivated: bridge.request("saveTextInsertionMethod", {
+                        method: ["automatic", "unicodeTyping"][currentIndex]
+                    })
+                }
+                Connections {
+                    target: bridge
+                    function onReply(action, data) {
+                        if (action === "saveTextInsertionMethod")
+                            bridge.request("snapshot");
+                    }
+                }
             }
             Setting {
                 ui: root.ui

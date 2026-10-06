@@ -3,6 +3,7 @@ import type { Desktop, Destination } from "./controller.ts";
 import { command, Notifier } from "./desktop.ts";
 import type { SourceID } from "./sources.ts";
 import { NativeDestinations } from "./native-destination.ts";
+import type { TextInsertionMethod } from "./text-insertion.ts";
 
 const preview = (): Destination => ({ deliver: async () => "preview", close() {} });
 export function isPlasmaDesktop(names: (string | undefined)[]) {
@@ -45,7 +46,9 @@ export class PlasmaDesktop implements Desktop {
   private connected = false;
   private lockedSince = 0;
   private destinations = new NativeDestinations();
-  constructor(private helper: string) {}
+  constructor(private helper: string) {
+    this.destinations.warm(helper);
+  }
 
   async monitorSession(unsafe: () => void): Promise<void> {
     if (process.env.XDG_SESSION_TYPE !== "wayland")
@@ -198,11 +201,14 @@ export class PlasmaDesktop implements Desktop {
     this.notifier.notify(title, body);
   }
 
-  async capture(): Promise<Destination> {
+  async capture(method: TextInsertionMethod = "automatic"): Promise<Destination> {
     const startedAt = Date.now();
     if (!(await this.unlocked(startedAt))) return preview();
-    const destination = await this.destinations.capture(this.helper, "focused");
+    const destination = await this.destinations.capture(this.helper, "focused", method);
     return {
+      get reason() {
+        return destination.reason;
+      },
       close: () => destination.close(),
       deliver: async (text, held) => {
         if (!(await this.unlocked(startedAt))) {

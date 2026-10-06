@@ -23,9 +23,11 @@ target_compile_options(dictaduo-gui PRIVATE -Wall -Wextra -Werror)
 install(TARGETS dictaduo-gui RUNTIME DESTINATION bin)
 install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/../../../build/linux-client/dictaduo"
                  "${CMAKE_CURRENT_SOURCE_DIR}/../../../build/linux-client/dictaduo-destination"
+                 "${CMAKE_CURRENT_SOURCE_DIR}/../../../build/linux-client/dictaduo-type"
         DESTINATION bin)
 install(FILES dictaduo.desktop DESTINATION share/applications)
 install(FILES mark.svg DESTINATION share/icons/hicolor/scalable/apps RENAME dictaduo.svg)
+install(FILES "../native/virtual-keyboard-unstable-v1.xml" DESTINATION share/licenses/dictaduo)
 
 include(CTest)
 if(BUILD_TESTING)
