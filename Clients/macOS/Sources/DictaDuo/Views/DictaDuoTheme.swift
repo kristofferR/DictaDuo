@@ -2,20 +2,22 @@ import AppKit
 import SwiftUI
 
 enum DictaDuoPalette {
-    // Glacier is the dark counterpart to DictaDuo's unchanged warm light palette.
-    static let ink = adaptive(light: 0x352D3A, dark: 0xEDF5FA, contrastLight: 0x241E28, contrastDark: 0xFFFFFF)
-    static let muted = adaptive(light: 0x766D78, dark: 0xA4B8C7, contrastLight: 0x514955, contrastDark: 0xDAEAF5)
+    // Graphite's warm accents adapt for readable controls; the app icon uses its shared renderer.
+    static let logo = adaptive(light: DictaDuoArtwork.ink, dark: DictaDuoArtwork.ivory,
+                               contrastLight: 0x10141C, contrastDark: 0xFFFFFF)
+    static let ink = adaptive(light: DictaDuoArtwork.ink, dark: 0xEDF5FA, contrastLight: 0x10141C, contrastDark: 0xFFFFFF)
+    static let muted = adaptive(light: 0x606875, dark: 0xA4B8C7, contrastLight: 0x424A58, contrastDark: 0xDAEAF5)
     static let faint = muted
     static let canvas = adaptive(light: 0xF8F6F2, dark: 0x1B252E)
     // Opaque equivalents of the mockup's raised glass layers keep long text legible.
     static let surface = adaptive(light: 0xFFFDF9, dark: 0x222C35)
     static let sidebar = adaptive(light: 0xEDE8E4, dark: 0x2B3E4D)
-    static let tint = adaptive(light: 0xEEE2DE, dark: 0xB2DFFF, darkAlpha: 0.08, contrastDark: 0x3A5265)
+    static let tint = adaptive(light: 0xF8E7D2, dark: DictaDuoArtwork.darkAccent, darkAlpha: 0.08, contrastDark: 0x5A4A32)
     static let line = adaptive(light: 0xE5DFE1, dark: 0x485B6B, contrastLight: 0x8F8190, contrastDark: 0xA6C1D5)
-    static let accent = adaptive(light: 0xC5513E, dark: 0xA7D6F5, contrastLight: 0xA93F2F, contrastDark: 0xD2ECFF)
-    /// A slightly deeper light-appearance vermilion keeps small text legible.
-    static let accentInk = adaptive(light: 0xB44634, dark: 0xA7D6F5, contrastLight: 0x963325, contrastDark: 0xD2ECFF)
-    static let onAccent = adaptive(light: 0xFFFFFF, dark: 0x192C3A)
+    static let accent = adaptive(light: DictaDuoArtwork.accent, dark: DictaDuoArtwork.darkAccent,
+                                 contrastLight: 0x71350F, contrastDark: 0xFFE4AC)
+    static let accentInk = accent
+    static let onAccent = adaptive(light: DictaDuoArtwork.ivory, dark: DictaDuoArtwork.ink)
     static let glassTint = adaptive(light: 0xF8F6F2, dark: 0x223949)
     static let success = Color(nsColor: .systemGreen)
     static let warning = Color(nsColor: .systemOrange)
@@ -106,11 +108,11 @@ struct DictaDuoMenuSurface: View {
 }
 
 struct DictaDuoMark: View {
-    var color: Color = DictaDuoPalette.ink
+    var color: Color = DictaDuoPalette.logo
     var size: CGFloat = 26
 
     var body: some View {
-        DictaDuoRibbon()
+        DictaDuoInkflow(small: size <= 24)
             .fill(color)
             .frame(width: size, height: size)
             .accessibilityHidden(true)

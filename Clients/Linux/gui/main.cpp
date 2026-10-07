@@ -7,15 +7,19 @@
 #include <QCommandLineParser>
 #include <QDateTime>
 #include <QDir>
+#include <QEvent>
 #include <QIcon>
 #include <QMenu>
 #include <QPainter>
+#include <QPalette>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QSvgRenderer>
 #include <QSystemTrayIcon>
 #include <QTimer>
+#include <algorithm>
 
 namespace {
 QIcon dot(const QColor &color) {
@@ -28,22 +32,90 @@ QIcon dot(const QColor &color) {
   painter.drawEllipse(QRectF(3, 3, 6, 6));
   return QIcon(pixmap);
 }
-/** The tray mark with a static recording dot in its corner; no animation. */
-QIcon recordingIcon(const QIcon &mark) {
+// The panel can use a different background from application windows. Keep a
+// narrow opposite-color edge around the monochrome symbol as a contrast fallback.
+QIcon trayIcon(bool lightInk, bool recording) {
+  QSvgRenderer ink(lightInk ? QStringLiteral(":/qt/qml/DictaDuo/mark-symbolic-light.svg")
+                            : QStringLiteral(":/qt/qml/DictaDuo/mark-symbolic.svg"));
+  QSvgRenderer edge(lightInk ? QStringLiteral(":/qt/qml/DictaDuo/mark-symbolic.svg")
+                             : QStringLiteral(":/qt/qml/DictaDuo/mark-symbolic-light.svg"));
+  ink.setAspectRatioMode(Qt::KeepAspectRatio);
+  edge.setAspectRatioMode(Qt::KeepAspectRatio);
   QIcon icon;
-  for (const int size : {16, 22, 24, 32, 48, 64}) {
-    QPixmap pixmap = mark.pixmap(size, size);
+  for (const int size : {16, 20, 22, 24, 32, 40, 44, 48, 64, 96, 128}) {
+    // These are physical-pixel representations, including 2x tray sizes.
+    // Render the SVG directly so QIcon cannot supply a pixmap with a different DPR.
+    QPixmap pixmap(size, size);
+    pixmap.setDevicePixelRatio(1);
+    pixmap.fill(Qt::transparent);
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing);
-    const qreal diameter = size * 0.46;
-    painter.setPen(QPen(QColor("#ffffff"), std::max(1.0, size / 16.0)));
-    painter.setBrush(QColor("#e5484d"));
-    painter.drawEllipse(QRectF(size - diameter - 0.5, size - diameter - 0.5,
-                               diameter, diameter));
+    const qreal halo = std::max(0.6, size / 32.0);
+    const qreal margin = halo + 0.5;
+    const QRectF bounds(margin, margin, size - 2 * margin, size - 2 * margin);
+    painter.setOpacity(0.85);
+    for (const int x : {-1, 0, 1})
+      for (const int y : {-1, 0, 1})
+        if (x != 0 || y != 0)
+          edge.render(&painter, bounds.translated(x * halo, y * halo));
+    painter.setOpacity(1);
+    ink.render(&painter, bounds);
+    if (recording) {
+      // Keep the static recording badge below the mark's written line.
+      const qreal diameter = size * 0.34;
+      const qreal outline = std::max(1.0, size / 16.0);
+      const qreal inset = outline / 2 + 0.5;
+      painter.setPen(QPen(QColor("#ffffff"), outline));
+      painter.setBrush(QColor("#e5484d"));
+      painter.drawEllipse(QRectF(size - diameter - inset, size - diameter - inset,
+                                 diameter, diameter));
+    }
+    painter.end();
     icon.addPixmap(pixmap);
   }
   return icon;
 }
+
+class BrandTrayIcon : public QSystemTrayIcon {
+public:
+  BrandTrayIcon() {
+    qApp->installEventFilter(this);
+    updateAppearance();
+  }
+
+  void setRecording(bool recording) {
+    if (m_recording == recording)
+      return;
+    m_recording = recording;
+    setIcon(m_recording ? m_recordingIcon : m_restingIcon);
+  }
+
+protected:
+  bool eventFilter(QObject *, QEvent *event) override {
+    if (event->type() == QEvent::ApplicationPaletteChange)
+      updateAppearance();
+    return false;
+  }
+
+private:
+  void updateAppearance() {
+    // QML's local palette and Bridge's theme preference do not change this
+    // desktop palette. A light app on a dark desktop keeps a light tray mark.
+    const bool lightInk =
+        qApp->palette().color(QPalette::WindowText).lightnessF() > 0.5;
+    if (!m_restingIcon.isNull() && m_lightInk == lightInk)
+      return;
+    m_lightInk = lightInk;
+    m_restingIcon = trayIcon(lightInk, false);
+    m_recordingIcon = trayIcon(lightInk, true);
+    setIcon(m_recording ? m_recordingIcon : m_restingIcon);
+  }
+
+  bool m_recording = false;
+  bool m_lightInk = false;
+  QIcon m_restingIcon;
+  QIcon m_recordingIcon;
+};
 } // namespace
 
 int main(int argc, char **argv) {
@@ -59,6 +131,7 @@ int main(int argc, char **argv) {
   app.setOrganizationName("DictaDuo");
   app.setApplicationName("DictaDuo");
   app.setDesktopFileName("dictaduo");
+  app.setWindowIcon(QIcon(":/qt/qml/DictaDuo/mark.svg"));
   QCommandLineParser parser;
   parser.setApplicationDescription("DictaDuo for Linux");
   parser.addHelpOption();
@@ -121,9 +194,7 @@ int main(int argc, char **argv) {
   auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
   if (!window)
     return 1;
-  const QIcon markIcon(":/qt/qml/DictaDuo/mark.svg");
-  const QIcon recordingMark = recordingIcon(markIcon);
-  QSystemTrayIcon tray(markIcon);
+  BrandTrayIcon tray;
   QMenu menu;
   menu.setToolTipsVisible(true);
   auto *status = menu.addAction("Checking server");
@@ -165,11 +236,9 @@ int main(int argc, char **argv) {
           : "Closes this window and the tray. Dictation keeps running in the "
             "background.");
   // Icons are only replaced when they change, since each update reaches the tray host.
-  auto recordingShown = std::make_shared<bool>(false);
   auto statusColor = std::make_shared<QString>("unset");
   auto updateTray = [&bridge, &menu, &tray, window, status, undo, finish,
-                     cancel, start, copyLast, markIcon, recordingMark,
-                     recordingShown, statusColor] {
+                     cancel, start, copyLast, statusColor] {
     const auto snapshot = bridge.snapshot();
     const auto activity = snapshot.value("activity").toMap();
     const QString phase = activity.value("phase").toString();
@@ -203,10 +272,7 @@ int main(int argc, char **argv) {
     menu.setDefaultAction(undoOpen    ? undo
                           : recording ? finish
                                       : nullptr);
-    if (*recordingShown != recording) {
-      *recordingShown = recording;
-      tray.setIcon(recording ? recordingMark : markIcon);
-    }
+    tray.setRecording(recording);
   };
   QObject::connect(&menu, &QMenu::aboutToShow, &app, updateTray);
   QObject::connect(&bridge, &Bridge::snapshotChanged, &app, updateTray);

@@ -108,16 +108,16 @@ void Bridge::updateColors() {
       dark ? QVariantMap{{"ink", "#edf5fa"},     {"muted", "#a4b8c7"},
                          {"canvas", "#1b252e"},  {"surface", "#222c35"},
                          {"sidebar", "#2b3e4d"}, {"line", "#485b6b"},
-                         {"accent", "#a7d6f5"},  {"onAccent", "#192c3a"},
-                         {"tint", "#304452"},    {"ok", "#9fdcb6"},
+                         {"accent", "#f6c263"},  {"onAccent", "#141c26"},
+                         {"tint", "#3b494f"},    {"ok", "#9fdcb6"},
                          {"okTint", "#23392f"},  {"warning", "#f0cf8f"},
                          {"warningTint", "#3b3324"}, {"error", "#f1a7a7"},
                          {"errorTint", "#40282b"}}
-           : QVariantMap{{"ink", "#352d3a"},     {"muted", "#766d78"},
+           : QVariantMap{{"ink", "#141c26"},     {"muted", "#606875"},
                          {"canvas", "#f8f6f2"},  {"surface", "#fffdf9"},
                          {"sidebar", "#ede8e4"}, {"line", "#d5cdd1"},
-                         {"accent", "#b44634"},  {"onAccent", "#ffffff"},
-                         {"tint", "#eee2de"},    {"ok", "#2f6b45"},
+                         {"accent", "#965222"},  {"onAccent", "#fff8ec"},
+                         {"tint", "#f8e7d2"},    {"ok", "#2f6b45"},
                          {"okTint", "#e2eee5"},  {"warning", "#85550f"},
                          {"warningTint", "#f6ead3"}, {"error", "#a23b2c"},
                          {"errorTint", "#f5deda"}};
@@ -180,9 +180,18 @@ void Bridge::updateColors() {
                 {"errorTint", blend(bg, error, .14).name()}};
       note = "Following the active Omarchy palette.";
     } else
-      note = "Omarchy colors unavailable. Using Glacier until a palette is "
+      note = "Omarchy colors unavailable. Using Graphite until a palette is "
              "available.";
   }
+  // Select monochrome artwork against its actual surface, including custom
+  // Omarchy colors; the app's light/dark preference alone is not sufficient.
+  const auto prefersLightInk = [](const QVariant &background) {
+    const QColor surface(background.toString());
+    return contrast(surface, QColor("#fff8ec")) >
+           contrast(surface, QColor("#141c26"));
+  };
+  colors.insert("lightWordmark", prefersLightInk(colors.value("sidebar")));
+  colors.insert("lightSymbol", prefersLightInk(colors.value("surface")));
   if (colors != m_colors || note != m_themeNote) {
     m_colors = colors;
     m_themeNote = note;

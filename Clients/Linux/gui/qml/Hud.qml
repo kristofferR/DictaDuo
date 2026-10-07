@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Controls
 import QtQuick.Layouts
 import DictaDuo.Native 1.0
@@ -47,12 +48,16 @@ Window {
                 levels: hud.ui.feedback.levels || []
                 visible: hud.phase === "recording"
             }
-            SLabel {
-                ui: hud.ui
+            Image {
+                objectName: "brandSymbol"
                 visible: hud.phase !== "recording"
-                text: "≋"
-                color: hud.ui.c.accent
-                font.pixelSize: 22
+                source: hud.ui.c.lightSymbol ? "../mark-symbolic-light.svg" : "../mark-symbolic.svg"
+                Layout.preferredWidth: 24
+                Layout.preferredHeight: 24
+                fillMode: Image.PreserveAspectFit
+                sourceSize.width: Math.ceil(width * Screen.devicePixelRatio)
+                sourceSize.height: Math.ceil(height * Screen.devicePixelRatio)
+                Accessible.ignored: true
             }
             ColumnLayout {
                 Layout.fillWidth: true

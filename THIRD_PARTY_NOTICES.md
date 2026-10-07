@@ -1,5 +1,13 @@
 # Third-party notices
 
+## DictaDuo wordmark and proof labels
+
+The Inkflow wordmark and outlined labels in the asset proof use **Noto Sans Bold 2.015**,
+copyright 2022 The Noto Project Authors, under the **SIL Open Font License 1.1**.
+The wordmark preserves its glyph outlines with custom spacing.
+The complete license and font provenance are in [Resources/Brand/FONT-LICENSE.txt](Resources/Brand/FONT-LICENSE.txt).
+The shipped artwork contains vector outlines; no font binary is bundled.
+
 ## Optional Linux capture helper
 
 The separately enabled `dictaduo-capture` helper dynamically links system **PipeWire** (MIT), **libsamplerate** (BSD-2-Clause), and **libusb** (LGPL-2.1-or-later). Their shared libraries remain supplied and replaceable by the system package manager; they are not copied into DictaDuo packages. Corresponding sources and licenses are available from [PipeWire](https://gitlab.freedesktop.org/pipewire/pipewire), [libsamplerate](https://github.com/libsndfile/libsamplerate), and [libusb](https://github.com/libusb/libusb). License texts accompany the helper in `resources/linux-capture-LICENSE.txt`.
