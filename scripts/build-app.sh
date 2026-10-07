@@ -38,6 +38,7 @@ cp "$swift_bin/DictaDuo" "$staged_app/Contents/MacOS/DictaDuo"
 cp "$info_plist" "$staged_app/Contents/Info.plist"
 cp Resources/swift-openapi-runtime-LICENSE.txt Resources/swift-http-types-LICENSE.txt \
     THIRD_PARTY_NOTICES.md "$staged_app/Contents/Resources/"
+cp Resources/Brand/FONT-LICENSE.txt "$staged_app/Contents/Resources/brand-font-LICENSE.txt"
 swift scripts/make-icon.swift "$project_dir/.build/DictaDuo.iconset"
 iconutil -c icns .build/DictaDuo.iconset -o "$staged_app/Contents/Resources/DictaDuo.icns"
 

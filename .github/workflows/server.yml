@@ -23,6 +23,8 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
+      - name: Verify shared Inkflow artwork is current
+        run: bun run brand:check
       - run: bun run fmt:check
       - run: bun run check
       - run: bun run test
@@ -65,6 +67,10 @@ jobs:
       - run: bun run generate:api --check
       - name: Test Swift packages without launching the client
         run: swift test
+      - name: Verify native macOS Inkflow icon export
+        run: |
+          swift scripts/make-icon.swift .build/Inkflow.iconset
+          iconutil -c icns .build/Inkflow.iconset -o .build/Inkflow.icns
 
   coordinator:
     name: Compiled server (${{ matrix.target }})

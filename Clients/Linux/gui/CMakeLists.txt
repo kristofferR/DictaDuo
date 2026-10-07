@@ -13,7 +13,7 @@ qt_add_executable(dictaduo-gui main.cpp Bridge.cpp Bridge.h HudSurface.cpp HudSu
 qt_add_qml_module(dictaduo-gui URI DictaDuo VERSION 1.0 QML_FILES
   qml/Main.qml qml/SButton.qml qml/SLabel.qml qml/StatusDot.qml qml/Group.qml qml/Setting.qml qml/Dictation.qml qml/MicrophoneTestButton.qml
   qml/History.qml qml/HistoryDetail.qml qml/HistoryChip.qml qml/Microphone.qml qml/Preferences.qml qml/DictionaryEditor.qml qml/Computer.qml qml/Hud.qml qml/DjiSettings.qml qml/LevelMeter.qml qml/ShortcutSettings.qml qml/PortalShortcutSettings.qml qml/ConnectionSettings.qml
-  RESOURCES mark.svg preview.json)
+  RESOURCES mark.svg mark-symbolic.svg mark-symbolic-light.svg wordmark.svg wordmark-light.svg preview.json)
 target_link_libraries(dictaduo-gui PRIVATE Qt6::Quick Qt6::QuickControls2 Qt6::Widgets Qt6::Network Qt6::Svg Qt6::DBus LayerShellQt::Interface)
 if(LIBPORTAL_FOUND)
   target_link_libraries(dictaduo-gui PRIVATE PkgConfig::LIBPORTAL)
@@ -31,7 +31,9 @@ install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/../../../build/linux-client/dictad
         DESTINATION bin)
 install(FILES dictaduo.desktop DESTINATION share/applications)
 install(FILES mark.svg DESTINATION share/icons/hicolor/scalable/apps RENAME dictaduo.svg)
+install(FILES mark-symbolic.svg DESTINATION share/icons/hicolor/scalable/apps RENAME dictaduo-symbolic.svg)
 install(FILES "../native/virtual-keyboard-unstable-v1.xml" "../native/input-method-unstable-v2.xml" "../native/wlr-data-control-unstable-v1.xml" "../native/ext-data-control-v1.xml" DESTINATION share/licenses/dictaduo)
+install(FILES "../../../Resources/Brand/FONT-LICENSE.txt" DESTINATION share/licenses/dictaduo RENAME brand-font-LICENSE.txt)
 
 include(CTest)
 if(BUILD_TESTING)

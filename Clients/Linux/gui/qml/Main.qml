@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import QtQuick.Controls
 import QtQuick.Layouts
 
@@ -342,6 +343,7 @@ ApplicationWindow {
                 anchors.margins: 20
                 spacing: 8
                 RowLayout {
+                    Layout.fillWidth: true
                     Layout.topMargin: 14
                     Layout.bottomMargin: 34
                     spacing: 12
@@ -349,13 +351,23 @@ ApplicationWindow {
                         source: "../mark.svg"
                         Layout.preferredWidth: 44
                         Layout.preferredHeight: 44
+                        sourceSize.width: Math.ceil(width * Screen.devicePixelRatio)
+                        sourceSize.height: Math.ceil(height * Screen.devicePixelRatio)
+                        Accessible.ignored: true
                     }
-                    SLabel {
-                        ui: app
-                        text: "DictaDuo"
-                        font.family: "Serif"
-                        font.pixelSize: 37
-                        font.weight: Font.DemiBold
+                    Image {
+                        objectName: "brandWordmark"
+                        source: app.c.lightWordmark ? "../wordmark-light.svg" : "../wordmark.svg"
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 138
+                        Layout.minimumWidth: 0
+                        Layout.preferredHeight: 32
+                        fillMode: Image.PreserveAspectFit
+                        horizontalAlignment: Image.AlignLeft
+                        sourceSize.width: Math.ceil(width * Screen.devicePixelRatio)
+                        sourceSize.height: Math.ceil(height * Screen.devicePixelRatio)
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: "DictaDuo"
                     }
                 }
                 Repeater {

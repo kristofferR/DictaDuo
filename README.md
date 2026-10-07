@@ -1,8 +1,10 @@
 <p align="center">
-  <img src="Clients/Linux/gui/mark.svg" width="128" height="128" alt="DictaDuo app icon">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/dictaduo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/dictaduo-light.svg">
+    <img src="docs/images/dictaduo-light.svg" width="420" alt="DictaDuo — the Inkflow pulse and wordmark, in graphite and gold">
+  </picture>
 </p>
-
-<h1 align="center">DictaDuo</h1>
 
 <p align="center">
   <strong>One dictation server for your Mac and your Linux desktop.</strong><br>
@@ -220,7 +222,7 @@ Server/        Production TypeScript server, API contract, and native capture
   Swift/       Reference Swift server and parity tests
 Engine/        Whisper inference helper
 TextEngine/    Qwen inference helpers
-Resources/     Shared third-party license files
+Resources/     Shared brand sources, generated artwork, and third-party licenses
 scripts/       Build, development, and validation entry points
 docs/          Architecture and setup guides
 ```
@@ -240,6 +242,7 @@ workspaces. Build outputs stay in `build/` and `.build/`.
 - [Architecture and storage](docs/architecture.md)
 - [HTTP API](docs/client-server-contract.md)
 - [Whisper helper](Engine/README.md) and [Qwen helpers](TextEngine/README.md)
+- [Inkflow / Graphite identity, editable sources, and platform exports](Resources/Brand/README.md)
 
 ## Support and contributing
 

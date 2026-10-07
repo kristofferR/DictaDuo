@@ -29,10 +29,12 @@ struct DictaDuoWindowView: View {
             VStack(spacing: 16) {
                 HStack(spacing: 12) {
                     DictaDuoAppIcon(size: 36)
-                    Text("DictaDuo").font(.system(size: 27, weight: .regular, design: .serif))
-                    DevBadge()
-                    Spacer(minLength: 0)
+                    VStack(alignment: .leading, spacing: 4) {
+                        DictaDuoWordmark(height: 21)
+                        DevBadge()
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 18)
                 .padding(.top, 22)
 

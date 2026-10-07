@@ -167,7 +167,7 @@ final class NativeIntegrationTests: XCTestCase {
     }
 
     @MainActor
-    func testGlacierTextRemainsLegibleOnReadingAndOpaqueFallbackSurfaces() throws {
+    func testGraphiteTextRemainsLegibleOnReadingAndOpaqueFallbackSurfaces() throws {
         let app = NSApplication.shared
         let previousAppearance = app.appearance
         defer { app.appearance = previousAppearance }
@@ -180,7 +180,12 @@ final class NativeIntegrationTests: XCTestCase {
                     return result + linear * weight
                 }
         }
-        for appearanceName in [NSAppearance.Name.darkAqua, .accessibilityHighContrastDarkAqua] {
+        func contrast(_ first: NSColor, _ second: NSColor) -> CGFloat {
+            (max(luminance(first), luminance(second)) + 0.05) /
+                (min(luminance(first), luminance(second)) + 0.05)
+        }
+        for appearanceName in [NSAppearance.Name.aqua, .darkAqua,
+                               .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua] {
             let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
             // The SwiftUI Color → NSColor bridge also consults the application
             // appearance; a drawing-only override does not carry its contrast.
@@ -196,15 +201,67 @@ final class NativeIntegrationTests: XCTestCase {
             for background in backgrounds {
                 let surface = try resolve(background)
                 XCTAssertEqual(surface.alphaComponent, 1, "Accessibility fallbacks must not read through the desktop")
-                for foreground in [DictaDuoPalette.ink, DictaDuoPalette.muted, DictaDuoPalette.accentInk] {
+                for foreground in [DictaDuoPalette.logo, DictaDuoPalette.ink,
+                                   DictaDuoPalette.muted, DictaDuoPalette.accentInk] {
                     let ink = try resolve(foreground)
-                    let lighter = max(luminance(ink), luminance(surface))
-                    let darker = min(luminance(ink), luminance(surface))
-                    XCTAssertGreaterThanOrEqual((lighter + 0.05) / (darker + 0.05), 4.5,
+                    XCTAssertGreaterThanOrEqual(contrast(ink, surface), 4.5,
                                                "Small text must remain readable in \(appearanceName)")
                 }
             }
+            XCTAssertGreaterThanOrEqual(contrast(try resolve(DictaDuoPalette.onAccent),
+                                                 try resolve(DictaDuoPalette.accent)), 4.5,
+                                       "Primary button labels must remain readable in \(appearanceName)")
         }
+    }
+
+    @MainActor
+    func testPortableBrandRendererFitsCanvasAndTranslatesGradientWithClip() throws {
+        let source = """
+        {"canvas":100,"paths":{
+          "box":[{"op":"M","values":[0,0]},{"op":"L","values":[100,0]},
+                 {"op":"L","values":[100,100]},{"op":"L","values":[0,100]},{"op":"Z","values":[]}],
+          "half":[{"op":"M","values":[0,0]},{"op":"L","values":[50,0]},
+                  {"op":"L","values":[50,100]},{"op":"L","values":[0,100]},{"op":"Z","values":[]}]},
+         "paints":{"sweep":{"kind":"linear","from":[0,0],"to":[50,0],
+                     "stops":[{"offset":0,"color":"#FF0000"},{"offset":1,"color":"#0000FF"}]}},
+         "layers":[{"path":"box","paint":"sweep","mode":"fill","offset":[10,0],"clip":"half"}]}
+        """
+        let model = try JSONDecoder().decode(BrandIconRenderer.Model.self, from: Data(source.utf8))
+        let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try XCTUnwrap(CGContext(data: nil, width: 140, height: 80, bitsPerComponent: 8,
+                                             bytesPerRow: 140 * 4, space: space,
+                                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.clear(CGRect(x: 0, y: 0, width: 140, height: 80))
+        context.translateBy(x: 0, y: 80)
+        context.scaleBy(x: 1, y: -1)
+        let rect = CGRect(x: 10, y: 0, width: 120, height: 80)
+        let transform = context.ctm
+        let clip = context.boundingBoxOfClipPath
+
+        // A late invalid reference must reject the entire model before the
+        // earlier valid layer can leave a partially rendered export behind.
+        let missing = BrandIconRenderer.Layer(path: "missing", paint: "sweep", mode: "fill",
+                                               width: nil, offset: nil, clip: nil)
+        let invalid = BrandIconRenderer.Model(canvas: model.canvas, paths: model.paths,
+                                               paints: model.paints, layers: model.layers + [missing])
+        XCTAssertThrowsError(try BrandIconRenderer.draw(invalid, in: rect, context: context))
+        let untouched = NSBitmapImageRep(cgImage: try XCTUnwrap(context.makeImage()))
+        XCTAssertEqual(try XCTUnwrap(untouched.colorAt(x: 42, y: 40)).alphaComponent, 0)
+
+        try BrandIconRenderer.draw(model, in: rect, context: context)
+        XCTAssertEqual(context.ctm, transform)
+        XCTAssertEqual(context.boundingBoxOfClipPath, clip)
+        let bitmap = NSBitmapImageRep(cgImage: try XCTUnwrap(context.makeImage()))
+        let left = try XCTUnwrap(bitmap.colorAt(x: 42, y: 40)?.usingColorSpace(.sRGB))
+        let right = try XCTUnwrap(bitmap.colorAt(x: 74, y: 40)?.usingColorSpace(.sRGB))
+        XCTAssertGreaterThan(left.alphaComponent, 0.99)
+        XCTAssertGreaterThan(right.alphaComponent, 0.99)
+        XCTAssertGreaterThan(left.redComponent, left.blueComponent)
+        XCTAssertGreaterThan(right.blueComponent, right.redComponent)
+        // Uniform fitting leaves a centered 80px canvas; translating its half
+        // clip places the visible gradient between x=38 and x=78.
+        XCTAssertEqual(try XCTUnwrap(bitmap.colorAt(x: 34, y: 40)).alphaComponent, 0)
+        XCTAssertEqual(try XCTUnwrap(bitmap.colorAt(x: 82, y: 40)).alphaComponent, 0)
     }
 
     @MainActor
