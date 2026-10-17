@@ -1,6 +1,7 @@
 # DictaDuo Linux GUI design exploration
 
-Ref #10. Published gallery: https://plans.kristofferr.com/d/fo12u4el8h2x
+Ref #10. Earlier published exploration: https://plans.kristofferr.com/d/fo12u4el8h2x.
+The repository gallery below carries the current Inkflow / Graphite artwork. The earlier published exploration is a separate deployment and may show older branding.
 
 ## Brief
 
@@ -10,11 +11,11 @@ The gallery contains 16 direction screens, six full reference screens, three ove
 
 Approved: direction A. The H1 capsule remains the Mac-style live feedback direction. A preserves the sidebar order Dictation, History, Microphone, Server preferences, This computer. H1 stays close to the Mac feedback capsule. Use the explicit recovery copy shown in the gallery regardless of the chosen visual direction.
 
-The palette and ribbon mark come from the existing DictaDuo sources, not from Omarchy. Window-control position is illustrative; native decorations and compositor capabilities are independent of product styling. No decorative continuous animation is proposed.
+The gallery uses the Inkflow / Graphite identity from `Resources/Brand`: the original long speech-pulse outline, outlined DictaDuo name, and graphite tile with a gold-to-copper material. The silhouette keeps its 2.08294:1 ink proportion in every placement. Gradients, highlights, and layered shadows come from the generated app SVG; the gallery does not redraw the tile or reshape the pulse to fit a square. The familiar layout and reference screens use deep copper accents in light appearance and gold in dark appearance. Earlier alternative layouts and theme palettes remain available as design history. Window-control position is illustrative; native decorations and compositor capabilities are independent of product styling. No decorative continuous animation is proposed.
 
 ## Selected appearance behavior
 
-Keep A’s layout for all themes. Offer DictaDuo warm light, Glacier dark, follow-system, and an optional Omarchy appearance. Kris explicitly selected following the active Omarchy palette. Read its colors without modifying desktop configuration; fall back to Glacier if the palette is missing or invalid.
+Keep A’s layout for all themes. Offer DictaDuo warm light and Graphite dark with Inkflow accents, follow-system, and an optional Omarchy appearance. The user-visible dark label is Graphite; stored appearance identifiers remain compatible. Kris explicitly selected following the active Omarchy palette. Read its colors without modifying desktop configuration; fall back to Graphite if the palette is missing or invalid. The app icon uses the same Graphite finish on both platforms. Its outline and the wordmark geometry stay consistent across appearances.
 
 ## Cotto assessment
 
@@ -77,4 +78,6 @@ The foundation is [PR #13](https://github.com/kristofferR/dictaduo/pull/13), sta
 
 ## Rebuild and review
 
-Run `bun docs/design/build-linux-gallery.mjs`. It writes the self-contained `linux-gui-gallery.html`. The file remains below the HTML communication 512 KB limit and has no external assets, forms, network requests or live product controls. Gallery interactions cover theme selection, shortlisting and filtering. Publish the same local path to preserve the gallery URL. Browser checks cover the rendered desktop layouts, light/dark switching, shortlist persistence, filtering and narrow-screen document overflow.
+Run `node scripts/generate-brand.mjs`, then `node docs/design/build-linux-gallery.mjs`. The gallery builder verifies generated-asset freshness before reading `generated/app-icon.svg`, the canonical `inkflow.svg`, `wordmark.svg`, and `brand.json` from `Resources/Brand`. It writes the self-contained `linux-gui-gallery.html`; all paths resolve relative to the script. Each vector is embedded once as an SVG symbol. Definition IDs and their references are prefixed together so gradients and reused shadow geometry remain intact, and the original mark is scaled uniformly. See the [Inkflow / Graphite identity guide](../../Resources/Brand/README.md) for editable artwork, the shared native renderer, and platform exports.
+
+The generated file has no external assets, forms, network requests or live product controls. Gallery interactions cover theme selection, shortlisting and filtering. Rebuilding it updates the repository file only. Browser checks cover rendered desktop layouts, light/dark switching, shortlist persistence, filtering, SVG definition references, and narrow-screen document overflow. The gallery is a visual reference; native Qt and macOS captures are validated separately.

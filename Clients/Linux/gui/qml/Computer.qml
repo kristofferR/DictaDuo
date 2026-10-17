@@ -34,7 +34,7 @@ ScrollView {
                 detail: "Only this computer. All themes use the same layout."
                 ComboBox {
                     implicitWidth: 245
-                    model: ["Follow system", "DictaDuo · Warm light", "DictaDuo · Glacier dark", "Omarchy · Active theme"]
+                    model: ["Follow system", "DictaDuo · Warm light", "DictaDuo · Graphite dark", "Omarchy · Active theme"]
                     currentIndex: ["system", "light", "dark", "omarchy"].indexOf(bridge.theme)
                     onActivated: bridge.theme = ["system", "light", "dark", "omarchy"][currentIndex]
                 }

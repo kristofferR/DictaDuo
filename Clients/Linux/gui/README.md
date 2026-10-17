@@ -1,6 +1,8 @@
 # DictaDuo for Linux
 
-Direction A of the [design gallery](https://plans.kristofferr.com/d/fo12u4el8h2x), implemented in Qt Quick. The familiar five-page sidebar, shared preferences and compact dictation capsule stay consistent across themes.
+DictaDuo's Qt Quick client uses the Graphite finish of the shared Inkflow
+identity, a five-page sidebar, shared preferences and a compact dictation
+capsule. The layout stays consistent across themes.
 
 ## Build and run
 
@@ -42,11 +44,45 @@ Build the Linux client first, then install the GUI, matching client, destination
 
 Choose a theme in **This computer → Appearance**:
 
-- Follow system: selects DictaDuo warm light or Glacier dark using Qt's color scheme hint.
-- DictaDuo warm light / Glacier dark: the approved Mac-like palette.
-- Omarchy: reads the active `colors.toml` from `$XDG_STATE_HOME/omarchy/current/theme` (default `~/.local/state`), with compatibility for `~/.config/omarchy/current/theme`. Only literal six-digit hex color assignments are consumed. Missing or unsupported palettes fall back to Glacier with a visible explanation. Background, foreground and accent drive semantic colors, with contrast correction for unreadable foregrounds/accents. A palette change is picked up within three seconds.
+- Follow system: selects DictaDuo warm light or Graphite dark using Qt's color scheme hint.
+- DictaDuo warm light / Graphite dark: neutral surfaces with deep copper accents in light mode and gold accents in dark mode. Primary buttons use ivory text on deep copper or graphite text on gold.
+- Omarchy: reads the active `colors.toml` from `$XDG_STATE_HOME/omarchy/current/theme` (default `~/.local/state`), with compatibility for `~/.config/omarchy/current/theme`. Only literal six-digit hex color assignments are consumed. Missing or unsupported palettes fall back to Graphite with a visible explanation. Background, foreground and accent drive semantic colors, with contrast correction for unreadable foregrounds/accents. A palette change is picked up within three seconds.
 
 The theme selection is local to the GUI. Reading Omarchy colors does not write theme files, install hooks or require Omarchy on other distributions. It uses the same layout and controls as the DictaDuo themes.
+
+### Brand assets
+
+The application icon, outlined DictaDuo name and monochrome Inkflow symbol share
+the editable vector masters in [Resources/Brand](../../../Resources/Brand/README.md).
+The application icon pairs a charcoal tile with the gold-to-copper mark. Its
+finish uses ordinary vector paths and gradients supported by QtSvg.
+The sidebar and passive capsule choose ink or ivory artwork by contrast with
+their actual background, including custom Omarchy colors. The name uses
+outlined lettering so its shape does not depend on installed fonts.
+
+The tray uses the small Inkflow symbol. Its dominant ink follows the desktop
+palette independently of the window's appearance setting, with a narrow
+opposite-color edge for panels whose background differs from that palette. A
+static red badge indicates recording. The icon is rendered directly from SVG
+at 16–128 physical pixels, including 2× sizes. Its original proportions are
+preserved within the square tray canvas; palette changes refresh it.
+
+CMake embeds the generated SVGs and installs `dictaduo.svg` and
+`dictaduo-symbolic.svg` in the hicolor scalable application-icon directory.
+Keep `Icon=dictaduo` in the launcher and autostart entry. Update the shared
+masters and regenerate platform assets when editing the identity; the SVG
+copies in this directory are exports.
+
+From the repository root, regenerate and verify them with:
+
+```sh
+node scripts/generate-brand.mjs
+node scripts/generate-brand.mjs --check
+```
+
+See the [branding guide](../../../Resources/Brand/README.md) for raster exports
+and platform proofs. The outlined wordmark's font license is installed with
+the other license notices as `share/licenses/dictaduo/brand-font-LICENSE.txt`.
 
 ## Implemented behavior
 
@@ -84,7 +120,14 @@ bun run check
 ctest --test-dir build/linux-gui --output-on-failure
 QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
   build/linux-gui/dictaduo-gui --preview --theme dark --capture .local/gui/dark
+QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
+  build/linux-gui/dictaduo-gui --preview --theme light --capture .local/gui/light
 ```
+
+For branding changes, inspect both captures and a live tray at 16, 22 and 24
+pixels on light and dark panels, including recording. A forced light or dark
+window theme must not change the tray's desktop-derived ink. Check the custom
+Omarchy appearance as well; its foreground and accent remain user-controlled.
 
 `--capture` is limited to preview mode. It renders all five pages into PNGs, then each `states` entry in `preview.json` on the Dictation page (`dictation-<name>.png`), and exits. Qt tests check socket snapshots/disconnection, palette changes/fallback, page rendering without QML warnings, and non-activating overlay flags. Desktop tests use an isolated D-Bus session to verify background startup, duplicate-launch forwarding, missing-bus errors, autostart persistence, preview isolation and write failures. GUI tests retain the microphone-test close guard. Controller tests check that GUI tests cannot insert or select a destination. The opt-in Wayland test below shows the actual capsule twice with synthetic state, without connecting to the client or using a microphone. During the test, inspect `hyprctl -j layers` for `dictaduo-dictation` on layer 3, absence from `hyprctl -j clients`, unchanged tile geometry and unchanged keyboard focus. This does not test RF range.
 

@@ -7,6 +7,9 @@
     "Clients/Linux"
   ],
   "scripts": {
+    "brand:generate": "bun scripts/generate-brand.mjs",
+    "brand:check": "bun scripts/generate-brand.mjs --check",
+    "brand:export": "bun scripts/export-brand.mjs",
     "dev:server": "bun run --cwd Server dev",
     "build:server": "bun run --cwd Server build",
     "generate:api": "bun run --cwd Server generate",

@@ -1,0 +1,267 @@
+{
+  "name": "DictaDuo",
+  "identity": "Inkflow / Graphite",
+  "version": 2,
+  "colors": {
+    "ink": "#141C26",
+    "ivory": "#FFF8EC",
+    "gold": "#F6C263",
+    "copper": "#C9773C",
+    "accent": "#965222",
+    "darkAccent": "#F6C263",
+    "tint": "#F8E7D2"
+  },
+  "icon": {
+    "canvas": 1024,
+    "markBounds": [
+      20,
+      20,
+      960,
+      460.88697
+    ],
+    "markWidth": 752,
+    "markCenter": [
+      512,
+      526
+    ],
+    "smallCanvas": 24,
+    "smallMarkWidth": 22
+  },
+  "sources": {
+    "mark": "inkflow.svg",
+    "tile": "icon-tile.svg",
+    "wordmark": "wordmark.svg"
+  },
+  "material": {
+    "tileGradient": {
+      "kind": "linear",
+      "from": [
+        80,
+        80
+      ],
+      "to": [
+        920,
+        960
+      ],
+      "stops": [
+        {
+          "offset": 0,
+          "color": "#485562"
+        },
+        {
+          "offset": 0.34,
+          "color": "#323E4C"
+        },
+        {
+          "offset": 0.74,
+          "color": "#202A37"
+        },
+        {
+          "offset": 1,
+          "color": "#131B25"
+        }
+      ]
+    },
+    "tileLight": {
+      "kind": "radial",
+      "center": [
+        240,
+        100
+      ],
+      "radius": 880,
+      "stops": [
+        {
+          "offset": 0,
+          "color": "#EAF2FF",
+          "opacity": 0.12
+        },
+        {
+          "offset": 0.7,
+          "color": "#D9E4FF",
+          "opacity": 0.015
+        },
+        {
+          "offset": 1,
+          "color": "#FFFFFF",
+          "opacity": 0
+        }
+      ]
+    },
+    "markGradient": {
+      "kind": "linear",
+      "from": [
+        90,
+        20
+      ],
+      "to": [
+        960,
+        420
+      ],
+      "stops": [
+        {
+          "offset": 0,
+          "color": "#FFE7A6"
+        },
+        {
+          "offset": 0.36,
+          "color": "#F6C263"
+        },
+        {
+          "offset": 0.72,
+          "color": "#E9A04B"
+        },
+        {
+          "offset": 1,
+          "color": "#C9773C"
+        }
+      ]
+    },
+    "markLight": {
+      "kind": "linear",
+      "from": [
+        0,
+        20
+      ],
+      "to": [
+        0,
+        480
+      ],
+      "stops": [
+        {
+          "offset": 0,
+          "color": "#FFFFFF",
+          "opacity": 0.16
+        },
+        {
+          "offset": 0.36,
+          "color": "#FFFFFF",
+          "opacity": 0.015
+        },
+        {
+          "offset": 1,
+          "color": "#FFFFFF",
+          "opacity": 0
+        }
+      ]
+    },
+    "tileRim": {
+      "kind": "linear",
+      "from": [
+        80,
+        64
+      ],
+      "to": [
+        800,
+        960
+      ],
+      "stops": [
+        {
+          "offset": 0,
+          "color": "#DEE8F1",
+          "opacity": 0.5
+        },
+        {
+          "offset": 0.24,
+          "color": "#B9C7D7",
+          "opacity": 0.08
+        },
+        {
+          "offset": 0.72,
+          "color": "#B9C7D7",
+          "opacity": 0
+        },
+        {
+          "offset": 1,
+          "color": "#687786",
+          "opacity": 0.14
+        }
+      ]
+    },
+    "markRim": {
+      "kind": "linear",
+      "from": [
+        100,
+        20
+      ],
+      "to": [
+        800,
+        480
+      ],
+      "stops": [
+        {
+          "offset": 0,
+          "color": "#FFF6D2",
+          "opacity": 0.7
+        },
+        {
+          "offset": 0.5,
+          "color": "#FFF2CD",
+          "opacity": 0.2
+        },
+        {
+          "offset": 1,
+          "color": "#62330D",
+          "opacity": 0.22
+        }
+      ]
+    },
+    "tileShadow": {
+      "color": "#060C15",
+      "offset": [
+        0,
+        16
+      ],
+      "passes": [
+        {
+          "width": 40,
+          "opacity": 0.014
+        },
+        {
+          "width": 30,
+          "opacity": 0.02
+        },
+        {
+          "width": 20,
+          "opacity": 0.028
+        },
+        {
+          "width": 10,
+          "opacity": 0.038
+        },
+        {
+          "width": 0,
+          "opacity": 0.07
+        }
+      ]
+    },
+    "markShadow": {
+      "color": "#02050B",
+      "offset": [
+        0,
+        8
+      ],
+      "passes": [
+        {
+          "width": 26,
+          "opacity": 0.022
+        },
+        {
+          "width": 19,
+          "opacity": 0.032
+        },
+        {
+          "width": 12,
+          "opacity": 0.044
+        },
+        {
+          "width": 6,
+          "opacity": 0.064
+        },
+        {
+          "width": 0,
+          "opacity": 0.15
+        }
+      ]
+    }
+  }
+}

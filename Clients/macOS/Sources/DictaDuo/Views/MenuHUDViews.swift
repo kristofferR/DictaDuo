@@ -16,8 +16,10 @@ struct DictaDuoMenuView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 DictaDuoMark(size: 20)
-                Text("DictaDuo").font(.headline)
-                DevBadge()
+                VStack(alignment: .leading, spacing: 2) {
+                    DictaDuoWordmark(height: 14)
+                    DevBadge()
+                }
                 Spacer(minLength: 8)
                 HStack(spacing: 6) {
                     StatusDot(color: controller.isServerReady ? DictaDuoPalette.success : DictaDuoPalette.warning)
@@ -30,7 +32,7 @@ struct DictaDuoMenuView: View {
                 .help(controller.serverStatusMessage)
                 .accessibilityIdentifier("server.status")
             }
-            .frame(height: 28)
+            .frame(minHeight: 28)
 
             DictaDuoDictationButton(controller: controller, identifier: "menu.dictate")
             Text(idleDictationHint)
