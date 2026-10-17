@@ -130,10 +130,12 @@ int main(int argc, char **argv) {
   QApplication app(argc, argv);
   app.setOrganizationName("DictaDuo");
   app.setApplicationName("DictaDuo");
+  app.setApplicationVersion(DICTADUO_VERSION);
   app.setDesktopFileName("dictaduo");
   app.setWindowIcon(QIcon(":/qt/qml/DictaDuo/mark.svg"));
   QCommandLineParser parser;
   parser.setApplicationDescription("DictaDuo for Linux");
+  parser.addVersionOption();
   parser.addHelpOption();
   parser.addOption(
       {"preview", "Show sample data without connecting to a client."});

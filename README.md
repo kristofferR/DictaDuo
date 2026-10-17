@@ -103,6 +103,10 @@ vocabulary hints to Soniox; proofreading always stays on your server. See
 
 ## Build from source
 
+For prebuilt packages and the coordinated release process, see
+[releases](docs/releases.md). CI builds can be downloaded from GitHub Actions;
+unsigned Mac CI builds are labelled separately from signed releases.
+
 | Component | Requirements |
 | --- | --- |
 | **Mac app and local server** | Apple Silicon, macOS 14+, Xcode 26+ with the Metal compiler, Swift 6.2+, Bun 1.4.2, CMake, and Git. |
@@ -240,6 +244,7 @@ workspaces. Build outputs stay in `build/` and `.build/`.
 - [DJI button routing](docs/dji-button-routing.md)
 - [Dictionary and cleanup instructions](docs/text-correction.md)
 - [Architecture and storage](docs/architecture.md)
+- [CI, downloads and release checklist](docs/releases.md)
 - [HTTP API](docs/client-server-contract.md)
 - [Whisper helper](Engine/README.md) and [Qwen helpers](TextEngine/README.md)
 - [Inkflow / Graphite identity, editable sources, and platform exports](Resources/Brand/README.md)

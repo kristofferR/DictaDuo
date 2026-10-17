@@ -821,6 +821,12 @@ private slots:
     window->setProperty("page",1);
     auto *page = window->findChild<QQuickItem *>("historyPage");
     QVERIFY(page);
+    auto *list = page->findChild<QQuickItem *>("historyList");
+    QVERIFY(list);
+    QTRY_VERIFY(page->property("records").toList().size() >= items.size());
+    QTRY_VERIFY(!page->property("loading").toBool());
+    // Reaching the end loads the older page whether or not the first page fills the list.
+    QVERIFY(QMetaObject::invokeMethod(list, "positionViewAtEnd"));
     const int listed = items.size() + 1;
     QTRY_COMPARE(page->property("records").toList().size(), listed);
     QTRY_VERIFY(olderReads > 0);
@@ -847,8 +853,6 @@ private slots:
     QCOMPARE(copy->property("symbolName").toString(), QString("copy"));
     QCOMPARE(copy->property("accessibleLabel").toString(), QString("Copy transcript"));
     QCOMPARE(page->property("selectedID").toString(),"preview-2");
-    auto *list = page->findChild<QQuickItem *>("historyList");
-    QVERIFY(list);
     QCOMPARE(list->property("count").toInt(),listed);
     auto *handle = window->findChild<QQuickItem *>("historyResizeHandle");
     QVERIFY(handle);

@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=bun-toolchain /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /src
-COPY Package.swift Package.resolved CMakeLists.txt THIRD_PARTY_NOTICES.md ./
+COPY Package.swift Package.resolved CMakeLists.txt THIRD_PARTY_NOTICES.md VERSION ./
 COPY package.json bun.lock ./
 COPY Clients/Linux ./Clients/Linux
 COPY Shared ./Shared

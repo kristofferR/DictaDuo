@@ -1,0 +1,23 @@
+# Maintainer: kristofferR <481270+kristofferR@users.noreply.github.com>
+pkgname=dictaduo-bin
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc='Native dictation client for a shared DictaDuo server'
+arch=('x86_64')
+url='https://github.com/kristofferR/DictaDuo'
+license=('MIT')
+options=('!strip' '!debug') # Preserve the compiled Bun client's embedded JavaScript.
+depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'layer-shell-qt' 'libportal'
+         'at-spi2-core' 'json-glib' 'glib2' 'wayland' 'libxkbcommon' 'dbus' 'wl-clipboard'
+         'pipewire' 'libnotify' 'xdg-utils' 'systemd')
+optdepends=('hyprland: verified Wayland desktop'
+            'xdg-desktop-portal-kde: experimental Plasma shortcuts and keyboard access')
+provides=('dictaduo')
+conflicts=('dictaduo')
+source=("dictaduo_${pkgver}_linux-x64.tar.gz::https://github.com/kristofferR/DictaDuo/releases/download/v${pkgver}/dictaduo_${pkgver}_linux-x64.tar.gz")
+sha256sums=('@SHA256@')
+
+package() {
+    install -d "$pkgdir/usr"
+    cp -a "$srcdir/usr/." "$pkgdir/usr/"
+}
