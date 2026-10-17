@@ -28,7 +28,7 @@ for executable in "$staging/usr/bin/"*; do
     fi
 done
 archive="dictaduo_${version}_linux-x64.tar.gz"
-tar -czf "$release_dir/$archive" -C "$staging" usr
+tar --owner=0 --group=0 --numeric-owner -czf "$release_dir/$archive" -C "$staging" usr
 checksum=$(sha256sum "$release_dir/$archive" | cut -d' ' -f1)
 sed -e "s/@VERSION@/$version/g" -e "s/@SHA256@/$checksum/g" \
     packaging/arch/PKGBUILD.in > "$arch_dir/PKGBUILD"

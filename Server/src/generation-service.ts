@@ -28,10 +28,12 @@ import type {
   WisprFlowImportRequest,
   WisprFlowKnownIDsRequest,
 } from "./api.ts";
-import { API_VERSION, SERVER_VERSION, type RecognitionEngine } from "./api.ts";
+import { API_VERSION, type RecognitionEngine } from "./api.ts";
 import type { components } from "./generated/api.ts";
 import { decodePersonalDictionary } from "./domain/dictionary.ts";
 import { validateBody } from "./validation.ts";
+// Embedded at compile time so every packaged server reports its release.
+import serverVersion from "../../VERSION" with { type: "text" };
 import type { InferenceBackend } from "./inference/native-inference.ts";
 import { ServiceError } from "./errors.ts";
 import {
@@ -380,7 +382,7 @@ export class GenerationService {
         cloudRecognition: !!this.configuration.soniox,
         features: ["retry-completed", "language-no"],
         recognitionEngines: [...this.engines],
-        serverVersion: SERVER_VERSION,
+        serverVersion: serverVersion.trim(),
         isDev: this.configuration.development,
         ready,
         speech: {

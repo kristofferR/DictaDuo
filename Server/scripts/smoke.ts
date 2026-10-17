@@ -4,7 +4,6 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { SERVER_VERSION } from "../src/api.ts";
 
 const executableIndex = process.argv.indexOf("--executable");
 const executable = resolve(
@@ -64,7 +63,10 @@ try {
   }
   const health = await json("/v1/health");
   assert.equal(health.apiVersion, 3);
-  assert.equal(health.serverVersion, SERVER_VERSION);
+  assert.equal(
+    health.serverVersion,
+    (await Bun.file(new URL("../../VERSION", import.meta.url)).text()).trim(),
+  );
   assert.equal(health.isDev, true);
   assert.equal(health.ready, false);
   const preferences = await json("/v1/preferences");
