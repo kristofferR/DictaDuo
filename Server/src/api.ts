@@ -1,4 +1,5 @@
 import type { components } from "./generated/api";
+import version from "../../VERSION" with { type: "text" };
 
 type Schemas = components["schemas"];
 
@@ -74,6 +75,8 @@ export type WisprFlowImportResult = Omit<Schemas["WisprFlowImportResult"], "reco
 export type APIErrorResponse = Schemas["APIErrorResponse"];
 
 export const API_VERSION = 3;
+// Embedded at compile time so every packaged server reports its release.
+export const SERVER_VERSION = version.trim();
 export const DEFAULT_PORT = 8391;
 export const MAXIMUM_RECORDING_SECONDS = 180;
 export const MAXIMUM_CHUNK_BYTES = 1_048_576;

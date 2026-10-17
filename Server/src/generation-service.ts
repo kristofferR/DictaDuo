@@ -28,7 +28,7 @@ import type {
   WisprFlowImportRequest,
   WisprFlowKnownIDsRequest,
 } from "./api.ts";
-import { API_VERSION, type RecognitionEngine } from "./api.ts";
+import { API_VERSION, SERVER_VERSION, type RecognitionEngine } from "./api.ts";
 import type { components } from "./generated/api.ts";
 import { decodePersonalDictionary } from "./domain/dictionary.ts";
 import { validateBody } from "./validation.ts";
@@ -380,7 +380,7 @@ export class GenerationService {
         cloudRecognition: !!this.configuration.soniox,
         features: ["retry-completed", "language-no"],
         recognitionEngines: [...this.engines],
-        serverVersion: "0.1.0",
+        serverVersion: SERVER_VERSION,
         isDev: this.configuration.development,
         ready,
         speech: {
