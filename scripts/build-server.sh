@@ -122,6 +122,7 @@ done
 cp Resources/*-LICENSE.txt THIRD_PARTY_NOTICES.md "$staging_dir/resources/"
 bun Server/scripts/licenses.ts "$staging_dir/resources/javascript-LICENSES.txt"
 cp Server/README.md "$staging_dir/README.md"
+cp VERSION "$staging_dir/VERSION"
 prior_package="$project_dir/build/.server-previous-$$"
 if [[ -d build/server ]]; then mv build/server "$prior_package"; fi
 if ! mv "$staging_dir" "$project_dir/build/server"; then

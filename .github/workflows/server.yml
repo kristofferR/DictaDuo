@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -23,6 +24,9 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
+      - run: bash scripts/release-version.sh
+      - name: Test publication gates without network writes
+        run: bash scripts/test-release.sh
       - run: bun run fmt:check
       - run: bun run check
       - run: bun run test

@@ -63,6 +63,10 @@ try {
   }
   const health = await json("/v1/health");
   assert.equal(health.apiVersion, 3);
+  assert.equal(
+    health.serverVersion,
+    (await Bun.file(new URL("../../VERSION", import.meta.url)).text()).trim(),
+  );
   assert.equal(health.isDev, true);
   assert.equal(health.ready, false);
   const preferences = await json("/v1/preferences");
