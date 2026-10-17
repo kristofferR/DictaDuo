@@ -3,7 +3,7 @@ name: Server release packages
 on:
   workflow_call:
     inputs:
-      release:
+      signed:
         type: boolean
         default: false
     secrets:
@@ -64,7 +64,7 @@ jobs:
           DICTADUO_BUILD_CAPTURE: ${{ runner.os == 'Linux' && '1' || '0' }}
         run: bash scripts/build-server.sh
       - name: Import release signing certificate
-        if: inputs.release && runner.os == 'macOS'
+        if: inputs.signed && runner.os == 'macOS'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -72,7 +72,7 @@ jobs:
       - name: Verify and archive server
         env:
           PLATFORM: ${{ matrix.platform }}
-          SIGNED: ${{ inputs.release && runner.os == 'macOS' }}
+          SIGNED: ${{ inputs.signed && runner.os == 'macOS' }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
@@ -87,7 +87,7 @@ jobs:
           path: build/release/*
           if-no-files-found: error
       - name: Remove release signing keychain
-        if: always() && inputs.release && runner.os == 'macOS'
+        if: always() && inputs.signed && runner.os == 'macOS'
         run: |
           security delete-keychain "$RUNNER_TEMP/dictaduo-signing.keychain-db" || true
           rm -f "$RUNNER_TEMP/dictaduo-signing.p12"

@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
   workflow_call:
     inputs:
-      release:
+      signed:
         type: boolean
         default: false
     secrets:
@@ -29,7 +29,7 @@ permissions:
 
 concurrency:
   group: clients-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ !inputs.release }}
+  cancel-in-progress: ${{ !inputs.signed }}
 
 jobs:
   macos:
@@ -42,21 +42,21 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Import release signing certificate
-        if: inputs.release
+        if: inputs.signed
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: bash scripts/import-signing-keychain.sh
       - name: Build and verify app bundle
         env:
-          RELEASE: ${{ inputs.release }}
+          SIGNED: ${{ inputs.signed }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           flags=(--unsigned)
-          if [[ "$RELEASE" == true ]]; then flags=(); fi
+          if [[ "$SIGNED" == true ]]; then flags=(); fi
           bash scripts/package-macos.sh "${flags[@]}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -64,7 +64,7 @@ jobs:
           path: build/release/*
           if-no-files-found: error
       - name: Remove release signing keychain
-        if: always() && inputs.release
+        if: always() && inputs.signed
         run: |
           security delete-keychain "$RUNNER_TEMP/dictaduo-signing.keychain-db" || true
           rm -f "$RUNNER_TEMP/dictaduo-signing.p12"
@@ -77,7 +77,7 @@ jobs:
     steps:
       - name: Install build and runtime dependencies
         run: |
-          pacman -Syu --noconfirm --needed git cmake ninja qt6-base qt6-declarative qt6-svg \
+          pacman -Syu --noconfirm --needed git cmake ninja qt6-base qt6-declarative qt6-svg unzip \
             layer-shell-qt libportal at-spi2-core json-glib wayland libxkbcommon dbus wl-clipboard
           useradd -m builder
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

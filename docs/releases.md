@@ -68,15 +68,21 @@ fall back to publishing unsigned files.
 
 ## Release checklist
 
-1. Merge the intended features and fixes, including [PR #64](https://github.com/kristofferR/DictaDuo/pull/64) for 0.5.0. Confirm
-   CI is green on `main`, then validate real dictation on Mac and Linux against
-   the release-candidate server. Back up server data before upgrading it.
+1. Merge the intended features and fixes and confirm CI is green on `main`.
 2. Set `VERSION` in a reviewed change. Mac bundle versions are injected during
    packaging; the numeric build number defaults to the Git commit count from a
    full clone. `DICTADUO_BUILD_NUMBER` can override it with a positive integer.
-3. Test packaging without publication using `gh workflow run release.yml --ref
-   main`, then inspect the run's `release-*` artifacts. Manual runs use unsigned
-   Mac builds and do not create a tag or GitHub release.
+3. Rehearse the release without publishing it:
+
+   ```sh
+   gh workflow run release.yml --ref main -f signed=true
+   ```
+
+   This signs and notarizes the Mac downloads exactly like a tagged build, but
+   creates no tag or GitHub release. Omit `-f signed=true` to package unsigned,
+   for example before the secrets exist. Download the run's `release-*`
+   artifacts and validate real dictation on Mac and Linux against the packaged
+   server. Back up server data before upgrading it.
 4. Write concise release notes describing user-visible changes, installation,
    server requirements and known limitations. Create the curated draft for the
    exact commit before pushing the tag:

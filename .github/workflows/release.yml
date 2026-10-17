@@ -3,8 +3,13 @@ name: Release
 on:
   push:
     tags: [v*]
-  # Manual runs validate and package without signing or publishing.
+  # Manual runs package without publishing. Enable signed to rehearse notarization.
   workflow_dispatch:
+    inputs:
+      signed:
+        description: Sign and notarize Mac downloads
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -36,7 +41,7 @@ jobs:
             bash scripts/release-version.sh
           fi
       - name: Require release signing secrets
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || inputs.signed
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -68,14 +73,14 @@ jobs:
     needs: [prepare, checks]
     uses: ./.github/workflows/clients.yml
     with:
-      release: ${{ github.event_name == 'push' }}
+      signed: ${{ github.event_name == 'push' || inputs.signed }}
     secrets: inherit
 
   servers:
     needs: [prepare, checks]
     uses: ./.github/workflows/server-release.yml
     with:
-      release: ${{ github.event_name == 'push' }}
+      signed: ${{ github.event_name == 'push' || inputs.signed }}
     secrets: inherit
 
   publish:
