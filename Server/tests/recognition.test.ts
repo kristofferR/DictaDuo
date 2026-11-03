@@ -70,7 +70,7 @@ async function setup(mode: "automatic" | "cloud" | "local" = "automatic", config
     development: true,
     startSpeechStream,
     soniox: configured
-      ? { apiKey: "secret", model: "stt-rt-v5", endpoint: "wss://example.invalid" }
+      ? { apiKey: "secret", model: "stt-rt-v6", endpoint: "wss://example.invalid" }
       : undefined,
   };
   const service = await GenerationService.open(config, local);

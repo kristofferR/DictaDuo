@@ -21,6 +21,6 @@ final class ServerModelStatusTests: XCTestCase {
         XCTAssertEqual(qwen.friendlyName, "Qwen3 4B")
         XCTAssertEqual(ModelRuntimeInfo(modelID: "parakeet-tdt-0.6b-v3", backend: "parakeet.cpp", ready: true).friendlyName,
                        "Parakeet v3")
-        XCTAssertEqual(ModelRuntimeInfo(modelID: "stt-rt-v5", backend: "soniox/websocket", ready: true).friendlyName, "Soniox")
+        XCTAssertEqual(ModelRuntimeInfo(modelID: "stt-rt-v6", backend: "soniox/websocket", ready: true).friendlyName, "Soniox")
     }
 }

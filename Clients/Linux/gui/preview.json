@@ -284,7 +284,7 @@
           "encoding": "float32"
         },
         "speech": {
-          "modelID": "stt-rt-v5",
+          "modelID": "stt-rt-v6",
           "backend": "soniox/websocket"
         },
         "proofreading": {

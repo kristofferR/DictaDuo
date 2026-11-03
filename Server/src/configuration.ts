@@ -168,7 +168,7 @@ export async function parseConfiguration(
     soniox: apiKey
       ? {
           apiKey,
-          model: "stt-rt-v5",
+          model: "stt-rt-v6",
           endpoint: "wss://stt-rt.soniox.com/transcribe-websocket",
         }
       : undefined,

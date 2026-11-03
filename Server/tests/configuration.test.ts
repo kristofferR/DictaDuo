@@ -91,7 +91,7 @@ test("Soniox credentials are optional, bounded, server-only, and may come from a
     (await parseConfiguration([], { ...environment, SONIOX_API_KEY: "api-secret" })).soniox,
   ).toEqual({
     apiKey: "api-secret",
-    model: "stt-rt-v5",
+    model: "stt-rt-v6",
     endpoint: "wss://stt-rt.soniox.com/transcribe-websocket",
   });
   const directory = await mkdtemp(join(tmpdir(), "dictaduo-soniox-config-"));

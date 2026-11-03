@@ -19,7 +19,7 @@ function fixture(message: (socket: ServerWebSocket<undefined>, data: string | Bu
   cleanups.push(() => {
     server.stop(true);
   });
-  return { apiKey: "test-secret", model: "stt-rt-v5", endpoint: `ws://127.0.0.1:${server.port}` };
+  return { apiKey: "test-secret", model: "stt-rt-v6", endpoint: `ws://127.0.0.1:${server.port}` };
 }
 
 test("streams PCM before release; replaces interim tails, filters markers and drains final tokens", async () => {
@@ -78,7 +78,7 @@ test("streams PCM before release; replaces interim tails, filters markers and dr
   await previewArrived.promise;
   expect(previews).toContain("Hello world");
   expect(configuration).toMatchObject({
-    model: "stt-rt-v5",
+    model: "stt-rt-v6",
     audio_format: "pcm_f32le",
     sample_rate: 16000,
     num_channels: 1,

@@ -71,7 +71,7 @@ const provider: CaptureProvider = {
   },
 };
 const services = await openCaptureServices(directory, provider, new FakeInference(), {
-  soniox: { apiKey: "fixture", endpoint: "wss://example.invalid", model: "stt-rt-v5" },
+  soniox: { apiKey: "fixture", endpoint: "wss://example.invalid", model: "stt-rt-v6" },
   startLiveSpeechStream: (_configuration, _language, _terms, _id, handlers) => ({
     send() {
       handlers.partial("Remote preview.");
