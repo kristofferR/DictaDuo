@@ -1578,6 +1578,13 @@ final class DictaDuoController: ObservableObject {
         }
         // An interrupted hold keeps its audio behind the undo window, like a cancel.
         hotkey.onInterruption = hotkey.onCancel
+        // Fn+Delete means the hold was an edit. An undo window would let the
+        // next Fn press paste the accidental take, so drop it outright.
+        hotkey.onDiscard = { [weak self] in
+            guard let self else { return }
+            if isCheckingShortcut { appendShortcutCheck("Fn+Delete discarded the hold; microphone stayed off.") }
+            else if isCapturing, recordingTrigger == .keyboard { cancelDictation(undoable: false) }
+        }
         hotkey.onEscape = { [weak self] in
             guard let self, !isCheckingShortcut else { return }
             if isBusy { cancelDictation() }

@@ -295,6 +295,37 @@ final class HotkeyMonitorTests: XCTestCase {
     }
 
     @MainActor
+    func testFnDeleteDiscardsTheHoldUntilFnIsReleased() async throws {
+        // Forward Delete as macOS reports Fn+Delete, and the untranslated Delete.
+        for code: CGKeyCode in [117, 51] {
+            let fixture = HotkeyFixture(key: .fn)
+            var discards = 0
+            fixture.monitor.onDiscard = { discards += 1 }
+            XCTAssertTrue(fixture.monitor.start())
+            defer { fixture.monitor.stop() }
+
+            try fixture.press()
+            try fixture.send(.keyDown, code: code)
+            XCTAssertEqual(discards, 1)
+            XCTAssertFalse(fixture.monitor.isHoldingFn)
+
+            // Deleting more while Fn stays down must not restart or resubmit.
+            try fixture.send(.keyDown, code: code, isRepeat: true)
+            try fixture.send(.keyUp, code: code)
+            try fixture.send(.keyDown, code: code)
+            try fixture.send(.keyDown, code: HoldKey.fn.keyCode)
+            try fixture.release()
+            XCTAssertEqual(discards, 1)
+            XCTAssertEqual(fixture.presses, 1)
+            XCTAssertEqual(fixture.releases, 0, "A discarded hold must not submit on release")
+            XCTAssertEqual(fixture.cancels, 0)
+
+            try fixture.press()
+            XCTAssertEqual(fixture.presses, 2, "The next Fn press starts a fresh take")
+        }
+    }
+
+    @MainActor
     func testFnDoesNotStartWithAnotherModifierAlreadyHeld() async throws {
         for type in [CGEventType.flagsChanged, .keyDown] {
             let fixture = HotkeyFixture(key: .fn)

@@ -208,13 +208,17 @@ final class HotkeyMonitor {
     var onEscape: (() -> Void)?
     /// System/input interruptions preserve audio; Escape remains explicit discard.
     var onInterruption: (() -> Void)?
+    /// Fn+Delete turned the hold into an edit, so its take is dropped rather
+    /// than offered for undo. Falls back to `onCancel`.
+    var onDiscard: (() -> Void)?
     /// Tap health, not a claim that a particular key event was delivered.
     var onStatusChange: ((Bool) -> Void)?
     /// Set only during an explicit, bounded shortcut check. No persistent log.
     var onDiagnostic: ((String) -> Void)?
 
-    /// An accepted Fn hold is dedicated push-to-talk, not a modifier chord.
-    /// Views use this same state to leave Escape available to the focused app.
+    /// An accepted Fn hold is dedicated push-to-talk, not a modifier chord;
+    /// only Fn+Delete discards it. Views use this same state to leave Escape
+    /// available to the focused app.
     /// A double-tap take is latched, so Fn shortcuts during it stay ordinary.
     var isHoldingFn: Bool { mode == .hold && key == .fn && physicalDown && active }
     /// An accepted hold or a press still inside its acceptance delay.
@@ -318,6 +322,12 @@ final class HotkeyMonitor {
             diagnoseModifier(type: type, code: code, flags: event.flags)
         }
         if isHoldingFn {
+            if type == .keyDown, code == 117 || code == 51 {
+                // Fn+Delete is Forward Delete (117; some keyboards report the
+                // untranslated Delete, 51). The hold was an edit, not speech.
+                blockCurrentHold(.discard)
+                return
+            }
             // Keep the accepted hold alive while navigating, typing, scrolling,
             // or clicking another app. Unrelated input can omit the Fn flag; it
             // is not a release. Only this key's own release edge ends the take.
@@ -335,7 +345,7 @@ final class HotkeyMonitor {
             // take, including a double-tap latch. A latch-only cancel must not
             // arm the chord block, or the next tap is swallowed.
             let cancelsHold = physicalDown && active && mode == .hold
-            if physicalDown { blockCurrentHold(explicitDiscard: true) }
+            if physicalDown { blockCurrentHold(.cancel) }
             active = false
             lastTapAt = nil
             if let onEscape { onEscape() } else if !cancelsHold { onCancel?() }
@@ -457,7 +467,9 @@ final class HotkeyMonitor {
         if physicalDown { blockCurrentHold() } else { lastTapAt = nil }
     }
 
-    private func blockCurrentHold(explicitDiscard: Bool = false) {
+    private enum HoldInterruption { case input, cancel, discard }
+
+    private func blockCurrentHold(_ reason: HoldInterruption = .input) {
         onDiagnostic?("Hold interrupted; release the key before trying again.")
         blockedUntilRelease = true
         pendingPress?.cancel()
@@ -469,8 +481,11 @@ final class HotkeyMonitor {
         // keeps recording; the blocked press just doesn't count as a tap.
         if active, mode == .hold {
             active = false
-            if explicitDiscard { onCancel?() }
-            else { notifyInterruption() }
+            switch reason {
+            case .input: notifyInterruption()
+            case .cancel: onCancel?()
+            case .discard: if let onDiscard { onDiscard() } else { onCancel?() }
+            }
         }
     }
 
