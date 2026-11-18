@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import { desktopUnlocked, Notifier } from "../src/desktop.ts";
+import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { desktopUnlocked, hyprland, Notifier } from "../src/desktop.ts";
 const state = "LockedHint=no\nActive=yes\nType=wayland\nState=active\n";
 const lock = {
   locked: false,
@@ -24,6 +28,28 @@ test("Omarchy lock checks reject pending, orphan and rapid lock/unlock even with
   expect(desktopUnlocked(state.replace("Active=yes", "Active=no"), lock, monitors, 1000)).toBe(
     false,
   );
+});
+
+test("a compositor request reads the whole reply and fails when none arrives", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dictaduo-hyprland-"));
+  const path = join(directory, "command.sock");
+  const server = createServer((socket) => {
+    socket.once("data", (request) => {
+      if (request.toString() !== "j/monitors") return;
+      socket.write('[{"solitaryBlockedBy":');
+      setTimeout(() => socket.end('["LOCK"]}]'), 5);
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(path, resolve));
+  try {
+    expect(JSON.parse(await hyprland(path, "j/monitors"))).toEqual([
+      { solitaryBlockedBy: ["LOCK"] },
+    ]);
+    await expect(hyprland(path, "j/silent", 20)).rejects.toThrow("did not respond");
+  } finally {
+    server.close();
+    await rm(directory, { recursive: true });
+  }
 });
 
 test("only exact namespaced compositor events control dictation", async () => {

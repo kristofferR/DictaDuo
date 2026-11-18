@@ -15,7 +15,7 @@ export class ButtonDestinationClient {
   state?: State;
   constructor(
     private api: Pick<API, "buttonRequest">,
-    private desktop: Pick<Desktop, "unlocked">,
+    private desktop: Pick<Desktop, "unlocked" | "locked">,
     private controller: Controller,
     private device: Device,
     private receiving = true,
@@ -112,12 +112,15 @@ export class ButtonDestinationClient {
     const epoch = this.epoch;
     const now = Date.now();
     const slept = now - this.lastTick > 3000 || now < this.lastTick;
-    if (slept || !(await this.desktop.unlocked())) {
+    // An idle tick must stay cheap: the full check spawns a process per signal, so
+    // it runs only to register and to start a take.
+    if (slept || (await this.desktop.locked?.())) {
       await this.disarm();
       return;
     }
     if (!this.enabled || epoch !== this.epoch) return;
     if (!this.registration) {
+      if (!(await this.desktop.unlocked()) || !this.enabled || epoch !== this.epoch) return;
       const registration = {
         id: randomUUID().toUpperCase(),
         owner: randomBytes(32).toString("hex"),

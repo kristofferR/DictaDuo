@@ -6,6 +6,8 @@ import type { components } from "../../../Server/src/generated/api.ts";
 type State = components["schemas"]["ButtonDestinationState"];
 function fixture() {
   let unlocked = true,
+    compositorLocked = false,
+    checks = 0,
     blocked: string | undefined;
   const requests: string[] = [];
   const starts: string[] = [];
@@ -23,7 +25,11 @@ function fixture() {
     },
   };
   const desktop = {
-    unlocked: async () => unlocked,
+    unlocked: async () => {
+      checks++;
+      return unlocked;
+    },
+    locked: async () => compositorLocked,
     capture: async () => {
       throw Error("not used");
     },
@@ -61,11 +67,16 @@ function fixture() {
     controller,
     requests,
     starts,
-    lock: () => {
+    /** How often the full lock check ran. */
+    checks: () => checks,
+    /** A lock the compositor has not taken yet is seen by the full check alone. */
+    lock: (compositor = true) => {
       unlocked = false;
+      compositorLocked = compositor;
     },
     unlock: () => {
       unlocked = true;
+      compositorLocked = false;
     },
     block: (path = "") => {
       blocked = path;
@@ -147,13 +158,46 @@ test("lock discards registration; reconnect registers without selecting and dupl
   await f.buttons.tick();
   expect(f.starts).toHaveLength(1);
   f.lock();
+  const checks = f.checks();
+  await f.buttons.tick();
   await f.buttons.tick();
   expect(f.requests.at(-1)?.startsWith("DELETE")).toBe(true);
+  // The compositor's lock is answer enough: a locked computer spawns nothing either.
+  expect(f.checks()).toBe(checks);
   f.set({ available: true, destinations: [] });
   f.unlock();
   await f.buttons.tick();
   expect(f.requests.filter((r) => r === "POST ")).toHaveLength(2);
   expect(f.requests.some((r) => r.endsWith("/select"))).toBe(false);
+});
+test("the full lock check runs to register and to start a take, never on an idle tick", async () => {
+  const f = fixture();
+  pending.push(f.buttons);
+  await f.buttons.tick();
+  await f.buttons.tick();
+  await f.buttons.tick();
+  expect(f.requests.filter((r) => r.endsWith("/heartbeat"))).toHaveLength(3);
+  expect(f.checks()).toBe(1);
+  f.lock(false);
+  f.set({
+    available: true,
+    destinations: [],
+    command: {
+      id: crypto.randomUUID(),
+      takeID: crypto.randomUUID(),
+      action: "start",
+      source: { hostID: "desktop", id: "dji" },
+      expiresAt: new Date(Date.now() + 5000).toISOString(),
+    },
+  });
+  await f.buttons.tick();
+  expect(f.checks()).toBe(2);
+  expect(f.starts).toHaveLength(0);
+  expect(f.requests.at(-1)?.startsWith("DELETE")).toBe(true);
+  // Unregistered, every tick asks again and nothing is offered until it passes.
+  await f.buttons.tick();
+  expect(f.checks()).toBe(3);
+  expect(f.requests.filter((r) => r === "POST ")).toHaveLength(1);
 });
 test("disarm wins a race with registration and retires the late server lease", async () => {
   const f = fixture();
