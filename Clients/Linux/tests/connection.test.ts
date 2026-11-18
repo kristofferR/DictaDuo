@@ -209,7 +209,7 @@ test("server readiness answers without a lock check, so the hidden tray's poll s
   f.desktop.unlocked = async () => (checks++, false);
   expect(await runtime.gui({ version: 1, action: "connection" })).toHaveProperty("ready");
   expect(checks).toBe(0);
-  // Everything else the GUI asks for still needs an unlocked session.
+  // A read of the user's own data, such as the source list, still needs an unlocked session.
   await expect(runtime.gui({ version: 1, action: "sources" })).rejects.toThrow("Unlock");
   expect(checks).toBe(1);
 });
