@@ -89,7 +89,13 @@ export interface Desktop {
   kind?: "hyprland" | "plasma";
   readonly keyboardAccess?: "disabled" | "requesting" | "ready" | "unavailable";
   enableKeyboardAccess?(): void;
+  /** The full lock check, and the only one that permits acting. */
   unlocked(since?: number): Promise<boolean>;
+  /**
+   * A cheap sign of a lock, for withdrawing what this computer offers between
+   * actions. Desktops that report every lock as a session event leave it out.
+   */
+  locked?(): Promise<boolean>;
   capture(method?: TextInsertionMethod): Promise<Destination>;
   defaultInput(hostID: string): Promise<SourceID | undefined>;
   /** Shows one notification, replacing the previous one. */

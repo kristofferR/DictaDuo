@@ -27,6 +27,8 @@ test("Plasma lock events invalidate an in-progress destination", () => {
   expect(plasmaLockEvent("org.freedesktop.ScreenSaver: AboutToLock ()")).toBe(true);
   expect(plasmaLockEvent("ActiveChanged (true,)")).toBe(true);
   expect(plasmaLockEvent("ActiveChanged (false,)")).toBe(false);
+  expect(plasmaLockEvent("The name org.freedesktop.ScreenSaver does not have an owner")).toBe(true);
+  expect(plasmaLockEvent("The name org.freedesktop.ScreenSaver is owned by :1.42")).toBe(false);
 });
 
 test("logind monitoring selects only the current session path", () => {

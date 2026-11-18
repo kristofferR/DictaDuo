@@ -21,6 +21,25 @@ export async function command(args: string[], timeout = 1500, input?: string): P
     clearTimeout(timer);
   }
 }
+/** One request on Hyprland's command socket, as hyprctl makes, without spawning it. */
+export function hyprland(path: string, request: string, timeout = 1500): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let reply = "";
+    const socket = connect(path, () => socket.write(request));
+    const timer = setTimeout(() => socket.destroy(new Error("Hyprland did not respond.")), timeout);
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk: string) => {
+      reply += chunk;
+    });
+    // Hyprland closes the connection once the reply is complete.
+    socket.once("end", () => resolve(reply));
+    socket.once("error", reject);
+    socket.once("close", () => {
+      clearTimeout(timer);
+      reject(new Error("Hyprland closed the connection."));
+    });
+  });
+}
 /**
  * Posts DictaDuo's notifications through notify-send, each replacing the
  * previous one instead of stacking. Sends are serialized so every one knows the ID.
@@ -80,6 +99,7 @@ export class HyprlandDesktop implements Desktop {
     this.destinations.enableKeyboardAccess();
   }
   private socket?: Socket;
+  private commands?: string;
   private monitor?: ReturnType<typeof Bun.spawn>;
   private connected = false;
   private destinations = new NativeDestinations();
@@ -98,6 +118,7 @@ export class HyprlandDesktop implements Desktop {
     if (!runtime || !signature || signature.includes("/"))
       throw new Error("Start DictaDuo inside the Hyprland session.");
     let buffer = "";
+    this.commands = join(runtime, "hypr", signature, ".socket.sock");
     this.socket = connect(join(runtime, "hypr", signature, ".socket2.sock"));
     await new Promise<void>((resolve, reject) => {
       this.socket!.once("connect", resolve);
@@ -198,6 +219,15 @@ export class HyprlandDesktop implements Desktop {
       return desktopUnlocked(state, JSON.parse(lockJSON), JSON.parse(monitorsJSON), since);
     } catch {
       return false;
+    }
+  }
+  /** Asks only the compositor, in-process, so it is cheap enough to repeat every second. */
+  async locked(): Promise<boolean> {
+    if (!this.connected || !this.commands) return true;
+    try {
+      return !compositorUnlocked(JSON.parse(await hyprland(this.commands, "j/monitors")));
+    } catch {
+      return true;
     }
   }
   async defaultInput(hostID: string): Promise<SourceID | undefined> {
@@ -304,6 +334,12 @@ export function desktopUnlocked(
   )
     return false;
   if (lock.lastEventAt !== "" && !(Date.parse(lock.lastEventAt) <= since)) return false;
+  return compositorUnlocked(monitors);
+}
+
+/** Hyprland names a held session lock among each monitor's solitary blockers. A
+ * monitor with no workspace yet reports nothing either way, so it cannot vouch. */
+export function compositorUnlocked(monitors: unknown): boolean {
   if (!Array.isArray(monitors) || monitors.length === 0) return false;
   const blockers = monitors.map((m) => (object(m) ? m.solitaryBlockedBy : undefined));
   if (blockers.some((b) => !Array.isArray(b) || b.includes("LOCK"))) return false;
