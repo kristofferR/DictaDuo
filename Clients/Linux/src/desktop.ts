@@ -26,15 +26,18 @@ export function hyprland(path: string, request: string, timeout = 1500): Promise
   return new Promise((resolve, reject) => {
     let reply = "";
     const socket = connect(path, () => socket.write(request));
+    const timer = setTimeout(() => socket.destroy(new Error("Hyprland did not respond.")), timeout);
     socket.setEncoding("utf8");
-    socket.setTimeout(timeout, () => socket.destroy(new Error("Hyprland did not respond.")));
     socket.on("data", (chunk: string) => {
       reply += chunk;
     });
     // Hyprland closes the connection once the reply is complete.
     socket.once("end", () => resolve(reply));
     socket.once("error", reject);
-    socket.once("close", () => reject(new Error("Hyprland closed the connection.")));
+    socket.once("close", () => {
+      clearTimeout(timer);
+      reject(new Error("Hyprland closed the connection."));
+    });
   });
 }
 /**

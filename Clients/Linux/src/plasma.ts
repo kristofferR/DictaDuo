@@ -26,8 +26,9 @@ export function plasmaUnlocked(state: string, screen: string, lockedSince: numbe
   );
 }
 
+/** A locker that left the bus can no longer report a lock, so its loss counts as one. */
 export function plasmaLockEvent(text: string) {
-  return /AboutToLock|ActiveChanged\s*\(\s*true\s*,?\s*\)/.test(text);
+  return /AboutToLock|ActiveChanged\s*\(\s*true\s*,?\s*\)|does not have an owner/.test(text);
 }
 
 export function loginSessionPath(reply: string) {

@@ -14,7 +14,7 @@ export class ButtonDestinationClient {
   private lastTick = Date.now();
   state?: State;
   constructor(
-    private api: Pick<API, "buttonRequest">,
+    private api: Pick<API, "buttonRequest" | "buttonStatus">,
     private desktop: Pick<Desktop, "unlocked" | "locked">,
     private controller: Controller,
     private device: Device,
@@ -120,6 +120,8 @@ export class ButtonDestinationClient {
     }
     if (!this.enabled || epoch !== this.epoch) return;
     if (!this.registration) {
+      // The server answers first, so an outage is not retried with the full check.
+      await this.api.buttonStatus();
       if (!(await this.desktop.unlocked()) || !this.enabled || epoch !== this.epoch) return;
       const registration = {
         id: randomUUID().toUpperCase(),

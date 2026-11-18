@@ -8,6 +8,7 @@ function fixture() {
   let unlocked = true,
     compositorLocked = false,
     checks = 0,
+    offline = false,
     blocked: string | undefined;
   const requests: string[] = [];
   const starts: string[] = [];
@@ -16,7 +17,11 @@ function fixture() {
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const api: Pick<API, "buttonRequest"> = {
+  const api: Pick<API, "buttonRequest" | "buttonStatus"> = {
+    buttonStatus: async () => {
+      if (offline) throw Error("offline");
+      return structuredClone(state);
+    },
     buttonRequest: async (path, _owner, _body, method) => {
       requests.push(`${method ?? "POST"} ${path}`);
       if (blocked !== undefined && (blocked === "" ? path === "" : path.endsWith(blocked)))
@@ -69,6 +74,9 @@ function fixture() {
     starts,
     /** How often the full lock check ran. */
     checks: () => checks,
+    offline: (down = true) => {
+      offline = down;
+    },
     /** A lock the compositor has not taken yet is seen by the full check alone. */
     lock: (compositor = true) => {
       unlocked = false;
@@ -173,6 +181,11 @@ test("lock discards registration; reconnect registers without selecting and dupl
 test("the full lock check runs to register and to start a take, never on an idle tick", async () => {
   const f = fixture();
   pending.push(f.buttons);
+  // An unreachable server is not worth a lock check: an outage must stay cheap too.
+  f.offline();
+  await expect(f.buttons.tick()).rejects.toThrow("offline");
+  expect(f.checks()).toBe(0);
+  f.offline(false);
   await f.buttons.tick();
   await f.buttons.tick();
   await f.buttons.tick();
