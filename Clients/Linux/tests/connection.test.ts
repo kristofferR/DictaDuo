@@ -193,6 +193,26 @@ test("runtime serializes a delayed press, key release, and GUI shutdown release 
   expect(actions).toEqual(["start", "stop", "stop"]);
 });
 
+test("server readiness answers without a lock check, so the hidden tray's poll spawns nothing", async () => {
+  const f = await fixture();
+  const settings = await ConnectionSettings.open("/dictaduo-destination", f.file);
+  const checked = await settings.test({
+    server: f.server,
+    name: "Desktop",
+    accessToken: "fixture-secret",
+  });
+  settings.commit(checked.ticket, checked.hostID);
+  const runtime = new ClientRuntime(settings, f.desktop);
+  cleanup.push(() => runtime.close());
+  runtime.start();
+  let checks = 0;
+  f.desktop.unlocked = async () => (checks++, false);
+  expect(await runtime.gui({ version: 1, action: "connection" })).toHaveProperty("ready");
+  expect(checks).toBe(0);
+  // A read of the user's own data, such as the source list, still needs an unlocked session.
+  await expect(runtime.gui({ version: 1, action: "sources" })).rejects.toThrow("Unlock");
+  expect(checks).toBe(1);
+});
 test("double-tap mode toggles on a double tap from either shortcut source, never on the test's Stop", async () => {
   const f = await fixture();
   const settings = await ConnectionSettings.open("/dictaduo-destination", f.file);
