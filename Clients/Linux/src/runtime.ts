@@ -154,7 +154,8 @@ export class ClientRuntime {
       this.edge(action, at);
       return {};
     }
-    if (action !== "stop" && !(await this.desktop.unlocked()))
+    // Server readiness is a status read like the snapshot; the hidden tray polls it.
+    if (action !== "stop" && action !== "connection" && !(await this.desktop.unlocked()))
       throw new ClientNotice("Unlock this computer first.");
     if (this.changing) throw new ClientNotice("The connection is changing. Try again in a moment.");
     if (action === "testConnection") return this.settings.test(input);

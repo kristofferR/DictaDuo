@@ -86,6 +86,9 @@ export function createGUIHandler(
       controller.stop();
       return {};
     }
+    // Server readiness neither acts on this desktop nor returns anything of the user's,
+    // and the hidden tray polls it, so like the snapshot it skips the lock check.
+    if (request.action === "connection") return api.health();
     if (!(await desktop.unlocked())) throw new ClientNotice("Unlock this computer first.");
     switch (request.action) {
       case "enableKeyboardAccess":
@@ -205,8 +208,6 @@ export function createGUIHandler(
             );
           throw error;
         }
-      case "connection":
-        return api.health();
       case "sources": {
         const [{ sources, sharingHost }, defaultID] = await Promise.all([
           api.sources(),
