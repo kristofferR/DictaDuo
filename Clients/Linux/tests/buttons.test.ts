@@ -186,6 +186,15 @@ test("the full lock check runs to register and to start a take, never on an idle
   await expect(f.buttons.tick()).rejects.toThrow("offline");
   expect(f.checks()).toBe(0);
   f.offline(false);
+  // Nor is a registration the server would refuse: this computer's is still held.
+  f.set({
+    available: true,
+    destinations: [{ id: "OTHER", device: { id: "client", name: "Linux" } }],
+  });
+  await f.buttons.tick();
+  expect(f.checks()).toBe(0);
+  expect(f.requests).toHaveLength(0);
+  f.set({ available: true, destinations: [] });
   await f.buttons.tick();
   await f.buttons.tick();
   await f.buttons.tick();

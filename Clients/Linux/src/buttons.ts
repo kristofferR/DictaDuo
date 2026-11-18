@@ -120,8 +120,11 @@ export class ButtonDestinationClient {
     }
     if (!this.enabled || epoch !== this.epoch) return;
     if (!this.registration) {
-      // The server answers first, so an outage is not retried with the full check.
-      await this.api.buttonStatus();
+      // The server answers first, so neither an outage nor a registration it would
+      // refuse, while another process holds this computer's, costs a full check.
+      const { destinations } = await this.api.buttonStatus();
+      if (!this.enabled || epoch !== this.epoch) return;
+      if (destinations.some((destination) => destination.device.id === this.device.id)) return;
       if (!(await this.desktop.unlocked()) || !this.enabled || epoch !== this.epoch) return;
       const registration = {
         id: randomUUID().toUpperCase(),
